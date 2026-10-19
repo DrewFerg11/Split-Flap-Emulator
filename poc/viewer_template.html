@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flapsim replay</title>
+<style>
+  :root {
+    --bg: #15171a; --panel: #1e2125; --tile: #0d0e10; --tile-hi: #1a1c1f;
+    --ink: #f2efe6; --muted: #8a9099; --line: #000; --coil: #3ddc84; --hall: #ffb020; --off: #33373d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
+  header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; }
+  h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  .meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .frame { background: var(--panel); border-radius: 14px; padding: 22px 18px; margin-top: 14px; }
+  .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .row + .row { margin-top: 22px; }
+  .mod { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .tile { position: relative; width: 84px; height: 116px; border-radius: 8px; overflow: hidden;
+          background: linear-gradient(var(--tile-hi) 0 50%, var(--tile) 50% 100%);
+          box-shadow: inset 0 0 0 1px #2a2d31, 0 4px 10px #0008; }
+  .tile::after { content: ""; position: absolute; left: 0; right: 0; top: calc(50% - 1px); height: 2px; background: var(--line); }
+  .ch { position: absolute; inset: 0; display: grid; place-items: center; font: 700 76px/1 "DejaVu Sans Mono", ui-monospace, monospace; }
+  .info { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; }
+  .led { width: 8px; height: 8px; border-radius: 50%; background: var(--off); }
+  .led.coil.on { background: var(--coil); box-shadow: 0 0 6px var(--coil); }
+  .led.hall.on { background: var(--hall); box-shadow: 0 0 6px var(--hall); }
+  svg.dial { width: 34px; height: 34px; }
+  .legend { display: flex; gap: 16px; justify-content: center; margin-top: 18px; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-top: 14px; }
+  .controls input { flex: 1; }
+  button { background: #2b2f35; color: var(--ink); border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .event { display: inline-block; padding: 2px 8px; border-radius: 99px; background: #2b2f35; margin-left: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1 id="title"></h1>
+    <div class="meta"><span id="clock"></span><span class="event" id="event"></span></div>
+  </header>
+  <div class="frame">
+    <div id="rows"></div>
+    <div class="legend">
+      <span><i class="led coil on"></i> motor coils energized</span>
+      <span><i class="led hall on"></i> hall sensor sees magnet</span>
+      <span><svg class="dial" viewBox="0 0 34 34"><circle cx="17" cy="17" r="13" fill="none" stroke="#444" stroke-width="2"/><line x1="17" y1="17" x2="17" y2="5" stroke="#f2efe6" stroke-width="2"/><circle cx="29" cy="17" r="2.5" fill="#ffb020"/></svg> drum angle (dot = magnet)</span>
+    </div>
+  </div>
+  <div class="controls" id="controls">
+    <button id="play">Play</button>
+    <input type="range" id="scrub" min="0" value="0">
+  </div>
+</div>
+<script>
+const DATA = __DATA__;
+const STEPS = DATA.steps, MAGNET = DATA.magnet;
+document.getElementById('title').textContent = DATA.title;
+const rows = document.getElementById('rows');
+const frames = DATA.frames;
+
+function dial(angle) {
+  const a = angle / STEPS * 2 * Math.PI, m = MAGNET / STEPS * 2 * Math.PI;
+  const x = 17 + 12 * Math.sin(a), y = 17 - 12 * Math.cos(a);
+  const mx = 17 + 13 * Math.sin(m), my = 17 - 13 * Math.cos(m);
+  return `<svg class="dial" viewBox="0 0 34 34"><circle cx="17" cy="17" r="13" fill="none" stroke="#444" stroke-width="2"/>` +
+         `<line x1="17" y1="17" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#f2efe6" stroke-width="2" stroke-linecap="round"/>` +
+         `<circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="2.5" fill="#ffb020"/></svg>`;
+}
+
+function render(i) {
+  const f = frames[i];
+  document.getElementById('clock').textContent = `emulated t = ${f.t.toFixed(1)} s · frame ${i + 1}/${frames.length}`;
+  document.getElementById('event').textContent = f.label || f.event;
+  const byBus = {};
+  for (const [bus, addr, angle, ch, coil, hall] of f.modules) (byBus[bus] ||= []).push({addr, angle, ch, coil, hall});
+  rows.innerHTML = Object.keys(byBus).sort().map(b => `<div class="row">` + byBus[b].map(m =>
+    `<div class="mod"><div class="tile"><div class="ch">${m.ch === ' ' ? '&nbsp;' : m.ch}</div></div>` +
+    `<div class="info">${dial(m.angle)}<i class="led coil ${m.coil ? 'on' : ''}"></i><i class="led hall ${m.hall ? 'on' : ''}"></i></div>` +
+    `<div class="info">bus${b} 0x${m.addr.toString(16)}</div></div>`).join('') + `</div>`).join('');
+  document.getElementById('scrub').value = i;
+}
+
+const scrub = document.getElementById('scrub');
+scrub.max = frames.length - 1;
+scrub.oninput = () => render(+scrub.value);
+let timer = null;
+document.getElementById('play').onclick = () => {
+  if (timer) { clearInterval(timer); timer = null; return; }
+  timer = setInterval(() => {
+    const n = (+scrub.value + 1) % frames.length;
+    render(n);
+  }, 100);
+};
+const params = new URLSearchParams(location.search);
+if (params.has('hide-controls')) document.getElementById('controls').style.display = 'none';
+render(params.has('frame') ? Math.min(+params.get('frame'), frames.length - 1) : frames.length - 1);
+</script>
+</body>
+</html>
