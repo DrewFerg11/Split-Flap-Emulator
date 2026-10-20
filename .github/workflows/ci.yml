@@ -101,7 +101,8 @@ jobs:
           flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.0-factory.bin \
             --hardware "${{ matrix.hardware }}" --scenario "scenarios/${{ matrix.scenario }}.yaml" \
             --seed "${{ matrix.seed }}" --var FIRMWARE_VERSION=v1.4.0 \
-            --golden-version-exception --out runs/scenario
+            --golden-version-exception --known-issues baselines/v1.4.0-golden.yaml \
+            --out runs/scenario
           python -c 'import json; m=json.load(open("runs/scenario/run.json")); print("Scenario wall seconds:", m["wall_seconds"])'
       - name: Prove strict and deliberately wrong versions fail
         if: matrix.name == 'negative-versions'

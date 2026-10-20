@@ -104,7 +104,7 @@ play.addEventListener('click',()=>{
     (out / "replay.html").write_text(document)
 
 
-def write_reports(out: Path, manifest, steps, version_exception):
+def write_reports(out: Path, manifest, steps, version_exception, known_issues=None):
     frames, warning = replay_data(out)
     write_replay(out, frames, warning)
     try:
@@ -115,10 +115,15 @@ def write_reports(out: Path, manifest, steps, version_exception):
     manifest.update(
         steps=steps,
         version_exception=version_exception,
+        known_issues=known_issues,
         replay={"snapshots": len(frames), "warning": warning},
     )
+    applied = bool(known_issues and known_issues["applied"])
+    verdict = "PASS" if manifest["passed"] else "FAIL"
+    if manifest["passed"] and applied:
+        verdict = "PASSED WITH KNOWN ISSUES"
     lines = [
-        f"# Firmware scenario: {'PASS' if manifest['passed'] else 'FAIL'}",
+        f"# Firmware scenario: {verdict}",
         "",
         f"Exit code: {manifest['exit_code']}; wall seconds: {manifest['wall_seconds']}",
         "Last observed guest seconds: "
@@ -127,6 +132,28 @@ def write_reports(out: Path, manifest, steps, version_exception):
     ]
     if version_exception:
         lines += ["**EXPLICIT GOLDEN VERSION EXCEPTION APPLIED**", fenced(version_exception), ""]
+    if known_issues:
+        lines += [f"**KNOWN-ISSUE BASELINE IN USE:** `{known_issues['baseline']}`", ""]
+        if known_issues["expected_failure"]:
+            failure = known_issues["expected_failure"]
+            lines += [
+                f"- Expected failure at step {failure['step']} ({failure['action']}): "
+                f"{failure['issue']}. {failure['reason']}",
+                fenced(failure["error"]),
+            ]
+        for record in known_issues["tolerated_serial"]:
+            lines.append(
+                f"- Tolerated {record['count']} serial line(s) for {record['issue']}, "
+                f"first: `{record['first']}`"
+            )
+        for entry in known_issues["expected_failures_not_observed"]:
+            lines.append(
+                f"- Not observed this run: {entry['issue']} at step {entry['step']} "
+                f"({entry['action']})"
+            )
+        if not applied:
+            lines.append("- No known issue was observed in this run.")
+        lines.append("")
     if manifest.get("error"):
         lines += ["Run failure:", fenced(manifest["error"]), ""]
     lines += [
@@ -187,6 +214,15 @@ def write_reports(out: Path, manifest, steps, version_exception):
         if step["status"] == "failed":
             failure = ET.SubElement(case, "failure", message=step.get("error", "step failed"))
             failure.text = json.dumps({k: step.get(k) for k in ["expected", "actual", "error"]})
+        elif step["status"] == "xfail":
+            ET.SubElement(
+                case,
+                "skipped",
+                message=f"expected failure (known issue {step.get('known_issue')}): "
+                f"{step.get('error', '')}",
+            )
+        elif step["status"] == "skipped_known_issue":
+            ET.SubElement(case, "skipped", message="not run after an expected known-issue failure")
         elif step["status"] != "passed":
             ET.SubElement(case, "skipped", message="not run because execution stopped earlier")
     if not steps or (not manifest["passed"] and not any(s["status"] == "failed" for s in steps)):

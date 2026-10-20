@@ -189,7 +189,8 @@ def json_subset(expected, actual, path="$"):
         raise ExecutionFailed(f"JSON mismatch at {path}: expected {expected!r}, got {actual!r}")
 
 
-def serial_errors(text, policy):
+def serial_errors(text, policy, known=None, observed=None):
+    """Fail on firmware error lines, except explicit policy flags and baseline-tolerated lines."""
     missing = []
     for line in text.splitlines():
         if policy.get("fresh_nvs") and re.fullmatch(
@@ -199,6 +200,12 @@ def serial_errors(text, policy):
         match = re.fullmatch(r"Error writing data to module (\d+), error code: 2", line)
         if policy.get("default_missing_bus1") and match:
             missing.append(int(match[1]))
+        elif known and (entry := known.tolerated_serial(line)):
+            if observed is not None:
+                record = observed.setdefault(
+                    entry["regex"], {"issue": entry["issue"], "count": 0, "first": line}
+                )
+                record["count"] += 1
         elif re.search(r"\[E\]|\b(error|failed|panic|abort|exception)\b", line, re.IGNORECASE):
             raise ExecutionFailed(f"unexpected serial error: {line}")
     if policy.get("default_missing_bus1") and sorted(missing) != list(range(32, 40)):
@@ -255,8 +262,20 @@ def http_request(context, method, path, data):
 
 class ScenarioExecutor:
     def __init__(
-        self, document, hardware, variables, *, firmware_sha256=None, golden_exception=False
+        self,
+        document,
+        hardware,
+        variables,
+        *,
+        firmware_sha256=None,
+        golden_exception=False,
+        known_issues=None,
     ):
+        if known_issues is not None:
+            known_issues.check_firmware(firmware_sha256)
+        self.known_issues = known_issues
+        self.known_serial = {}
+        self.known_failure = None
         requested = parse_variables(variables)
         effective = copy.deepcopy(requested)
         self.version_exception = None
@@ -323,13 +342,72 @@ class ScenarioExecutor:
                 result["status"] = "passed"
             except BaseException as error:
                 result.update(status="failed", error=str(error) or type(error).__name__)
-                raise
+                entry = self.expected_failure(error, result, deadline, context.deadline)
+                if entry is None:
+                    raise
+                result.update(status="xfail", known_issue=entry["issue"])
+                self.known_failure = {
+                    "issue": entry["issue"],
+                    "reason": entry["reason"],
+                    "step": result["index"],
+                    "action": result["action"],
+                    "error": result["error"],
+                }
+                for later in self.results[result["index"] :]:
+                    later["status"] = "skipped_known_issue"
+                break
             finally:
                 result.update(
                     wall_seconds=round(time.monotonic() - started, 3),
                     guest_end_ns=self.guest_ns(context.out),
                 )
-        return {"steps": self.results, "version_exception": self.version_exception}
+        return {
+            "steps": self.results,
+            "version_exception": self.version_exception,
+            "known_issues": self.known_issue_summary(),
+        }
+
+    def expected_failure(self, error, result, step_deadline, run_deadline):
+        """Only assertion failures and the step's own timeout can match a baseline entry."""
+        if self.known_issues is None or not isinstance(error, (ExecutionFailed, TimeoutError)):
+            return None
+        step_timed_out = (
+            isinstance(error, TimeoutError)
+            and step_deadline < run_deadline
+            and time.monotonic() >= step_deadline
+        )
+        if isinstance(error, TimeoutError) and not step_timed_out:
+            return None
+        return self.known_issues.expected_failure(
+            self.document["name"],
+            result["index"],
+            result["action"],
+            result["error"],
+            step_timed_out=step_timed_out,
+        )
+
+    def known_issue_summary(self):
+        if self.known_issues is None:
+            return None
+        expected = [
+            {k: v for k, v in e.items() if k != "compiled"}
+            for e in self.known_issues.failures
+            if e["scenario"] == self.document["name"]
+        ]
+        return {
+            "baseline": self.known_issues.source,
+            "firmware_sha256": self.known_issues.firmware_sha256,
+            "applied": bool(self.known_failure or self.known_serial),
+            "expected_failure": self.known_failure,
+            "expected_failures_not_observed": [
+                e
+                for e in expected
+                if not self.known_failure or e["step"] != self.known_failure["step"]
+            ],
+            "tolerated_serial": [
+                {"regex": regex, **record} for regex, record in self.known_serial.items()
+            ],
+        }
 
     @staticmethod
     def guest_ns(out):
@@ -370,7 +448,9 @@ class ScenarioExecutor:
         elif kind == "assert_no_errors":
             serial = context.serial()
             end = serial.rfind("\n") + 1
-            serial_errors(serial[self.error_cursor : end], value)
+            serial_errors(
+                serial[self.error_cursor : end], value, self.known_issues, self.known_serial
+            )
             self.error_cursor = end
             self.last_error_policy = value
             activity = self.activity(context)
@@ -487,6 +567,8 @@ class ScenarioExecutor:
         serial_errors(
             serial[self.error_cursor :],
             {"fresh_nvs": (self.last_error_policy or {}).get("fresh_nvs", False)},
+            self.known_issues,
+            self.known_serial,
         )
         state = read_settlement(out, hardware)
         if state and (state["counters"]["stalls"] or state["counters"]["anomalies"]):
@@ -495,4 +577,10 @@ class ScenarioExecutor:
     def finalize(self, out, manifest):
         from flapsim.report import write_reports
 
-        write_reports(out, manifest, self.results, self.version_exception)
+        write_reports(
+            out,
+            manifest,
+            self.results,
+            self.version_exception,
+            known_issues=self.known_issue_summary(),
+        )

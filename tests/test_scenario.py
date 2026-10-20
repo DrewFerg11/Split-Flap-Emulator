@@ -14,6 +14,7 @@ import pytest
 import yaml
 from test_runner import assert_reaped, cli_command
 
+from flapsim.baseline import KnownIssues, load_known_issues
 from flapsim.executor import ExecutionFailed, RunContext, load_executor
 from flapsim.hardware import load_hardware
 from flapsim.report import write_reports
@@ -552,3 +553,148 @@ def test_checked_in_scenarios_load_with_the_required_version_variable():
             firmware_sha256=GOLDEN_SHA256,
             golden_exception=True,
         )
+
+
+def baseline(**overrides):
+    document = {
+        "version": 1,
+        "firmware_sha256": GOLDEN_SHA256,
+        "description": "controlled baseline",
+        "serial": [
+            {
+                "issue": "DrewFerg11/Split-Flap-Display#54",
+                "reason": "never-written key noise",
+                "regex": r"^\[\s*\d+\]\[E\]\[Preferences\.cpp:\d+\] getString\(\): "
+                r"nvs_get_str len fail: \w+ NOT_FOUND$",
+            }
+        ],
+        "expected_failures": [
+            {
+                "issue": "DrewFerg11/Split-Flap-Display#54",
+                "reason": "lost mode write",
+                "scenario": "controlled",
+                "step": 1,
+                "action": "wait_display",
+                "error": "timeout",
+            }
+        ],
+    }
+    document.update(overrides)
+    return KnownIssues(document)
+
+
+def test_checked_in_baseline_is_valid_and_bound_to_the_golden_checksum():
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.0-golden.yaml")
+    known.check_firmware(GOLDEN_SHA256)
+    with pytest.raises(ValueError, match="applies only to firmware"):
+        known.check_firmware("0" * 64)
+    assert all(e["issue"].count("#") == 1 for e in known.serial + known.failures)
+
+
+@pytest.mark.parametrize(
+    "overrides,message",
+    [
+        ({"serial": [{"issue": "x#1", "reason": "r", "regex": "^a$"}]}, "owner/repo#123"),
+        (
+            {"serial": [{"issue": "o/r#1", "reason": "r", "regex": "NOT_FOUND"}]},
+            "anchored",
+        ),
+        ({"serial": [{"issue": "o/r#1", "reason": "r", "regex": "^.*$"}]}, "empty line"),
+        ({"serial": [], "expected_failures": []}, "should be deleted"),
+        ({"firmware_sha256": "ABC"}, "SHA-256"),
+        ({"unknown": 1}, "expected fields"),
+    ],
+)
+def test_baseline_entries_must_be_linked_narrow_and_nonempty(overrides, message):
+    with pytest.raises(ValueError, match=message):
+        baseline(**overrides)
+
+
+def test_baseline_requires_the_matching_firmware_and_a_step_scenario(tmp_path):
+    with pytest.raises(ValueError, match="applies only to firmware"):
+        executor([{"assert_no_errors": {}}], firmware_sha256="0" * 64, known_issues=baseline())
+    (tmp_path / "boot.yaml").write_text("version: 1\nmode: boot\ntimeout: 5\n")
+    with pytest.raises(ValueError, match="known issues require a step-based scenario"):
+        load_executor(tmp_path / "boot.yaml", FIXTURE["hardware"], known_issues=baseline())
+
+
+def test_baseline_tolerates_only_matching_serial_lines_and_records_them(context):
+    noise = "[  8617][E][Preferences.cpp:483] getString(): nvs_get_str len fail: name NOT_FOUND\n"
+    (context.out / "serial.log").write_text(noise)
+    with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+        executor([{"assert_no_errors": {}}]).execute(context)
+    engine = executor(
+        [{"assert_no_errors": {}}], firmware_sha256=GOLDEN_SHA256, known_issues=baseline()
+    )
+    result = engine.execute(context)
+    tolerated = result["known_issues"]["tolerated_serial"]
+    assert result["known_issues"]["applied"] and tolerated[0]["count"] == 1
+    (context.out / "serial.log").write_text(noise + "[9][E][Preferences.cpp:483] putString(): x\n")
+    with pytest.raises(ExecutionFailed, match="putString"):
+        executor(
+            [{"assert_no_errors": {}}], firmware_sha256=GOLDEN_SHA256, known_issues=baseline()
+        ).execute(context)
+
+
+def test_expected_failure_stops_the_scenario_as_xfail_and_only_when_it_matches(context):
+    steps = [
+        {"wait_display": {"text": "HELLOXXX"}, "timeout": 0.1},
+        {"assert_no_errors": {}},
+    ]
+    with pytest.raises(TimeoutError):
+        executor(steps).execute(context)
+    engine = executor(steps, firmware_sha256=GOLDEN_SHA256, known_issues=baseline())
+    result = engine.execute(context)
+    assert [s["status"] for s in result["steps"]] == ["xfail", "skipped_known_issue"]
+    assert result["known_issues"]["expected_failure"]["issue"].endswith("#54")
+    assert result["known_issues"]["expected_failures_not_observed"] == []
+    # Same step, but an assertion failure instead of the step timeout: still a real failure.
+    other = [{"assert_no_errors": {}}]
+    (context.out / "serial.log").write_text("Guru Meditation Error: Core panic\n")
+    with pytest.raises(ExecutionFailed):
+        executor(other, firmware_sha256=GOLDEN_SHA256, known_issues=baseline()).execute(context)
+
+
+def test_run_deadline_timeouts_are_never_expected_failures(context):
+    context.deadline = time.monotonic() + 0.1
+    engine = executor(
+        [{"wait_display": {"text": "HELLOXXX"}, "timeout": 30}],
+        firmware_sha256=GOLDEN_SHA256,
+        known_issues=baseline(),
+    )
+    with pytest.raises(TimeoutError):
+        engine.execute(context)
+
+
+def test_reports_mark_known_issue_runs_prominently(tmp_path, monkeypatch):
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    manifest = {"passed": True, "exit_code": 0, "wall_seconds": 1, "scenario": {"name": "s"}}
+    steps = [
+        {"index": 1, "name": "wait", "action": "wait_display", "status": "xfail",
+         "known_issue": "o/r#1", "error": "run exceeded its wall-clock deadline"},
+        {"index": 2, "name": "check", "action": "assert_no_errors",
+         "status": "skipped_known_issue"},
+    ]  # fmt: skip
+    known = {
+        "baseline": "baselines/x.yaml",
+        "firmware_sha256": GOLDEN_SHA256,
+        "applied": True,
+        "expected_failure": {
+            "issue": "o/r#1",
+            "reason": "lost write",
+            "step": 1,
+            "action": "wait_display",
+            "error": "run exceeded its wall-clock deadline",
+        },
+        "expected_failures_not_observed": [],
+        "tolerated_serial": [{"regex": "^x$", "issue": "o/r#2", "count": 3, "first": "x"}],
+    }
+    write_reports(tmp_path, manifest, steps, None, known_issues=known)
+    report = (tmp_path / "report.md").read_text()
+    assert "PASSED WITH KNOWN ISSUES" in report and "o/r#1" in report and "o/r#2" in report
+    assert "PASSED WITH KNOWN ISSUES" in summary.read_text()
+    root = ET.parse(tmp_path / "junit.xml").getroot()
+    assert root.get("failures") == "0" and root.get("skipped") == "2"
+    assert "known issue o/r#1" in root.find("testcase/skipped").get("message")
+    assert manifest["known_issues"] is known

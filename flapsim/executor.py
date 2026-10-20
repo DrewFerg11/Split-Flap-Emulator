@@ -95,7 +95,15 @@ class BootExecutor:
             context.pause()
 
 
-def load_executor(path, hardware, *, variables=(), firmware_sha256=None, golden_exception=False):
+def load_executor(
+    path,
+    hardware,
+    *,
+    variables=(),
+    firmware_sha256=None,
+    golden_exception=False,
+    known_issues=None,
+):
     if str(path) == "boot":
         document = {"version": 1, "mode": "boot", "timeout": 240}
     else:
@@ -114,9 +122,12 @@ def load_executor(path, hardware, *, variables=(), firmware_sha256=None, golden_
             variables,
             firmware_sha256=firmware_sha256,
             golden_exception=golden_exception,
+            known_issues=known_issues,
         )
-    if variables or golden_exception:
-        raise ValueError("variables and version exceptions require a step-based scenario")
+    if variables or golden_exception or known_issues is not None:
+        raise ValueError(
+            "variables, version exceptions and known issues require a step-based scenario"
+        )
     mapping(
         {k: v for k, v in document.items() if k != "expect_text"},
         "boot scenario",

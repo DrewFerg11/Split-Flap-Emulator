@@ -35,6 +35,31 @@ that strict `v1.4.0` and deliberately wrong `v9.9.9` expectations both fail with
 exit 5 against the pinned image, produce failing JUnit evidence, and reap QEMU.
 An unexpected pass, timeout or different failure makes this verifier fail.
 
+## Known-issue baselines (golden runs only)
+
+The golden image has known firmware defects that the strict smoke scenarios
+correctly detect. To keep the emulator's own CI meaningful without hiding them,
+golden runs pass `--known-issues baselines/v1.4.0-golden.yaml`. The policy is
+tracked in [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15).
+
+- A baseline names one firmware SHA-256. Any other firmware is rejected before
+  QEMU starts. Release gating of new firmware never passes a baseline, so
+  strict behaviour is the default.
+- `serial` entries are anchored full-line regexes, each linked to an
+  `owner/repo#N` issue. Matching lines are tolerated by `assert_no_errors` and
+  the final sweep, and counted in the report. Everything else still fails.
+- `expected_failures` entries match one scenario name, step number and action,
+  plus either an error regex or `timeout` (the step's own deadline only, never
+  the run deadline). A match marks that step `xfail`, marks the remaining steps
+  `skipped_known_issue`, and the run passes as **passed_with_known_issues**.
+- Expectations are non-strict because the race is intermittent. Entries that
+  did not occur are listed as "not observed" in the report.
+- Runtime failures, QEMU exits, model stalls and anomalies are never tolerated.
+
+The manifest (`status`, `known_issues`), `report.md`, JUnit (`skipped` with the
+issue link) and the Actions job summary all show the baseline prominently.
+Remove entries as their issues are fixed, and delete the file when it is empty.
+
 ## Schema
 
 ```yaml

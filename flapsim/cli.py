@@ -27,6 +27,11 @@ def main() -> int:
         action="store_true",
         help="explicitly accept v1.4.0-rc.1 only for the checksum-pinned v1.4.0 golden image",
     )
+    runner.add_argument(
+        "--known-issues",
+        type=Path,
+        help="checksum-bound baseline of linked known firmware issues (golden runs only)",
+    )
     runner.add_argument("--out", type=Path, required=True)
     runner.add_argument("--timing", choices=["ci", "accurate", "realtime"], default="ci")
     runner.add_argument("--seed", type=int)

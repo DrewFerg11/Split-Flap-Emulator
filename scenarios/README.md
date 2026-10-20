@@ -14,3 +14,5 @@ See [scenario schema, freshness and reports](../docs/scenarios.md). Step-based
 scenarios that assert a version require `--var FIRMWARE_VERSION=<release-tag>`.
 The published v1.4.0 golden asset also requires the explicit checksum-guarded
 `--golden-version-exception`; new releases use strict matching by default.
+Golden CI runs also pass `--known-issues baselines/v1.4.0-golden.yaml`, a
+checksum-bound list of linked known firmware defects (see #15 and the docs).

@@ -11,6 +11,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from flapsim.baseline import load_known_issues
 from flapsim.executor import (
     ExecutionFailed,
     InterruptedRun,
@@ -161,12 +162,17 @@ def run(args, *, executor=None, interrupt=None):
     source, data = firmware_bytes(args.firmware)
     digest = hashlib.sha256(data).hexdigest()
     hardware = load_hardware(args.hardware, seed=args.seed)
+    known_issues = None
+    if getattr(args, "known_issues", None) is not None:
+        known_issues = load_known_issues(args.known_issues)
+        known_issues.check_firmware(digest)
     executor = executor or load_executor(
         args.scenario,
         hardware,
         variables=getattr(args, "variables", ()),
         firmware_sha256=digest,
         golden_exception=getattr(args, "golden_version_exception", False),
+        known_issues=known_issues,
     )
     timeout = positive_timeout(args.timeout if args.timeout is not None else executor.timeout)
     prefix, build = runtime_info(args.qemu_prefix)
@@ -269,7 +275,12 @@ def run(args, *, executor=None, interrupt=None):
         validate_timeline(out / "timeline.jsonl")
         if hasattr(executor, "verify_final"):
             executor.verify_final(out, hardware)
-        manifest["status"] = "passed"
+        summary = (
+            executor.known_issue_summary() if hasattr(executor, "known_issue_summary") else None
+        )
+        manifest["status"] = (
+            "passed_with_known_issues" if summary and summary["applied"] else "passed"
+        )
         exit_code = 0
     except InterruptedRun as error:
         exit_code = 128 + error.signum

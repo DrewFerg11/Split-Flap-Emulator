@@ -22,6 +22,8 @@ def main():
                     "wall_seconds",
                     "source_unchanged",
                     "qemu_returncode",
+                    "status",
+                    "known_issues",
                 ]
             }
         )
