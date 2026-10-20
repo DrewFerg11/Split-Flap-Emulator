@@ -21,6 +21,7 @@ from flapsim.executor import (
 )
 from flapsim.hardware import load_hardware, write_model_config
 from flapsim.process import enable_subreaper, stop_group
+from flapsim.provenance import emulator_provenance
 from flapsim.state import read_settlement
 
 FLASH_SIZE = 4 * 1024 * 1024
@@ -176,6 +177,7 @@ def run(args, *, executor=None, interrupt=None):
     )
     timeout = positive_timeout(args.timeout if args.timeout is not None else executor.timeout)
     prefix, build = runtime_info(args.qemu_prefix)
+    emulator = emulator_provenance()
     if interrupt and (signum := interrupt()) is not None:
         raise InterruptedRun(signum)
     if args.timing not in {"ci", "accurate", "realtime"}:
@@ -190,6 +192,7 @@ def run(args, *, executor=None, interrupt=None):
         "hardware": hardware,
         "seed": hardware["seed"],
         "build": build,
+        "emulator": emulator,
         "timing": args.timing,
         "scenario": executor.document,
         "timeout_seconds": timeout,

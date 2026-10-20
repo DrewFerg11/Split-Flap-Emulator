@@ -14,6 +14,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  container:
+    name: Verified runtime image
+    needs: [fast-checks, qemu-boot]
+    uses: ./.github/workflows/verify-container.yml
+
   fast-checks:
     name: Fast checks
     runs-on: ubuntu-24.04

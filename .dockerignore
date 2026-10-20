@@ -1,0 +1,13 @@
+.git
+.venv
+build
+dist
+firmware
+runs
+poc
+*.bin
+*.egg-info
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/*.pyc

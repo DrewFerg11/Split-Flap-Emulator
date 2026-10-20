@@ -1,7 +1,1 @@
-version: 1
-name: version-check
-timeout: 120
-steps:
-  - wait_serial: {regex: '^Firmware: .+\n'}
-    timeout: 100
-  - expect_serial: "Firmware: ${FIRMWARE_VERSION} ("
+../flapsim/data/scenarios/version-check.yaml

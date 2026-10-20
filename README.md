@@ -25,6 +25,7 @@ See [runner usage](docs/runner.md) and [scenario usage](docs/scenarios.md).
 - POC code (reference only): [`poc/`](poc)
 - Build, installation, checks and boot reproduction: [`docs/development.md`](docs/development.md)
 - Physical hardware, configuration and state/timeline schemas: [`docs/hardware-model.md`](docs/hardware-model.md)
+- Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md) (publication blocked by firmware #54)
 - Ordered branch/PR workflow: [`docs/implementation-queue.md`](docs/implementation-queue.md)
 - QEMU integration decision and lifecycle: [`docs/adr/0001-qemu-integration.md`](docs/adr/0001-qemu-integration.md)
 

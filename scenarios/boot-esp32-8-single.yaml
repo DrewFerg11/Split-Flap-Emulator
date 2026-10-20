@@ -1,4 +1,1 @@
-version: 1
-mode: boot
-timeout: 240
-expect_text: XXXXXXXX
+../flapsim/data/scenarios/boot-esp32-8-single.yaml

@@ -11,6 +11,7 @@ from typing import Protocol
 import yaml
 
 from flapsim.hardware import HardwareLoader, mapping
+from flapsim.resources import resolve_resource
 from flapsim.state import read_settlement
 
 
@@ -108,7 +109,9 @@ def load_executor(
         document = {"version": 1, "mode": "boot", "timeout": 240}
     else:
         try:
-            document = yaml.load(Path(path).read_text(), Loader=HardwareLoader)
+            document = yaml.load(
+                resolve_resource("scenarios", path).read_text(), Loader=HardwareLoader
+            )
         except (OSError, yaml.YAMLError) as error:
             raise ValueError(f"cannot load scenario {path}: {error}") from error
     if not isinstance(document, dict):

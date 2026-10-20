@@ -6,6 +6,8 @@ from pathlib import Path
 
 import yaml
 
+from flapsim.resources import resolve_resource
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -144,11 +146,8 @@ def normalize_hardware(document, *, seed=None):
 
 
 def load_hardware(path, *, seed=None):
-    path = Path(path)
-    if not path.exists() and path.parent == Path("."):
-        path = ROOT / "hardware" / f"{path.stem}.yaml"
     try:
-        document = yaml.load(path.read_text(), Loader=HardwareLoader)
+        document = yaml.load(resolve_resource("hardware", path).read_text(), Loader=HardwareLoader)
     except (OSError, yaml.YAMLError) as error:
         raise ValueError(f"cannot load hardware {path}: {error}") from error
     return normalize_hardware(document, seed=seed)

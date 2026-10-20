@@ -315,8 +315,8 @@ implementation is merged and acceptance passes. See the [ordered PR queue](imple
 | 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | Merged: [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10) as `3eebd00`; both real layouts and CI passed; Hermes approved before merge; [hardware/schema contract](hardware-model.md) |
 | 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | Merged: [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11) as `e237b07`; [runner contract](runner.md); all three CI jobs and 144 local tests passed; Hermes approved before merge |
 | 4 | [Scenarios, smoke tests, reports, and replay](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | 6–8; golden regression checks from 11 | In progress: [PR #12](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/12); rebased onto main `e237b07`; [scenario contract](scenarios.md); strict version negative and three homing seeds pass; complete smoke acceptance remains blocked by firmware #54 and separate I2C issue #14 |
-| 5 | [Docker packaging, verified publishing, and maintenance](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | 9; maintenance from 11 | [Draft PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13) preserved; image verification/publication acceptance remains blocked |
-| 6 | [Firmware release gating](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | 10; companion firmware-repository PR | Blocked on strict smoke acceptance and an actual verified published immutable image; no companion release gate claimed |
+| 5 | [Docker packaging, verified publishing, and maintenance](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | 9; maintenance from 11 | In progress on `mvp/06-packaging`; [container use/publication](container.md), [maintenance](maintenance.md); local prototype built; strict smoke and real publication acceptance blocked by firmware #54 |
+| 6 | [Firmware release gating](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | 10; companion firmware-repository PR | Blocked on a verified published immutable image and firmware #54; no active release gate claimed |
 
 [View all MVP issues](https://github.com/DrewFerg11/Split-Flap-Emulator/issues?q=is%3Aissue%20label%3Amvp).
 Each issue uses the `[MVP n/6]` title prefix and `mvp` label, with implementation checklists, dependencies,
@@ -517,6 +517,9 @@ each with `--timing ci`.
 last 50 serial lines.
 
 ### Step 9: Docker image
+
+**Implementation note:** built-in resources are packaged in the wheel; source archives, provenance and runtime dependencies are included in the image. MQTT/Mosquitto stays post-MVP. The candidate is built once, verified, exported and published without rebuilding; only the publication job has package-write permission. No image is published while the strict golden smokes fail on firmware #54. See [container documentation](container.md).
+
 **Tasks**
 - Multi-stage `Dockerfile`: stage 1 builds QEMU and the model; stage 2 is `debian:bookworm-slim` + Python + runtime
   libs (`libglib2.0-0 libgcrypt20 libslirp0 libpixman-1-0`) + Mosquitto (for post-MVP MQTT) + the `flapsim`
@@ -544,6 +547,9 @@ last 50 serial lines.
 (for example a wrong version string) blocks publishing.
 
 ### Step 11: Emulator self-tests and maintenance hooks
+
+**Implementation note:** the version check is not disabled. Only the checksum-pinned golden v1.4.0/v1.4.0-rc.1 mismatch has an explicit recorded exception; real release gating remains strict. Both golden smoke gates remain failing on firmware #54 by maintainer decision. QEMU/firmware update, clean rebuild, cache, fixture, source licensing and publication procedures are in [maintenance](maintenance.md).
+
 **Tasks**
 - A "golden run" in this repo's CI: boot a pinned known-good firmware (v1.4.0 image downloaded from releases) with
   `release-smoke-8` and the version check disabled. This catches emulator regressions.
