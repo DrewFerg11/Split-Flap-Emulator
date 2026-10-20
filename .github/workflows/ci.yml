@@ -88,16 +88,21 @@ jobs:
       - name: Install Python configuration loader
         run: python -m pip install -e .
       - name: Verify actual golden firmware boot, model and I2C discovery
-        run: python -m tools.verify_model --hardware "${{ matrix.hardware }}" --out runs/model --timeout 240
+        run: |
+          python -m tools.verify_model --fetch-only
+          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.0-factory.bin \
+            --hardware "${{ matrix.hardware }}" --scenario "scenarios/boot-${{ matrix.hardware }}.yaml" \
+            --out runs/model
+          python -m tools.verify_model --hardware "${{ matrix.hardware }}" --out runs/model
       - name: Record verification in summary
         if: always()
         shell: bash
         run: |
-          if test -f runs/model/verification.json; then
+          if test -f runs/model/run.json; then
             {
               echo '### Pinned firmware model verification: ${{ matrix.hardware }}'
               echo '```json'
-              cat runs/model/verification.json
+              cat runs/model/run.json
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
