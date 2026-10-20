@@ -34,7 +34,8 @@ banner. `version`, `mode`, and `timeout` are required. Missing fields report
 their names with invalid-input exit code 2 before launch. Unknown keys,
 unsupported modes, duplicate YAML keys, invalid deadlines
 and text that cannot fit the physical modules fail before launch. Full scenario
-steps, version checks, reports and replay arrive in phase 4. The separate golden
+steps, version checks, reports and replay are documented in
+[scenarios.md](scenarios.md). The separate golden
 evidence checker retains the narrowly scoped discovery/error assertions; a
 generic boot command does not silently allow or classify firmware serial errors.
 
@@ -72,8 +73,9 @@ contract. No global process killing is used.
 
 HTTP forwarding binds only `127.0.0.1`, targeting guest `192.168.4.1:80` on
 AP-mode SLIRP. A temporary port probe supplies a candidate; QEMU must actually
-bind it. Up to five forwarding-bind failures can retry with a fresh candidate
-within the same deadline. Every attempt is reaped and logged. Each retry resets
+bind it. Forwarding-bind failures can retry with a fresh candidate, up to five
+total startup attempts within the same deadline. Every attempt is reaped and
+logged. Each retry resets
 the private flash/model output so incomplete startup cannot seed the next run.
 Other startup errors fail immediately. A successful QMP `query-status` reporting
 `running` proves QEMU initialization finished before invoking the executor;

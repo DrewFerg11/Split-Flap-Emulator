@@ -24,23 +24,20 @@ def read_settlement(out: Path, hardware):
     except json.JSONDecodeError as error:
         raise ValueError(f"invalid model JSON: {error}") from error
     for value in [before, state, after]:
-        if (
-            not isinstance(value, dict)
-            or type(value.get("schema_version")) is not int
-            or value["schema_version"] != 1
-        ):
-            raise ValueError("unsupported or missing model schema_version")
-        for key in ["movement_id", "settlement_id", "guest_ns", "sequence"]:
-            if type(value.get(key)) is not int or value[key] < 0:
-                raise ValueError(f"invalid model {key}")
-        if type(value.get("settled")) is not bool:
-            raise ValueError("invalid model settled flag")
-        validate_counters(value.get("counters"))
+        validate_identity(value)
     identity = (state["movement_id"], state["settlement_id"])
     if not all(v["settled"] for v in [before, state, after]) or any(
         (v["movement_id"], v["settlement_id"]) != identity for v in [before, after]
     ):
         return None
+    return validate_state(state, hardware)
+
+
+def validate_state(state, hardware):
+    """Validate a complete, all-off historical settlement without reading live activity."""
+    validate_identity(state)
+    if not state["settled"]:
+        raise ValueError("historical snapshot is not settled")
     modules = state.get("modules")
     if not isinstance(modules, list) or len(modules) != len(hardware["modules"]):
         raise ValueError("model settlement has missing/extra modules")
@@ -71,3 +68,18 @@ def read_settlement(out: Path, hardware):
     if any(sum(m["counters"][k] for m in modules) != state["counters"][k] for k in COUNTERS):
         raise ValueError("model aggregate counters do not match module counters")
     return state
+
+
+def validate_identity(value):
+    if (
+        not isinstance(value, dict)
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] != 1
+    ):
+        raise ValueError("unsupported or missing model schema_version")
+    for key in ["movement_id", "settlement_id", "guest_ns", "sequence"]:
+        if type(value.get(key)) is not int or value[key] < 0:
+            raise ValueError(f"invalid model {key}")
+    if type(value.get("settled")) is not bool:
+        raise ValueError("invalid model settled flag")
+    validate_counters(value.get("counters"))

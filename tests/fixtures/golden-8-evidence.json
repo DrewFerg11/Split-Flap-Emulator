@@ -1,0 +1,571 @@
+{
+  "provenance": {
+    "source": "phase-2 local real published-firmware run model-8-final",
+    "firmware": {
+      "repository": "DrewFerg11/Split-Flap-Display",
+      "tag": "v1.4.0",
+      "asset": "splitflap-esp32_n4-v1.4.0-factory.bin",
+      "url": "https://github.com/DrewFerg11/Split-Flap-Display/releases/download/v1.4.0/splitflap-esp32_n4-v1.4.0-factory.bin",
+      "size": 4128768,
+      "sha256": "a087801e2ba5e08154af28a636c310b988b43417f28c7ddb7bae4f3df9f6221e",
+      "source_commit": "c0ff3dd3af683c187f936548cf941a004e780227"
+    },
+    "build": {
+      "commit": "e39508f79cb0681bbe15cfcebd40a3f45cdc3c48",
+      "flags": [
+        "--target-list=xtensa-softmmu",
+        "--extra-cflags=-fPIC",
+        "--disable-alsa",
+        "--disable-attr",
+        "--disable-auth-pam",
+        "--disable-avx2",
+        "--disable-avx512bw",
+        "--disable-blkio",
+        "--disable-bochs",
+        "--disable-bpf",
+        "--disable-brlapi",
+        "--disable-bzip2",
+        "--disable-canokey",
+        "--disable-cap-ng",
+        "--disable-capstone",
+        "--disable-cloop",
+        "--disable-cocoa",
+        "--disable-colo-proxy",
+        "--disable-coreaudio",
+        "--disable-crypto-afalg",
+        "--disable-curl",
+        "--disable-curses",
+        "--disable-dbus-display",
+        "--disable-dmg",
+        "--disable-docs",
+        "--disable-dsound",
+        "--disable-fuse",
+        "--disable-fuse-lseek",
+        "--disable-gcrypt",
+        "--disable-gettext",
+        "--disable-gio",
+        "--disable-glusterfs",
+        "--disable-gnutls",
+        "--disable-gtk",
+        "--disable-gtk-clipboard",
+        "--disable-guest-agent",
+        "--disable-guest-agent-msi",
+        "--disable-hv-balloon",
+        "--disable-hvf",
+        "--disable-iconv",
+        "--disable-jack",
+        "--disable-keyring",
+        "--disable-kvm",
+        "--disable-l2tpv3",
+        "--disable-libcbor",
+        "--disable-libdaxctl",
+        "--disable-libdw",
+        "--disable-libiscsi",
+        "--disable-libkeyutils",
+        "--disable-libnfs",
+        "--disable-libpmem",
+        "--disable-libssh",
+        "--disable-libudev",
+        "--disable-libusb",
+        "--disable-libvduse",
+        "--disable-linux-aio",
+        "--disable-linux-io-uring",
+        "--disable-lzfse",
+        "--disable-lzo",
+        "--disable-malloc-trim",
+        "--disable-membarrier",
+        "--disable-modules",
+        "--disable-mpath",
+        "--disable-multiprocess",
+        "--disable-netmap",
+        "--disable-nettle",
+        "--disable-numa",
+        "--disable-nvmm",
+        "--disable-opengl",
+        "--disable-oss",
+        "--disable-pa",
+        "--disable-parallels",
+        "--disable-pipewire",
+        "--disable-pixman",
+        "--disable-plugins",
+        "--disable-png",
+        "--disable-qatzip",
+        "--disable-qcow1",
+        "--disable-qed",
+        "--disable-qga-vss",
+        "--disable-qpl",
+        "--disable-rbd",
+        "--disable-rdma",
+        "--disable-replication",
+        "--disable-rust",
+        "--disable-rutabaga-gfx",
+        "--disable-sdl",
+        "--disable-sdl-image",
+        "--disable-seccomp",
+        "--disable-selinux",
+        "--disable-slirp",
+        "--disable-slirp-smbd",
+        "--disable-smartcard",
+        "--disable-snappy",
+        "--disable-sndio",
+        "--disable-sparse",
+        "--disable-spice",
+        "--disable-spice-protocol",
+        "--disable-stack-protector",
+        "--disable-tcg",
+        "--disable-tools",
+        "--disable-tpm",
+        "--disable-u2f",
+        "--disable-uadk",
+        "--disable-usb-redir",
+        "--disable-vde",
+        "--disable-vdi",
+        "--disable-vduse-blk-export",
+        "--disable-vfio-user-server",
+        "--disable-vhdx",
+        "--disable-vhost-crypto",
+        "--disable-vhost-kernel",
+        "--disable-vhost-net",
+        "--disable-vhost-user",
+        "--disable-vhost-user-blk-server",
+        "--disable-vhost-vdpa",
+        "--disable-virglrenderer",
+        "--disable-virtfs",
+        "--disable-vmdk",
+        "--disable-vmnet",
+        "--disable-vnc",
+        "--disable-vnc-jpeg",
+        "--disable-vnc-sasl",
+        "--disable-vpc",
+        "--disable-vte",
+        "--disable-vvfat",
+        "--disable-werror",
+        "--disable-whpx",
+        "--disable-xen",
+        "--disable-xen-pci-passthrough",
+        "--disable-xkbcommon",
+        "--disable-zstd",
+        "--disable-system",
+        "--disable-user",
+        "--disable-linux-user",
+        "--disable-bsd-user",
+        "--disable-pie",
+        "--enable-tcg",
+        "--enable-system",
+        "--disable-werror",
+        "--enable-gcrypt",
+        "--enable-slirp",
+        "--python=/workspace/Split-Flap-Emulator/.venv/bin/python"
+      ],
+      "cc": "cc (Debian 14.2.0-19) 14.2.0\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+      "cc_command": [
+        "cc"
+      ],
+      "cflags": "-I/workspace/scratch/sysroot/usr/include",
+      "ldflags": "-L/workspace/scratch/sysroot/usr/lib/x86_64-linux-gnu -Wl,-rpath,/workspace/scratch/sysroot/usr/lib/x86_64-linux-gnu",
+      "pkg_config_path": "/workspace/scratch/sysroot/usr/lib/x86_64-linux-gnu/pkgconfig",
+      "integration_sha256": "9b9a6748f8193a50bd527044868970e7e72eedc1f6c23ad51b8298cdcac12c02",
+      "build_wall_seconds": 15.099,
+      "build_kind": "incremental",
+      "jobs": 3,
+      "host": {
+        "architecture": "x86_64",
+        "logical_cpus": 3
+      }
+    },
+    "wall_seconds": 224.497,
+    "selection": "first complete all-off blank and X move_finished records, plus serial log"
+  },
+  "hardware": {
+    "schema_version": 1,
+    "chip": "esp32",
+    "seed": 7,
+    "drum": {
+      "steps_per_rotation": 2048,
+      "flaps": " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+      "magnet_position": 730,
+      "sensor_window": 40
+    },
+    "modules": [
+      {
+        "bus": 0,
+        "addr": 32,
+        "angle": 231
+      },
+      {
+        "bus": 0,
+        "addr": 33,
+        "angle": 519
+      },
+      {
+        "bus": 0,
+        "addr": 34,
+        "angle": 323
+      },
+      {
+        "bus": 0,
+        "addr": 35,
+        "angle": 581
+      },
+      {
+        "bus": 0,
+        "addr": 36,
+        "angle": 2047
+      },
+      {
+        "bus": 0,
+        "addr": 37,
+        "angle": 1684
+      },
+      {
+        "bus": 0,
+        "addr": 38,
+        "angle": 954
+      },
+      {
+        "bus": 0,
+        "addr": 39,
+        "angle": 855
+      }
+    ]
+  },
+  "serial": "ets Jul 29 2019 12:21:46\n\nrst:0x1 (POWERON_RESET),boot:0x12 (SPI_FAST_FLASH_BOOT)\nconfigsip: 0, SPIWP:0xee\nclk_drv:0x00,q_drv:0x00,d_drv:0x00,cs0_drv:0x00,hd_drv:0x00,wp_drv:0x00\nmode:DIO, clock div:2\nload:0x3fff0030,len:1184\nload:0x40078000,len:13232\nload:0x40080400,len:3028\nentry 0x400805e4\n[  3326][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n=== Split Flap Display ===\nFirmware: v1.4.0-rc.1 (prebuilt (GitHub Actions))\nChip: ESP32-D0WDQ6 rev 0\nMAC: 10:01:00:C4:0A:24\nReset reason: power-on\n===========================\nInit Web Server\n[  3370][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\nPOSIX Timezone set to: UTC0\n[  3518][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  3519][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\nAP Mode Started!\nConnect to: Split Flap Display\nAP IP Address: http://192.168.4.1\n[  3779][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  3780][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  3782][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\nmDNS: http://splitflap.local\n[  4265][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4266][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4266][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4266][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4266][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4266][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4267][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4267][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4268][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4268][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4268][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4269][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n[  4269][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n\n=== I2C Configuration ===\nWire   (SDA=21, SCL=22): [0]0x20 [1]0x21 [2]0x22 [3]0x23 [4]0x24 [5]0x25 [6]0x26 [7]0x27 \nWire1  (SDA=33, SCL=32): [8]0x20 [9]0x21 [10]0x22 [11]0x23 [12]0x24 [13]0x25 [14]0x26 [15]0x27 \nTotal modules: 16\n=========================\n\n=== I2C Scanner ===\nWire  : [0]0x20 [1]0x21 [2]0x22 [3]0x23 [4]0x24 [5]0x25 [6]0x26 [7]0x27\nWire1 : (none found)\n  -> [8]0x20 MISSING\n  -> [9]0x21 MISSING\n  -> [10]0x22 MISSING\n  -> [11]0x23 MISSING\n  -> [12]0x24 MISSING\n  -> [13]0x25 MISSING\n  -> [14]0x26 MISSING\n  -> [15]0x27 MISSING\n===================\n\nError writing data to module 32, error code: 2\nError writing data to module 33, error code: 2\nError writing data to module 34, error code: 2\nError writing data to module 35, error code: 2\nError writing data to module 36, error code: 2\nError writing data to module 37, error code: 2\nError writing data to module 38, error code: 2\nError writing data to module 39, error code: 2\nHoming\n",
+  "states": [
+    {
+      "schema_version": 1,
+      "guest_ns": 26937432809,
+      "sequence": 193,
+      "movement_id": 9,
+      "settlement_id": 9,
+      "settled": true,
+      "counters": {
+        "forward": 33818,
+        "backward": 8,
+        "stalls": 0,
+        "writes": 33898,
+        "reads": 3390,
+        "anomalies": 0
+      },
+      "event": "move_finished",
+      "modules": [
+        {
+          "bus": 0,
+          "addr": 32,
+          "angle": 4,
+          "latch": 65505,
+          "phase": -1,
+          "char": " ",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 3870,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 3880,
+            "reads": 388,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 33,
+          "angle": 2,
+          "latch": 65505,
+          "phase": -1,
+          "char": " ",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 3580,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 3590,
+            "reads": 359,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 34,
+          "angle": 6,
+          "latch": 65505,
+          "phase": -1,
+          "char": " ",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 3780,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 3790,
+            "reads": 379,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 35,
+          "angle": 4,
+          "latch": 65505,
+          "phase": -1,
+          "char": " ",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 3520,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 3530,
+            "reads": 353,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 36,
+          "angle": 2,
+          "latch": 65505,
+          "phase": -1,
+          "char": " ",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 4100,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 4110,
+            "reads": 411,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 37,
+          "angle": 9,
+          "latch": 65505,
+          "phase": -1,
+          "char": " ",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 4470,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 4480,
+            "reads": 448,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 38,
+          "angle": 8,
+          "latch": 65505,
+          "phase": -1,
+          "char": " ",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 5199,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 5209,
+            "reads": 521,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 39,
+          "angle": 9,
+          "latch": 65505,
+          "phase": -1,
+          "char": " ",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 5299,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 5309,
+            "reads": 531,
+            "anomalies": 0
+          }
+        }
+      ],
+      "text": "        ",
+      "rows": [
+        "        ",
+        ""
+      ]
+    },
+    {
+      "schema_version": 1,
+      "guest_ns": 33839432809,
+      "sequence": 226,
+      "movement_id": 10,
+      "settlement_id": 10,
+      "settled": true,
+      "counters": {
+        "forward": 44432,
+        "backward": 8,
+        "stalls": 0,
+        "writes": 44536,
+        "reads": 4454,
+        "anomalies": 0
+      },
+      "event": "move_finished",
+      "modules": [
+        {
+          "bus": 0,
+          "addr": 32,
+          "angle": 1331,
+          "latch": 65505,
+          "phase": -1,
+          "char": "X",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 5197,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 5210,
+            "reads": 521,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 33,
+          "angle": 1329,
+          "latch": 65505,
+          "phase": -1,
+          "char": "X",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 4907,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 4920,
+            "reads": 492,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 34,
+          "angle": 1333,
+          "latch": 65505,
+          "phase": -1,
+          "char": "X",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 5107,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 5120,
+            "reads": 512,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 35,
+          "angle": 1331,
+          "latch": 65505,
+          "phase": -1,
+          "char": "X",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 4847,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 4860,
+            "reads": 486,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 36,
+          "angle": 1329,
+          "latch": 65505,
+          "phase": -1,
+          "char": "X",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 5427,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 5440,
+            "reads": 544,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 37,
+          "angle": 1336,
+          "latch": 65505,
+          "phase": -1,
+          "char": "X",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 5797,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 5810,
+            "reads": 581,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 38,
+          "angle": 1334,
+          "latch": 65505,
+          "phase": -1,
+          "char": "X",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 6525,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 6538,
+            "reads": 654,
+            "anomalies": 0
+          }
+        },
+        {
+          "bus": 0,
+          "addr": 39,
+          "angle": 1335,
+          "latch": 65505,
+          "phase": -1,
+          "char": "X",
+          "hall": false,
+          "energized": false,
+          "counters": {
+            "forward": 6625,
+            "backward": 1,
+            "stalls": 0,
+            "writes": 6638,
+            "reads": 664,
+            "anomalies": 0
+          }
+        }
+      ],
+      "text": "XXXXXXXX",
+      "rows": [
+        "XXXXXXXX",
+        ""
+      ]
+    }
+  ]
+}

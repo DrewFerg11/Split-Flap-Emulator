@@ -95,7 +95,15 @@ class BootExecutor:
             context.pause()
 
 
-def load_executor(path, hardware):
+def load_executor(
+    path,
+    hardware,
+    *,
+    variables=(),
+    firmware_sha256=None,
+    golden_exception=False,
+    known_issues=None,
+):
     if str(path) == "boot":
         document = {"version": 1, "mode": "boot", "timeout": 240}
     else:
@@ -105,6 +113,21 @@ def load_executor(path, hardware):
             raise ValueError(f"cannot load scenario {path}: {error}") from error
     if not isinstance(document, dict):
         raise ValueError("scenario must be a mapping")
+    if "steps" in document:
+        from flapsim.scenario import ScenarioExecutor
+
+        return ScenarioExecutor(
+            document,
+            hardware,
+            variables,
+            firmware_sha256=firmware_sha256,
+            golden_exception=golden_exception,
+            known_issues=known_issues,
+        )
+    if variables or golden_exception or known_issues is not None:
+        raise ValueError(
+            "variables, version exceptions and known issues require a step-based scenario"
+        )
     mapping(
         {k: v for k, v in document.items() if k != "expect_text"},
         "boot scenario",
