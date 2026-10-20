@@ -119,6 +119,12 @@ The exact-source local image at `39f9768` built in 4562.9 seconds on the same
 two-CPU/vfs host and passed resource/provenance, lifecycle and rejection checks.
 This is partial diagnostic evidence, not publication proof. Rebuild after source
 changes and verify that image's identity against the recorded source revision.
+The later source `022a2b1` rebuilt in 189.12 seconds with the native cache and
+passed the same partial checks. Its unchanged 120-second initial homing waits
+timed out locally on both layouts (152.583/173.963 seconds total); model activity
+was still moving, with only 21.8/15.8 seconds of guest time elapsed. These runs
+did not reach HTTP assertions and do not establish a firmware regression. CI's
+three homing seeds pass, while its full smokes fail on the firmware paths.
 Full successful smoke/image durations remain unavailable while #54 blocks them.
 Record fresh CI timings and the immutable digest when acceptance passes; do not
 claim the release gate's approximately 15-minute target from these partial runs.

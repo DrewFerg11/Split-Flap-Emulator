@@ -15,11 +15,13 @@ An additional intermittent I2C read failure is tracked separately in
 [emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14);
 its cause is still under investigation and its strict error assertion remains.
 
-The local diagnostic image from source `39f9768` passed installed-resource,
-source/license, provenance, timeout, stop and wrong-version rejection checks
-([evidence](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6#issuecomment-6295887101)).
-These partial checks do not authorize publication. Later source heads require
-their own matching image and complete verification.
+The local image from source `022a2b1` passed installed-resource, source/license,
+provenance, timeout, stop and wrong-version rejection checks
+([evidence](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6#issuecomment-6296570430)).
+Both unscaled strict smokes timed out during initial homing on the two-CPU/vfs
+host, before reaching their HTTP assertions. These local performance failures
+are separate from CI's firmware failures. Partial or failed diagnostics do not
+authorize publication; later source heads require matching image verification.
 
 ## Run a released image
 
