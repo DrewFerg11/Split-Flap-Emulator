@@ -27,6 +27,8 @@ expect_text: XXXXXXXX
 
 It waits for the real firmware banner and a fresh settlement after movement,
 with no stalls/anomalies and, when specified, exact text in module order.
+A settled state with stalls or anomalies fails with exit code 5 immediately,
+even when its text differs from the expectation.
 `--scenario boot` omits the text assertion; it still requires movement and the
 banner. `version`, `mode`, and `timeout` are required. Missing fields report
 their names with invalid-input exit code 2 before launch. Unknown keys,
@@ -75,8 +77,9 @@ within the same deadline. Every attempt is reaped and logged. Each retry resets
 the private flash/model output so incomplete startup cannot seed the next run.
 Other startup errors fail immediately. A successful QMP `query-status` reporting
 `running` proves QEMU initialization finished before invoking the executor;
-the guest's HTTP server may still be starting. QMP uses a private short-lived
-Unix socket, avoiding a second TCP port and long output-path socket limits.
+the guest's HTTP server may still be starting. Runtime failures after that point
+end the run. QMP uses a private short-lived Unix socket, avoiding a second TCP
+port and long output-path socket limits.
 
 ## Executor contract
 

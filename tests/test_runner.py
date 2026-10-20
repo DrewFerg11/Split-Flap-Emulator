@@ -15,6 +15,7 @@ import pytest
 
 from flapsim.executor import load_executor
 from flapsim.hardware import load_hardware
+from flapsim.process import enable_subreaper
 from flapsim.runner import FLASH_SIZE, QEMU_COMMIT, command_for, run
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -169,6 +170,48 @@ def test_runtime_failures_timeouts_and_descendant_cleanup(arguments, monkeypatch
             os.kill(descendant, 0)
 
 
+@pytest.mark.parametrize("mode,counter", [("fault", "stalls"), ("anomaly", "anomalies")])
+def test_boot_faults_fail_even_when_expected_text_does_not_match(
+    arguments, monkeypatch, mode, counter
+):
+    monkeypatch.setenv("FLAPSIM_FAKE_MODE", mode)
+    scenario = arguments.out.parent / "fault.yaml"
+    scenario.write_text(
+        json.dumps({"version": 1, "mode": "boot", "timeout": 10, "expect_text": "YYYYYYYY"})
+    )
+    arguments.scenario = scenario
+    arguments.timeout = 10
+    assert run(arguments) == 5
+    value = manifest(arguments)
+    assert "model faults:" in value["error"] and f"'{counter}': 1" in value["error"]
+    assert not value["passed"] and value["source_unchanged"]
+    assert_reaped(value)
+
+
+def test_runtime_failure_does_not_retry_a_bind_message_after_startup(arguments):
+    class FailingExecutor:
+        timeout = 10
+        document = {"version": 1, "mode": "boot", "timeout": 10}
+
+        def execute(self, context):
+            log = max(
+                context.out.glob("qemu-attempt-*.log"),
+                key=lambda path: int(path.stem.rsplit("-", 1)[1]),
+            )
+            with log.open("a") as stream:
+                stream.write("runtime diagnostic: Could not set up host forwarding rule\n")
+            context.process.terminate()
+            context.process.wait(timeout=5)
+            raise RuntimeError("failure after QMP startup")
+
+    arguments.timeout = 10
+    assert run(arguments, executor=FailingExecutor()) == 3
+    value = manifest(arguments)
+    assert value["error"] == "failure after QMP startup"
+    assert len(value["attempts"]) == 1 and "retry" not in value["attempts"][0]
+    assert_reaped(value)
+
+
 def test_source_tampering_after_launch_fails(arguments, monkeypatch):
     monkeypatch.setenv("FLAPSIM_FAKE_MODE", "tamper")
     monkeypatch.setenv("FLAPSIM_FAKE_SOURCE", str(arguments.firmware))
@@ -217,7 +260,7 @@ def test_actual_port_bind_collision_retries(arguments, monkeypatch):
     assert_reaped(value)
 
 
-def cli_command(args):
+def cli_command(args, *, timeout=10):
     return [
         sys.executable,
         "-m",
@@ -234,30 +277,64 @@ def cli_command(args):
         "--qemu-prefix",
         str(args.qemu_prefix),
         "--timeout",
-        "10",
+        str(timeout),
     ]
+
+
+def stop_test_cli(process):
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.communicate(timeout=10)
+        return
+    except subprocess.TimeoutExpired:
+        # Only children of this test's CLI are eligible for forced cleanup.
+        path = Path(f"/proc/{process.pid}/task/{process.pid}/children")
+        children = [int(pid) for pid in path.read_text().split()] if path.exists() else []
+        for pid in children:
+            try:
+                if os.getpgid(pid) == pid:
+                    os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.kill()
+        process.communicate(timeout=5)
+        deadline = time.monotonic() + 2
+        while children:
+            for pid in children.copy():
+                try:
+                    reaped, _ = os.waitpid(pid, os.WNOHANG)
+                except ChildProcessError:
+                    reaped = pid
+                if reaped:
+                    children.remove(pid)
+            if children:
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("test CLI children did not finish cleanup") from None
+                time.sleep(0.02)
 
 
 @pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM])
 def test_cli_signals_reap_children(arguments, signum):
+    enable_subreaper()
     env = {**os.environ, "FLAPSIM_FAKE_MODE": "no-output"}
-    process = subprocess.Popen(cli_command(arguments), env=env, stdout=subprocess.PIPE)
+    process = subprocess.Popen(cli_command(arguments, timeout=30), env=env, stdout=subprocess.PIPE)
     try:
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 15
         while not (arguments.out / "flash-observed.json").exists():
             assert process.poll() is None and time.monotonic() < deadline
             time.sleep(0.02)
         process.send_signal(signum)
-        process.communicate(timeout=6)
+        process.communicate(timeout=10)
         assert process.returncode == 128 + signum
         assert_reaped(manifest(arguments))
     finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait()
+        stop_test_cli(process)
 
 
 def test_two_concurrent_cli_instances_are_isolated(arguments, tmp_path):
+    enable_subreaper()
     other = argparse.Namespace(**{**vars(arguments), "out": tmp_path / "other"})
     children = [
         subprocess.Popen(cli_command(a), stdout=subprocess.PIPE) for a in [arguments, other]
@@ -276,9 +353,7 @@ def test_two_concurrent_cli_instances_are_isolated(arguments, tmp_path):
         assert_reaped(b)
     finally:
         for child in children:
-            if child.poll() is None:
-                child.kill()
-                child.wait()
+            stop_test_cli(child)
 
 
 @pytest.mark.parametrize(

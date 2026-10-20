@@ -80,6 +80,8 @@ class BootExecutor:
     def execute(self, context):
         while True:
             state = context.settlement()
+            if state and (state["counters"]["stalls"] or state["counters"]["anomalies"]):
+                raise ExecutionFailed(f"model faults: {state['counters']}")
             if (
                 state
                 and state["movement_id"] > 0
@@ -89,8 +91,6 @@ class BootExecutor:
                     or state["text"] == self.document["expect_text"]
                 )
             ):
-                if state["counters"]["stalls"] or state["counters"]["anomalies"]:
-                    raise ExecutionFailed(f"model faults: {state['counters']}")
                 return {"state": state}
             context.pause()
 

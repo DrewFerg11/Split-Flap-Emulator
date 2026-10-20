@@ -110,9 +110,10 @@ if mode != "no-output":
                 "counters": counters,
             }
         )
-    if mode == "fault":
-        state["modules"][0]["counters"] = {**counters, "stalls": 1}
-        state["counters"] = {**counters, "stalls": 1}
+    if mode in {"fault", "anomaly"}:
+        counter = "stalls" if mode == "fault" else "anomalies"
+        state["modules"][0]["counters"] = {**counters, counter: 1}
+        state["counters"] = {**counters, counter: 1}
     (out / "serial.log").write_text("=== Split Flap Display ===\n")
     (out / "timeline.jsonl").write_text(json.dumps(state) + "\n")
     (out / "state.json").write_text(json.dumps(state) if mode != "partial" else "{")

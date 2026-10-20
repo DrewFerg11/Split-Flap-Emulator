@@ -237,7 +237,8 @@ def run(args, *, executor=None, interrupt=None):
                         break
                     except RuntimeError:
                         if (
-                            process.poll() is not None
+                            manifest["status"] == "starting"
+                            and process.poll() is not None
                             and "Could not set up host forwarding rule"
                             in (out / f"qemu-attempt-{attempt_number}.log").read_text(
                                 errors="replace"

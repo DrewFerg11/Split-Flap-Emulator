@@ -313,7 +313,7 @@ implementation is merged and acceptance passes. See the [ordered PR queue](imple
 |---|---|---|---|
 | 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | Merged: [PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9); [current CI passed](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39358214724); Hermes approved before merge; merged as `9663764`; [ADR](adr/0001-qemu-integration.md) |
 | 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | Merged: [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10) as `3eebd00`; both real layouts and CI passed; Hermes approved before merge; [hardware/schema contract](hardware-model.md) |
-| 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | In progress: [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11); [runner contract](runner.md); rebased onto main `3eebd00`; previous CI passed both real CLI boots; updated checks and Hermes review pending |
+| 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | In progress: [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11); [runner contract](runner.md); based on main `3eebd00`; local 144 tests pass after review fixes; fresh CI and current-head Hermes approval required |
 | 4 | [Scenarios, smoke tests, reports, and replay](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | 6–8; golden regression checks from 11 | Not started |
 | 5 | [Docker packaging, verified publishing, and maintenance](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | 9; maintenance from 11 | Not started |
 | 6 | [Firmware release gating](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | 10; companion firmware-repository PR | Not started |
@@ -438,8 +438,10 @@ unsupported hardware, reserved/conflicting addresses, and invalid mechanics/star
 ### Step 5: Runner CLI
 **Implementation note (phase 3):** the CLI owns a process group and subreaps descendants;
 QMP confirms startup before an executor runs, and actual forwarding-bind failures
-retry within the total deadline. Golden verification is an offline evidence check
-after CLI supervision. See [runner.md](runner.md).
+retry within the total deadline, only before that startup confirmation. Observed
+settlement faults fail immediately even when expected text differs. Golden
+verification is an offline evidence check after CLI supervision. See
+[runner.md](runner.md).
 
 **Tasks**
 - `flapsim run --firmware <factory.bin> --hardware <yaml> --scenario <yaml> --out <dir> [--timing ci|accurate|realtime]`.
