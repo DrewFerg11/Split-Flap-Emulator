@@ -171,7 +171,28 @@ CI runs five real-firmware jobs (two smoke layouts and three homing seeds),
 plus asserted strict/wrong-version negatives in the eight-module job. Each
 scenario has a 300-second bound; logs, manifests, reports, JUnit and replays are
 uploaded on failure as well as success, excluding firmware/private flash.
-Current-head real scenario results and measured CI duration remain pending
-until the draft PR's workflow finishes. The preceding runner CI passed both
-real CLI boots within 240 seconds; its local eight-module run took 599.849s on
-the slower shared host. Do not substitute local-host timing for CI measurements.
+The [pre-rebase CI](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39460294879)
+passed fast checks and all three homing seeds. The strict eight-module smoke
+failed on rebooted Preferences errors in 94.426s; the sixteen-module smoke
+failed on HTTP 200 without motion in 222.304s. These are failed-run durations,
+not successful smoke timing acceptance. Fresh checks repeat after rebasing.
+The preceding runner CI passed both real CLI boots within 240 seconds; its
+local eight-module run took 599.849s on the slower shared host. Do not substitute
+local-host timing for CI measurements.
+
+## Golden acceptance blockers
+
+The checksum-pinned published v1.4.0 image does not pass both complete smokes.
+[Firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54)
+records settings GET readback returning defaults despite confirmed persistence,
+and dual-row text POST returning HTTP 200 without subsequent motion. Readback
+sometimes passes, while rebooted Preferences missing-key errors still fail the
+strict error gate. The maintainer chose to retain these failures and owns the
+firmware fix. The golden version exception permits only the recorded version
+mismatch; it does not relax these assertions or serial-error policies.
+
+The intermittent I2C read Error 263 in
+[emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14)
+is a separate unresolved investigation. A later run without that error is not
+proof of a fix. Issue #5 remains open until genuine complete smoke acceptance
+and the corresponding merges; the implementation PR uses `Refs #5`.

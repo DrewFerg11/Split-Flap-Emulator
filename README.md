@@ -13,9 +13,12 @@ virtual display.
 is merged, providing the pinned build and unmodified QEMU library launcher. Phase 2 is also merged, adding the physical PCF8575, stepper, drum and hall
 model, validated 8/16-module hardware, atomic state, activity markers and timelines. Both layouts have booted the
 unmodified golden firmware and settled at X with zero stalls/anomalies. Review/merge acceptance is tracked per
-phase. Phase 3 implements `flapsim run` with private flash, loopback forwarding, process
+phase. Phase 3 is merged as `e237b07`, adding `flapsim run` with private flash, loopback forwarding, process
 supervision and bounded boot scenarios. Phase 4 adds declarative serial/HTTP/display
-scenarios with strict versions, per-step deadlines and finalized reports/replays.
+scenarios with strict versions, per-step deadlines and finalized reports/replays. Its implementation is now ready
+for review; complete strict golden smoke acceptance remains blocked by
+[firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54) and the separate
+[I2C investigation #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14).
 See [runner usage](docs/runner.md) and [scenario usage](docs/scenarios.md).
 
 - Findings, results and the step-by-step MVP plan: [`docs/poc-findings-and-mvp-plan.md`](docs/poc-findings-and-mvp-plan.md)
