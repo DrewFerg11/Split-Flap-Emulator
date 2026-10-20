@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: GPL-2.0-or-later */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * flapsim POC: virtual split-flap modules behind the picsimlab I2C hook.
  *
@@ -13,7 +13,9 @@
  *   FLAPSIM_WINDOW               steps the sensor stays active (default 40)
  *   FLAPSIM_SEED                 seed for random start angles (default 1; 0 = all start at 0)
  *   FLAPSIM_TRACE                1 = log every I2C transaction
- *   FLAPSIM_STATE                path; drum state JSON is rewritten here on every motor stop
+ *   FLAPSIM_STATE                path; drum state JSON is rewritten when every motor has stopped
+ *   FLAPSIM_TIMELINE             path; JSONL snapshots (every 100 ms of guest time while moving) + events
+ *   FLAPSIM_LOG_HALL             1 = log motor on/off and hall-detection events per module
  */
 #include "qemu/timer.h"
 

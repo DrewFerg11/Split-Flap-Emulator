@@ -59,11 +59,12 @@ def display():
     return "".join(m["char"] for m in st["modules"]), st["t"]
 
 
-# MQTT broker on the host; the guest reaches the host as 192.168.4.2 (slirp gateway).
-open(f"{RUN}/mosquitto.conf", "w").write("listener 1883 0.0.0.0\nallow_anonymous true\n")
+# MQTT broker on the host. The guest reaches it as 192.168.4.2 (the slirp gateway), which slirp
+# forwards to the host's loopback, so the broker only needs to listen on 127.0.0.1.
+open(f"{RUN}/mosquitto.conf", "w").write("listener 1883 127.0.0.1\nallow_anonymous true\n")
 broker = subprocess.Popen(["mosquitto", "-c", f"{RUN}/mosquitto.conf"], stderr=subprocess.DEVNULL)
 time.sleep(1)
-sub = subprocess.Popen(["mosquitto_sub", "-v", "-t", "splitflap/#"], stdout=open(f"{RUN}/mqtt.log", "w"))
+sub = subprocess.Popen(["mosquitto_sub", "-h", "127.0.0.1", "-v", "-t", "splitflap/#"], stdout=open(f"{RUN}/mqtt.log", "w"))
 
 env = dict(os.environ, FLAPSIM_BUS1="", FLAPSIM_SEED="7", FLAPSIM_STATE=STATE, FLAPSIM_TIMELINE=f"{RUN}/timeline.jsonl")
 qemu = subprocess.Popen(
@@ -109,15 +110,23 @@ try:
     wait_for(lambda: serial().count("[MQTT] Connected to broker") > n, "MQTT connect", 120)
     log("MQTT: firmware connected to the host broker")
     time.sleep(3)
-    subprocess.run(["mosquitto_pub", "-t", "splitflap/splitflap/set", "-m", "WORLD"], check=True)
+    before = display()
+    subprocess.run(["mosquitto_pub", "-h", "127.0.0.1", "-t", "splitflap/splitflap/set", "-m", "WORLD"], check=True)
     log("published WORLD to splitflap/splitflap/set")
-    got = wait_for(lambda: display() if display() and display()[0].startswith("WORLD") else None, "drums to show WORLD", 120)
-    log(f"PASS mqtt: drums show [{got[0]}] at emulated t={got[1]:.1f}s")
-    time.sleep(2)
-    log("MQTT traffic seen on broker:\n    " + "\n    ".join(open(f"{RUN}/mqtt.log").read().strip().splitlines()))
+    wait_for(lambda: "[MQTT] Message received: WORLD" in serial(), "firmware to receive the MQTT message", 60)
+    log("PASS mqtt: firmware received WORLD")
+    # Known firmware limitation (findings doc, finding 3): in AP mode setDisplay() is never called, so the
+    # message is dropped and the drums must NOT change. Assert that, so a firmware fix shows up as a change here.
+    time.sleep(15)
+    after = display()
+    if after and before and after[0] != before[0]:
+        raise SystemExit(f"UNEXPECTED: drums changed to [{after[0]}] in AP mode; finding 3 may be fixed, update this check")
+    log(f"PASS mqtt (known limitation): drums unchanged at [{after[0] if after else '?'}] in AP mode")
     ok = True
 finally:
     qemu.terminate()
     sub.terminate()
+    sub.wait()  # mosquitto_sub buffers when writing to a file; its log is complete only after it exits
     broker.terminate()
+    log("MQTT traffic seen on broker:\n    " + "\n    ".join(open(f"{RUN}/mqtt.log").read().strip().splitlines()))
     log("RESULT: " + ("PASS" if ok else "FAIL"))

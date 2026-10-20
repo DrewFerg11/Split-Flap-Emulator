@@ -38,8 +38,8 @@ The POC proved the core idea with the published `v1.4.0` `esp32_n4` binary:
 - settings persist across a reboot, and single-bus mode and dual-bus 16-module mode both work.
 
 With `-icount shift=3`, motion timing matches real hardware (~500 steps/s against the firmware's 512 target), and
-runs are deterministic. A boot-to-display run takes about 1.5–2 minutes of wall-clock time on a 4-vCPU machine. That
-is fast enough to gate releases in GitHub Actions.
+runs with the same seed and build are consistent. A boot-to-display run takes about 1.5–2 minutes of wall-clock time
+on a 4-vCPU machine. That is fast enough to gate releases in GitHub Actions.
 
 Using one binary, the POC found a real release bug (`v1.4.0` reports itself as `v1.4.0-rc.1`), plus several
 firmware behaviours worth reviewing ([section 8](#8-firmware-findings-from-the-poc)).
@@ -141,7 +141,7 @@ All POC code is in [`poc/`](../poc); see [`poc/README.md`](../poc/README.md) for
 | `flapsim_model.c` | Hardware model (≈300 lines): PCF8575 + stepper + drum + hall sensor per address, with diagnostics |
 | `experiment.sh` | Boot a release image under a given configuration; logs go to `runs/<name>/` |
 | `analyze.py` | Summarise a run: moves, step rate, wall vs emulated time, errors |
-| `net_scenario.py` | End-to-end: AP mode → `POST /settings` → reboot → `POST /text` → check drums; MQTT via Mosquitto |
+| `net_scenario.py` | End-to-end: AP mode → `POST /settings` → reboot → `POST /text` → check drums; MQTT receive check (local Mosquitto) |
 | `viewer_template.html`, `render.py`, `shot.js` | Timeline → standalone HTML replay → PNG screenshots → GIF |
 
 The model is configured through environment variables (`FLAPSIM_BUS0/1`, `FLAPSIM_STEPS`, `FLAPSIM_MAGNET`,
@@ -157,7 +157,7 @@ replaces these with a hardware config file.
 | Homing from random angles | ✅ Every drum lands on blank (within ~10 steps, which is the firmware's 20 ms polling granularity) |
 | 8 modules, single bus (`wire1Addresses=""`) | ✅ No-Wi-Fi display shows `WIFI ERR` (the correct 8-module message) |
 | 16 modules, dual bus | ✅ Both rows home; no-Wi-Fi display `[XXXXXXXX] [XXXXXXXX]`; no I²C errors |
-| Accurate motion timing | ✅ `-icount shift=3`: 500 steps/s (target 512); deterministic across runs |
+| Accurate motion timing | ✅ `-icount shift=3`: 500 steps/s (target 512); consistent across runs with the same seed and build (not bit-for-bit) |
 | Host → firmware HTTP | ✅ `GET /version`, `GET /settings`, `GET /index.html`, `POST /settings`, `POST /text` |
 | Web control → drums | ✅ `POST /text {"mode":"single","words":["HELLO"],"center":true}` → `[ HELLO  ]` in ~6 s |
 | Settings persistence + reboot | ✅ A hardware-setting change triggers a reboot; settings survive in emulated flash |
@@ -194,7 +194,9 @@ Measurements: 8 modules, same seed, one emulated board per host core, 4-vCPU clo
 | `-icount shift=4,sleep=off` (~62 MIPS) | 460 ⚠️ | 0.53× | ~66 s |
 
 - `sleep=off` means idle periods cost no wall-clock time; guest time jumps ahead.
-- Two `shift=2` runs finished their moves within 0.06 s of each other, so tests are repeatable.
+- Two `shift=2` runs with the same seed finished their moves within 0.06 s of each other. That is consistent enough
+  for repeatable tests, but not bit-for-bit deterministic, so scenarios should assert on settled states, not exact
+  timestamps.
 - **Recommendation:** `shift=3` for CI, `shift=2` for timing-sensitive checks, real-time mode only for watching it
   live.
 - MTTCG and `-icount` cannot be combined.
@@ -283,7 +285,7 @@ split-flap-emulator/
 ## 11. MVP scope
 
 **In:** ESP32 (`esp32_n4`) only; 8-module single-bus and 16-module dual-bus hardware configs; AP-mode networking
-(web UI and HTTP API); the release smoke scenario; deterministic timing (`shift=3`); CI artefacts with replay; Docker
+(web UI and HTTP API); the release smoke scenario; consistent timing (`shift=3`); CI artefacts with replay; Docker
 image; a `sim-test` job in the firmware repo's `release.yml`.
 
 **Out (post-MVP):** station-mode Wi-Fi / WPA2 (and so MQTT inbound, NTP time modes, network OTA); ESP32-C3 and S3;

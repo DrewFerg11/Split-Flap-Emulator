@@ -48,7 +48,7 @@ The scripts expect to be run from this folder, with `qemu-lcgamboa/` and `fw/` n
 | `flapsim_model.c` | PCF8575 + 28BYJ-48 + drum + hall model; configured by `FLAPSIM_*` env vars (see file header) |
 | `experiment.sh` | Boot one configuration; outputs in `runs/<name>/` |
 | `analyze.py` | Summarise a run |
-| `net_scenario.py` | End-to-end HTTP (+ partial MQTT) scenario |
+| `net_scenario.py` | End-to-end HTTP scenario, plus an MQTT receive check (inbound display is a known AP-mode limitation) |
 | `viewer_template.html`, `render.py`, `shot.js` | Replay page, renderer, screenshot helper |
 
 Known POC limitations are listed in the main doc: env-var config, one board per process, and station-mode Wi-Fi
