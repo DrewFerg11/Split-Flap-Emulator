@@ -1,0 +1,116 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
+#include "internal.h"
+#include <errno.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void integer(struct json_object *object, const char *key, int64_t value) {
+    json_object_object_add(object, key, json_object_new_int64(value));
+}
+
+static struct json_object *counters(FsCounters count) {
+    struct json_object *object = json_object_new_object();
+    integer(object, "forward", count.forward);
+    integer(object, "backward", count.backward);
+    integer(object, "stalls", count.stalls);
+    integer(object, "writes", count.writes);
+    integer(object, "reads", count.reads);
+    integer(object, "anomalies", count.anomalies);
+    return object;
+}
+
+static struct json_object *identity(void) {
+    struct json_object *object = json_object_new_object();
+    integer(object, "schema_version", 1);
+    integer(object, "guest_ns", fs.now);
+    integer(object, "sequence", fs.sequence);
+    integer(object, "movement_id", fs.movement_id);
+    integer(object, "settlement_id", fs.settlement_id);
+    json_object_object_add(object, "settled", json_object_new_boolean(!fs_any_energized()));
+    FsCounters total = {0};
+    for (int i = 0; i < fs.count; i++) {
+        FsCounters *count = &fs.modules[i].counters;
+        total.forward += count->forward;
+        total.backward += count->backward;
+        total.stalls += count->stalls;
+        total.writes += count->writes;
+        total.reads += count->reads;
+    }
+    total.anomalies = fs.totals.anomalies;
+    json_object_object_add(object, "counters", counters(total));
+    return object;
+}
+
+static void atomic_json(const char *path, struct json_object *object) {
+    if (fs.failed)
+        return;
+    size_t length = strlen(path) + 5;
+    char *temporary = malloc(length);
+    if (!temporary) {
+        fs_fail("out of memory writing JSON");
+        return;
+    }
+    snprintf(temporary, length, "%s.tmp", path);
+    FILE *file = fopen(temporary, "w");
+    if (!file)
+        fs_fail("cannot open %s: %s", temporary, strerror(errno));
+    else {
+        bool failed = fprintf(file, "%s\n",
+                              json_object_to_json_string_ext(object, JSON_C_TO_STRING_PLAIN)) < 0;
+        if (fclose(file) != 0)
+            failed = true;
+        if (failed || rename(temporary, path) != 0)
+            fs_fail("cannot commit JSON output %s", path);
+    }
+    free(temporary);
+}
+
+void fs_write_activity(void) {
+    if (fs.failed)
+        return;
+    struct json_object *object = identity();
+    atomic_json(fs.activity_path, object);
+    json_object_put(object);
+}
+
+void fs_emit(const char *event, bool state) {
+    if (fs.failed)
+        return;
+    fs.sequence++;
+    struct json_object *object = identity();
+    json_object_object_add(object, "event", json_object_new_string(event));
+    struct json_object *modules = json_object_new_array();
+    char text[FS_MAX_MODULES + 1] = {0}, rows[2][FS_MAX_MODULES + 1] = {{0}};
+    int row_count[2] = {0};
+    for (int i = 0; i < fs.count; i++) {
+        FsModule *module = &fs.modules[i];
+        struct json_object *entry = json_object_new_object();
+        integer(entry, "bus", module->bus);
+        integer(entry, "addr", module->addr);
+        integer(entry, "angle", module->angle);
+        integer(entry, "latch", module->latch);
+        integer(entry, "phase", module->phase);
+        char shown = fs_shown(module);
+        text[i] = shown;
+        rows[module->bus][row_count[module->bus]++] = shown;
+        json_object_object_add(entry, "char", json_object_new_string_len(&shown, 1));
+        json_object_object_add(entry, "hall", json_object_new_boolean(fs_hall(module)));
+        json_object_object_add(entry, "energized", json_object_new_boolean(module->energized));
+        json_object_object_add(entry, "counters", counters(module->counters));
+        json_object_array_add(modules, entry);
+    }
+    json_object_object_add(object, "modules", modules);
+    json_object_object_add(object, "text", json_object_new_string(text));
+    struct json_object *row_array = json_object_new_array();
+    for (int b = 0; b < 2; b++)
+        json_object_array_add(row_array, json_object_new_string(rows[b]));
+    json_object_object_add(object, "rows", row_array);
+    if (state)
+        atomic_json(fs.state_path, object);
+    if (fprintf(fs.timeline, "%s\n",
+                json_object_to_json_string_ext(object, JSON_C_TO_STRING_PLAIN)) < 0 ||
+        fflush(fs.timeline) != 0)
+        fs_fail("cannot write model timeline");
+    fs_write_activity();
+    json_object_put(object);
+}

@@ -64,9 +64,21 @@ def build(args):
     for tool in ["git", "ninja", "pkg-config", cc[0]]:
         if shutil.which(tool) is None:
             raise ValueError(f"missing build dependency: {tool}; see docs/development.md")
-    run(["pkg-config", "--exists", "glib-2.0", "gthread-2.0", "libgcrypt", "slirp", "pixman-1"])
+    run(
+        [
+            "pkg-config",
+            "--exists",
+            "glib-2.0",
+            "gthread-2.0",
+            "libgcrypt",
+            "slirp",
+            "pixman-1",
+            "json-c",
+        ]
+    )
     prefix = args.build_root.resolve()
-    source, work, stage = prefix / "src", prefix / "work", prefix / "install"
+    source, work = prefix / "src", prefix / "work"
+    stage = args.install_dir.resolve() if args.install_dir else prefix / "install"
     # --clean discards only generated outputs. Never reset a developer's source edits.
     if args.clean:
         for directory in [work, stage]:
@@ -119,16 +131,27 @@ def build(args):
     run(shared_link_command(commands[-1], work), work)
     for directory in [stage / "bin", stage / "lib", stage / "share/qemu"]:
         directory.mkdir(parents=True, exist_ok=True)
+    model_sources = sorted((ROOT / "model").glob("*.c"))
+    model_flags = shlex.split(
+        run(["pkg-config", "--cflags", "--libs", "json-c", "glib-2.0"], capture=True)
+    )
     run(
         [
             *cc,
-            "-std=c11",
+            "-std=gnu11",
             "-O2",
             "-Wall",
             "-Wextra",
             "-Werror",
+            "-isystem",
+            str(source / "include"),
+            "-isystem",
+            str(source),
+            "-isystem",
+            str(work),
             str(ROOT / "qemu/launcher.c"),
-            str(ROOT / "qemu/boot_stub.c"),
+            *map(str, model_sources),
+            *model_flags,
             "-ldl",
             "-o",
             str(stage / "bin/flapsim-qemu"),
@@ -144,10 +167,11 @@ def build(args):
             "build.sh",
             "launcher.c",
             "callbacks.h",
-            "boot_stub.c",
             "QEMU_COMMIT",
         ]
     ]
+    sources.extend(sorted((ROOT / "model").glob("*.c")))
+    sources.extend(sorted((ROOT / "model").glob("*.h")))
     manifest = {
         **configuration,
         "integration_sha256": hashlib.sha256(b"".join(p.read_bytes() for p in sources)).hexdigest(),
@@ -163,6 +187,9 @@ def build(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build-root", type=Path, default=ROOT / "build/qemu")
+    parser.add_argument(
+        "--install-dir", type=Path, help="stage the runtime separately from the build cache"
+    )
     parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 1, 4))
     parser.add_argument(
         "--clean", action="store_true", help="discard generated build/install outputs"

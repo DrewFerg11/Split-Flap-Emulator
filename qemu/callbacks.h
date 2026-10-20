@@ -16,5 +16,8 @@ typedef struct {
 } flapsim_callbacks;
 
 int flapsim_i2c_event(uint8_t id, uint8_t addr, uint16_t event);
+void flapsim_model_prepare(void *library);
+void flapsim_model_start(void);
+void flapsim_model_finish(void);
 
 #endif
