@@ -73,8 +73,9 @@ contract. No global process killing is used.
 
 HTTP forwarding binds only `127.0.0.1`, targeting guest `192.168.4.1:80` on
 AP-mode SLIRP. A temporary port probe supplies a candidate; QEMU must actually
-bind it. Up to five forwarding-bind failures can retry with a fresh candidate
-within the same deadline. Every attempt is reaped and logged. Each retry resets
+bind it. Forwarding-bind failures can retry with a fresh candidate, up to five
+total startup attempts within the same deadline. Every attempt is reaped and
+logged. Each retry resets
 the private flash/model output so incomplete startup cannot seed the next run.
 Other startup errors fail immediately. A successful QMP `query-status` reporting
 `running` proves QEMU initialization finished before invoking the executor;
