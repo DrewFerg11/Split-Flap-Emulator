@@ -21,6 +21,8 @@
 14. [Open questions](#14-open-questions)
 15. [References](#15-references)
 
+[MVP delivery progress and issue tracker](#mvp-delivery-progress)
+
 ---
 
 ## 1. Summary
@@ -295,10 +297,45 @@ Improv serial provisioning; fault injection; I²C bus timing; the home-lab live 
 the emulator, runs the smoke scenario on both hardware configs, attaches a report and replay, and blocks publishing
 on failure, all within ~15 minutes.
 
+## MVP delivery progress
+
+The original steps below are grouped into six implementation issues. Execute the phases in order; tests and
+GitHub Actions checks land with each phase, starting in phase 1. The original step numbers remain stable for
+technical references. Golden regression checks from step 11 are introduced incrementally in phases 1–4;
+maintenance documentation is completed in phase 5.
+
+All phases are **not started**. The issue backlog is prepared; no MVP implementation is complete.
+
+| Phase | Tracking issue | Original steps | Status |
+|---|---|---|---|
+| 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | Not started |
+| 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | Not started |
+| 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | Not started |
+| 4 | [Scenarios, smoke tests, reports, and replay](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | 6–8; golden regression checks from 11 | Not started |
+| 5 | [Docker packaging, verified publishing, and maintenance](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | 9; maintenance from 11 | Not started |
+| 6 | [Firmware release gating](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | 10; companion firmware-repository PR | Not started |
+
+[View all MVP issues](https://github.com/DrewFerg11/Split-Flap-Emulator/issues?q=is%3Aissue%20label%3Amvp).
+Each issue uses the `[MVP n/6]` title prefix and `mvp` label, with implementation checklists, dependencies,
+tests/workflow requirements, acceptance criteria, and scope boundaries.
+
+**Keeping this plan current**
+- Use issue checkboxes and comments for working notes and current blockers.
+- In each implementation PR, update this table's status and link the implementation PR and verification evidence.
+  If a phase needs multiple PRs, keep it in progress until all acceptance criteria are met and merged.
+- Record material architecture decisions, changed interfaces, scope changes, and justified acceptance deviations
+  next to the affected original step (and in an ADR when appropriate). Preserve the historical POC findings.
+- Mark a phase complete only after the implementation is merged and its required checks pass. A created issue,
+  open PR, or local-only demonstration does not establish completion.
+- Keep the top-level status and README consistent with delivered functionality. Declare the MVP complete only
+  after the companion firmware release gate is operational and verified as required by section 11.
+- Preserve `poc/` as frozen reference; production behavior and new documentation belong outside that directory.
+
 ## 12. MVP implementation plan (step by step)
 
-Each step lists **tasks**, the **deliverable**, and **acceptance criteria**. Do them in order. Each one is a
-reviewable PR.
+Each step lists **tasks**, the **deliverable**, and **acceptance criteria**. Follow the dependency order in the
+six-phase tracker above. Each phase is a reviewable implementation chunk; the original steps remain its technical
+checklist. Tests and CI evolve within each phase rather than waiting until step 11.
 
 ### Step 0: Repository skeleton
 **Tasks**
