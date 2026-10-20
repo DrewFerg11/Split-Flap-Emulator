@@ -141,28 +141,26 @@ issue #6; the implementation PR alone does not close it.
 See [maintenance](maintenance.md) for source licensing, cache recovery, evidence
 retention, required checks and the firmware-release integration prerequisites.
 
-## Current CI evidence
+## Verification history
 
-On PR #13 head `eb1aab1`, CI39508190280 built local image
-`sha256:c7c45ef8e139e2f8a5b2cb11154378222b8314a3cdac53658493cc97828ebdca`
-from GitHub's synthetic merge source `b34b9db0930f5eeee6f826a1ffb7b441be365bd1`.
-All five image cases passed: smoke-8 173.056s (all steps, 24 visible known serial
-lines), smoke-16 218.878s (visible expected step8 failure), timeout exit4/3.023s,
-stop exit143/0.198s, wrong-version exit5/6.163s. Installed resources, source/license
-and provenance checks passed. These baseline results do not establish firmware fixes.
+The phase5 implementation merged as `dd6a432`. Its candidate passed installed
+resources/source/license/provenance checks and all five image cases: smoke8
+173.056s (all steps,24 visible known serial lines), smoke16 218.878s (visible
+expected step8 failure), timeout exit4/3.023s, stop exit143/0.198s and wrong-version
+exit5/6.163s. The overall job then failed at the host publication verifier's
+missing `packaging` import. PR #17 fixes that dependency, verified in a clean
+environment. These baseline results establish neither a firmware fix nor
+publication authorization.
 
-The overall image job failed afterward because the host publication-rejection
-verifier imported `packaging`, which its setup had not installed. PR #17 fixes
-that explicit host dependency; the exact setup and imports were verified in a
-clean virtual environment. [Retained CI evidence](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39508190280/artifacts/12304464406)
-is not complete publication authorization: fresh CI must pass the full rejection
-guard on the updated source. No image was exported or published from that failed
-job, and no GHCR manifest digest exists yet.
+A subsequent candidate passed the corrected host setup, but the final serial
+sweep caught the raw interleaving recorded in
+[SFD #86](https://github.com/DrewFerg11/Split-Flap-Display/issues/86). Its narrow
+checksum-bound baseline entry and regression/negative controls are documented in
+[scenario usage](scenarios.md). Strict policy and release commands are unchanged.
+The failed run skipped later lifecycle/rejection checks and published nothing.
 
-The first renamed-workflow run, CI39511137762, installed the missing host dependency
-successfully, but image smoke16's final sweep caught a raw interleaved serial
-record. The exact capture and retained artifact12305839532 are linked in
-[SFD #86](https://github.com/DrewFerg11/Split-Flap-Display/issues/86). A new explicit
-golden entry records only that checksum-bound Preferences.begin NOT_FOUND numeric
-suffix; strict error policy and release commands are unchanged. Fresh verification
-is required; this failed run did not execute lifecycle/rejection checks or publish.
+[Issue #7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) tracks exact
+source/image identities, run links and temporary artifact pointers (14-day
+retention), alongside the acceptance evidence still required. Fresh current-source
+image/rejection verification and actual immutable publication are necessary;
+old partial proof cannot authorize publication or establish an active release gate.

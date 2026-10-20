@@ -50,6 +50,16 @@ workflow also reports total simulation-job duration including checkout, image
 pull and artifact upload. Upload occurs before that final duration summary, so
 the duration is in the Actions summary rather than the uploaded artifact.
 
+Positive runs and wrong-version probes require native QEMU exit0 after the
+runner's shutdown. This is observed behavior of the pinned integration, verified
+by the container verifier for expected CLI exits0/5/143; it is not a universal
+QEMU SIGTERM contract. A changed QEMU pin must re-verify it before relaxing this
+guard. An intentional timeout instead requires the boot-mode three-second run,
+a failed manifest/JUnit, and integer native exit status agreeing with the last
+reaped attempt. Boot mode has no timed-out step record; a forced reaped shutdown
+may have a nonzero native status. Inconsistent/missing status, a different
+scenario/budget, skipped evidence or Docker timeout cannot prove that probe.
+
 Docker pull is bounded to 180 seconds and attached execution to 360 seconds;
 other Docker operations are bounded to 30 seconds and named-container removal
 runs on failure. The hosted job has a 15-minute final limit. Record real parallel

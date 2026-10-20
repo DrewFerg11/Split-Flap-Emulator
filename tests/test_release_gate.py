@@ -51,7 +51,12 @@ def evidence(out, *, code=0, probe="none", checksum=CHECKSUM):
             ],
         )
     if probe == "timeout":
-        manifest["error"] = "run exceeded its wall-clock deadline"
+        manifest.update(
+            error="run exceeded its wall-clock deadline",
+            scenario={"version": 1, "mode": "boot", "timeout": 240},
+            timeout_seconds=3.0,
+            steps=[],
+        )
     (run / "run.json").write_text(json.dumps(manifest))
     (run / "junit.xml").write_text(f'<testsuite failures="{int(code != 0)}" skipped="0"/>')
     for name in ("serial.log", "timeline.jsonl", "report.md", "replay.html"):
@@ -107,6 +112,52 @@ def test_negative_run_must_fail_for_the_intended_reason(tmp_path, probe, code):
     with pytest.raises(GateFailure) as caught:
         inspect_result(tmp_path, code, CHECKSUM, "8", probe)
     assert caught.value.kind == "simulation"
+
+
+@pytest.mark.parametrize("native_code", [None, "0", True, -9])
+def test_timeout_probe_rejects_missing_or_contradictory_child_exit(tmp_path, native_code):
+    manifest = evidence(tmp_path, code=4, probe="timeout")
+    manifest["qemu_returncode"] = native_code  # Last attempt remains a reaped exit 0.
+    (tmp_path / "run/run.json").write_text(json.dumps(manifest))
+    with pytest.raises(GateFailure) as caught:
+        inspect_result(tmp_path, 4, CHECKSUM, "8", "timeout")
+    assert caught.value.kind == "evidence"
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("scenario", {"name": "release-smoke-8"}),
+        ("timeout_seconds", 300),
+        ("passed", True),
+        ("status", "passed"),
+        ("steps", [{"status": "failed", "action": "wait_display"}]),
+    ],
+)
+def test_timeout_probe_rejects_a_different_or_inconsistent_run(tmp_path, key, value):
+    manifest = evidence(tmp_path, code=4, probe="timeout")
+    manifest[key] = value
+    (tmp_path / "run/run.json").write_text(json.dumps(manifest))
+    with pytest.raises(GateFailure) as caught:
+        inspect_result(tmp_path, 4, CHECKSUM, "8", "timeout")
+    assert caught.value.kind != "timeout"
+
+
+def test_timeout_probe_requires_failed_junit(tmp_path):
+    evidence(tmp_path, code=4, probe="timeout")
+    (tmp_path / "run/junit.xml").write_text('<testsuite failures="0" skipped="0"/>')
+    with pytest.raises(GateFailure) as caught:
+        inspect_result(tmp_path, 4, CHECKSUM, "8", "timeout")
+    assert caught.value.kind != "timeout"
+
+
+def test_timeout_probe_can_prove_a_reaped_forced_shutdown(tmp_path):
+    manifest = evidence(tmp_path, code=4, probe="timeout")
+    manifest.update(qemu_returncode=-9, attempts=[{"returncode": -9}])
+    (tmp_path / "run/run.json").write_text(json.dumps(manifest))
+    with pytest.raises(GateFailure) as caught:
+        inspect_result(tmp_path, 4, CHECKSUM, "8", "timeout")
+    assert caught.value.kind == "timeout"  # An intentional deadline is still a failed gate.
 
 
 def arguments(tmp_path, probe="none"):

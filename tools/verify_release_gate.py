@@ -86,6 +86,8 @@ def inspect_result(out, code, checksum, layout, probe):
         or manifest.get("version_exception") is not None
         or not manifest.get("attempts")
         or any(type(a.get("returncode")) is not int for a in manifest["attempts"])
+        or type(manifest.get("qemu_returncode")) is not int
+        or manifest["qemu_returncode"] != manifest["attempts"][-1]["returncode"]
     ):
         raise GateFailure("evidence", "inconsistent provenance, cleanup or strict-policy evidence")
     for name in ("serial.log", "timeline.jsonl", "report.md", "junit.xml", "replay.html"):
@@ -93,7 +95,17 @@ def inspect_result(out, code, checksum, layout, probe):
             raise GateFailure("evidence", f"missing simulator artifact: {name}")
     junit = ET.parse(out / "run/junit.xml").getroot()
     if code:
-        if code == 4 and probe == "timeout" and "deadline" in manifest.get("error", ""):
+        if manifest.get("passed") is not False or manifest.get("status") != "failed":
+            raise GateFailure("evidence", "nonzero execution must have a failed manifest")
+        if (
+            code == 4
+            and probe == "timeout"
+            and "deadline" in manifest.get("error", "")
+            and manifest.get("scenario", {}).get("mode") == "boot"
+            and manifest.get("timeout_seconds") == 3
+            and not manifest.get("steps")
+            and int(junit.get("failures", "0")) > 0
+        ):
             raise GateFailure("timeout", manifest["error"])
         if code == 5 and probe == "wrong-version":
             for step in manifest.get("steps", []):
