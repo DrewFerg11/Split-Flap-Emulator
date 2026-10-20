@@ -127,18 +127,20 @@ def verify(args) -> None:
                         serial.read_text(errors="replace") if serial.exists() else "",
                         (out / "qemu.log").read_text(errors="replace"),
                     ):
-                        # Recheck the source after the guest has been allowed to write to flash.
-                        checked_firmware(args.firmware)
-                        result["passed"] = True
-                        return
+                        break
                     if time.monotonic() >= deadline:
                         raise TimeoutError(
                             f"no firmware banner + 0x20 discovery after {args.timeout}s"
                         )
                     time.sleep(0.1)
             finally:
-                stop(process)
-                result["qemu_returncode"] = process.returncode
+                try:
+                    stop(process)
+                finally:
+                    result["qemu_returncode"] = process.poll()
+            # The guest writes its separate flash.bin; verify the original input after cleanup.
+            checked_firmware(args.firmware)
+            result["passed"] = True
     except BaseException as error:
         result["error"] = str(error) or type(error).__name__
         raise

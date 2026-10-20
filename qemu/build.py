@@ -43,6 +43,14 @@ def shared_link_command(command: str, build: Path) -> list[str]:
     return [t for t in expanded if t not in main_objects and t != "-pie"] + ["-shared"]
 
 
+def optional_features(help_text: str) -> list[str]:
+    """Feature rows start with two spaces and a name; option rows begin with --."""
+    features = re.findall(r"^  ([a-z][\w-]*)(?=\s|$)", help_text, re.MULTILINE)
+    if not features:
+        raise ValueError("no optional features found in pinned configure --help")
+    return features
+
+
 def build(args):
     started = time.monotonic()
     if sys.platform != "linux":
@@ -81,7 +89,7 @@ def build(args):
         raise ValueError("QEMU source has local modifications; refusing an unrecorded build")
     work.mkdir(exist_ok=True)
     help_text = run([str(source / "configure"), "--help"], work, True)
-    features = re.findall(r"^  ([a-z][\w-]*)\s", help_text, re.MULTILINE)[1:]
+    features = optional_features(help_text)
     flags = [
         "--target-list=xtensa-softmmu",
         "--extra-cflags=-fPIC",

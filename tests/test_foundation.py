@@ -79,6 +79,28 @@ def test_shared_link_fails_closed_on_abi_build_change(tmp_path):
         qemu_build.shared_link_command("cc -o qemu-system-xtensa libqemu.a", tmp_path)
 
 
+def test_optional_features_keeps_first_feature_and_ignores_options():
+    # The first real feature in the pinned fork's generated help is af-xdp.
+    help_text = """Options:
+  --enable-system       system emulation
+Optional features:
+  af-xdp                AF_XDP network backend support
+  alsa                  ALSA sound support
+  gcrypt                libgcrypt cryptography support
+  slirp                 SLIRP networking
+  werror                treat warnings as errors
+"""
+    assert qemu_build.optional_features(help_text) == [
+        "af-xdp",
+        "alsa",
+        "gcrypt",
+        "slirp",
+        "werror",
+    ]
+    with pytest.raises(ValueError, match="no optional features"):
+        qemu_build.optional_features("  --enable-system system emulation\n")
+
+
 def test_banner_or_callback_alone_is_not_boot_proof():
     banner = "=== Split Flap Display ===\n"
     discovery = "Wire  : [0]0x20\n"
@@ -106,7 +128,7 @@ def fake_golden(monkeypatch, firmware):
     monkeypatch.setitem(verify_boot.GOLDEN, "sha256", hashlib.sha256(data).hexdigest())
 
 
-@pytest.mark.parametrize("mode", ["exit", "timeout", "banner_only", "pass"])
+@pytest.mark.parametrize("mode", ["exit", "timeout", "banner_only", "pass", "tamper"])
 def test_boot_supervision_and_retained_evidence(tmp_path, monkeypatch, mode):
     firmware = tmp_path / "factory.bin"
     fake_golden(monkeypatch, firmware)
@@ -120,8 +142,9 @@ def test_boot_supervision_and_retained_evidence(tmp_path, monkeypatch, mode):
         f"mode = {mode!r}\n"
         "serial = pathlib.Path(sys.argv[sys.argv.index('-serial') + 1][5:])\n"
         "serial.with_suffix('.pid').write_text(str(os.getpid()))\n"
+        f"if mode == 'tamper': pathlib.Path({str(firmware)!r}).write_bytes(b'changed source')\n"
         "serial.write_text('' if mode == 'timeout' else '=== Split Flap Display ===\\n' + "
-        "('Wire  : [0]0x20\\n' if mode == 'pass' else ''))\n"
+        "('Wire  : [0]0x20\\n' if mode in ['pass', 'tamper'] else ''))\n"
         "print('FLAPSIM probe: bus=0 address=0x20 ACK event=1', flush=True)\n"
         "if mode != 'exit': time.sleep(60)\n"
     )
@@ -140,14 +163,17 @@ def test_boot_supervision_and_retained_evidence(tmp_path, monkeypatch, mode):
     if mode == "pass":
         verify_boot.verify(args)
     else:
-        with pytest.raises((RuntimeError, TimeoutError)):
+        with pytest.raises((RuntimeError, TimeoutError, ValueError)):
             verify_boot.verify(args)
     evidence = json.loads((out / "verification.json").read_text())
     assert evidence["passed"] == (mode == "pass")
     assert (out / "serial.log").exists()
     assert (out / "qemu.log").exists()
     assert (out / "flash.bin").stat().st_size == verify_boot.FLASH_SIZE
-    assert firmware.read_bytes() == b"test factory image"
+    assert firmware.read_bytes() == (
+        b"changed source" if mode == "tamper" else b"test factory image"
+    )
+    assert evidence["qemu_returncode"] is not None
     assert evidence["wall_seconds"] < 10
     pid = int((out / "serial.pid").read_text())
     with pytest.raises(ProcessLookupError):

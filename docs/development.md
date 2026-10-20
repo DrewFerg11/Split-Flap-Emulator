@@ -90,11 +90,14 @@ assert versions or disable a version gate. Phase 4 adds strict serial/HTTP versi
 assertions plus the explicit golden-only exception required by issue #5.
 
 CI runs independent `Fast checks` and `Pinned QEMU build and boot` jobs on PRs,
-main pushes and manual runs. The latter caches only an exact match of the QEMU
-pin, integration/build scripts, workflow configuration and recorded toolchain;
-there is no broad restore key that can reuse stale hooks. Build provenance distinguishes
-cold from incremental invocations and records host architecture and visible CPUs. Every invocation still
-checks source provenance and rebuilds the launcher. Jobs and emulator processes
+main pushes and manual runs. Cache keys include the QEMU pin, build scripts,
+workflow configuration, exact toolchain and integration sources. A fallback can
+reuse the QEMU compilation only when the pin, toolchain and build configuration
+match; integration source changes still rebuild the launcher before verification
+and regenerate its provenance. Cached staged binaries are overwritten by that
+build, and a failed build prevents the boot step. Build provenance distinguishes
+cold from incremental invocations and records host architecture and visible CPUs.
+Every invocation checks source provenance and rebuilds the launcher. Jobs and emulator processes
 are bounded; superseded runs cancel. Available build, serial and verification
 logs are retained for 14 days even on failure. Firmware/flash binaries are not
 uploaded. CI has read-only repository permissions and is independent of the

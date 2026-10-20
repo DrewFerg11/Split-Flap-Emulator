@@ -67,11 +67,13 @@ jobs:
           } > build/toolchain.txt
           lscpu > build/runner-specs.txt
           echo "digest=$(sha256sum build/toolchain.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      - name: Restore exact QEMU build cache
+      - name: Restore compatible QEMU build cache
         uses: actions/cache@v4
         with:
           path: build/qemu
-          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/**', '.github/workflows/ci.yml') }}
+          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/workflows/ci.yml') }}-${{ hashFiles('qemu/*.c', 'qemu/*.h') }}
+          restore-keys: |
+            qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/workflows/ci.yml') }}-
       - name: Build pinned integration
         shell: bash
         run: |
