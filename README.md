@@ -18,7 +18,7 @@ supervision and bounded boot scenarios. Phase 4 adds declarative serial/HTTP/dis
 scenarios with strict versions, per-step deadlines and finalized reports/replays, and is merged as `2004377`.
 Golden CI uses the checksum-bound, issue-linked [known-issues baseline](baselines/v1.4.0-golden.yaml)
 per [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15); strict release runs use no baseline.
-Phase 5 packaging is next for review. Full firmware-functional follow-up remains tracked in
+Phase 5 packaging implementation is merged as `dd6a432`. [Phase 6 / PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17) is next for review. Image publication and strict companion firmware acceptance remain pending; no active release gate is claimed. Full firmware-functional follow-up remains tracked in
 [firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54) and the separate
 [I2C investigation #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14).
 See [runner usage](docs/runner.md) and [scenario usage](docs/scenarios.md).
@@ -27,7 +27,7 @@ See [runner usage](docs/runner.md) and [scenario usage](docs/scenarios.md).
 - POC code (reference only): [`poc/`](poc)
 - Build, installation, checks and boot reproduction: [`docs/development.md`](docs/development.md)
 - Physical hardware, configuration and state/timeline schemas: [`docs/hardware-model.md`](docs/hardware-model.md)
-- Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md) (publication blocked by firmware #54)
+- Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md) (publication verification pending)
 - Ordered branch/PR workflow: [`docs/implementation-queue.md`](docs/implementation-queue.md)
 - QEMU integration decision and lifecycle: [`docs/adr/0001-qemu-integration.md`](docs/adr/0001-qemu-integration.md)
 
@@ -46,7 +46,3 @@ licence.
 
 QEMU source is pinned to [`e39508f79cb0681bbe15cfcebd40a3f45cdc3c48`](https://github.com/lcgamboa/qemu/tree/e39508f79cb0681bbe15cfcebd40a3f45cdc3c48).
 The build applies no source patches; integration sources are in [`qemu/`](qemu).
-
-Phase 6 [release-gate integration](docs/release-gate.md) is being prepared as a
-stacked draft after packaging. Publication and strict companion firmware
-acceptance remain pending; no active release gate is claimed.

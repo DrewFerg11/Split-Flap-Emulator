@@ -15,8 +15,8 @@ when creating or rebasing it. Only the first unmerged item is ready for review.
 | 2 | [#3](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | `mvp/03-hardware-model` | `mvp/02-foundation` | [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10) merged as `3eebd00`; CI passed both layouts and Hermes approved before merge |
 | 3 | [#4](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | `mvp/04-runner` | `mvp/03-hardware-model` | [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11) merged as `e237b07`; all three CI jobs and 144 local tests passed; Hermes approved before merge |
 | 4 | [#5](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | `mvp/05-scenarios` | `mvp/04-runner` | Implementation merged in [PR #12](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/12) as `2004377`; Hermes approved `6901917`; all seven CI jobs pass under the accepted known-issues baseline; strict firmware follow-up remains open |
-| 5 | [#6](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | `mvp/06-packaging` | `mvp/05-scenarios` | [PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13) ready/non-draft on main `2004377`, head `eb1aab1` (220 local tests pass); container golden runs explicitly mount the accepted baseline; exact candidate verification/publication pending |
-| 6 | [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | `mvp/07-release-gate` | `mvp/06-packaging` | [Draft PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17), stacked on packaging `eb1aab1e73dede90b6b3d1c991bede4aeb6d83f2`; [companion firmware draft #85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85); 239 local tests pass; actual image/hosted gate evidence pending |
+| 5 | [#6](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | `mvp/06-packaging` | `mvp/05-scenarios` | Implementation merged in [PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13) as `dd6a432`; Hermes approved `eb1aab1`; container cases pass with visible baseline, publication-rejection CI setup fixed in #17; publication pending |
+| 6 | [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | `mvp/07-release-gate` | `mvp/06-packaging` | [PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17), rebased onto main `dd6a432f5a0a1183c276ed0643abda9053af321b` after packaging merged; [companion firmware draft #85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85); 239 local tests pass; actual image/hosted gate evidence pending |
 
 PR #12 includes the accepted checksum-bound known-issues baseline from [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15).
 Hermes verified its final head and approved it before the maintainer merged.
@@ -51,7 +51,13 @@ The intermittent I2C read Error263 remains separately tracked in
 baseline entry does not establish a cause or fix. [#16](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/16)
 tracks mechanical realism after the MVP and does not block this queue.
 
-Phase 6 uses a [strict same-run artifact gate](release-gate.md). Its recorded
-packaging parent is `eb1aab1e73dede90b6b3d1c991bede4aeb6d83f2`; keep the
-emulator and companion firmware PRs draft until their actual activation and
-acceptance evidence is available. No published image or active gate is claimed.
+Phase 6 uses a [strict same-run artifact gate](release-gate.md). Its
+current recorded main base is `dd6a432f5a0a1183c276ed0643abda9053af321b`.
+PR #17 is the next emulator review; the companion firmware PR stays draft until
+actual image and strict hosted activation evidence is available. No published image or active gate is claimed.
+
+The maintainer requested workflow names matching `numbers-go-up` in #17:
+`CI / Test`, `CI / Container`, `Release / Tag`; filenames and all references
+are updated. The same PR fixes the missing host `packaging` dependency found
+in CI39508190280 after all five image cases passed. No firmware assertion or
+known-issues policy changes are part of that CI fix.

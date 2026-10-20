@@ -13,7 +13,7 @@ from tools.verify_boot import GOLDEN, ROOT
 
 
 def validate_workflows(root):
-    publish = yaml.safe_load((root / ".github/workflows/publish.yml").read_text())
+    publish = yaml.safe_load((root / ".github/workflows/release.yml").read_text())
     jobs = publish["jobs"]
     assert set(jobs["publish"]["needs"]) >= {"verify", "validate"}
     condition = jobs["publish"]["if"]
@@ -24,7 +24,7 @@ def validate_workflows(root):
         if name != "publish":
             assert job.get("permissions", {}).get("packages") != "write"
     assert jobs["publish"]["permissions"]["packages"] == "write"
-    verify = yaml.safe_load((root / ".github/workflows/verify-container.yml").read_text())
+    verify = yaml.safe_load((root / ".github/workflows/ci-container.yml").read_text())
     assert verify["permissions"] == {"contents": "read"}
     steps = verify["jobs"]["image"]["steps"]
     verify_index = next(

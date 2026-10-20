@@ -1,4 +1,4 @@
-name: Publish verified container
+name: Release / Tag
 
 on:
   push:
@@ -41,7 +41,7 @@ jobs:
 
   verify:
     needs: validate
-    uses: ./.github/workflows/verify-container.yml
+    uses: ./.github/workflows/ci-container.yml
     with:
       export_image: true
 

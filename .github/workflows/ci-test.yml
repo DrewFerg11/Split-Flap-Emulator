@@ -1,4 +1,4 @@
-name: CI
+name: CI / Test
 
 on:
   pull_request:
@@ -17,7 +17,7 @@ jobs:
   container:
     name: Verified runtime image
     needs: [fast-checks, qemu-boot]
-    uses: ./.github/workflows/verify-container.yml
+    uses: ./.github/workflows/ci-container.yml
 
   fast-checks:
     name: Fast checks
@@ -88,9 +88,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/qemu
-          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/workflows/ci.yml') }}-${{ hashFiles('qemu/*.c', 'qemu/*.h', 'model/*.c', 'model/*.h') }}
+          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/workflows/ci-test.yml') }}-${{ hashFiles('qemu/*.c', 'qemu/*.h', 'model/*.c', 'model/*.h') }}
           restore-keys: |
-            qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/workflows/ci.yml') }}-
+            qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/workflows/ci-test.yml') }}-
       - name: Build pinned integration
         shell: bash
         run: |

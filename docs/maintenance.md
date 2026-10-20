@@ -94,7 +94,7 @@ from #15; matched issues remain visible, while unmatched failures prevent image
 verification/publication. Container golden checks mount that same baseline
 read-only; version-rejection probes and future release gating remain strict. The reusable container job
 also tests installed resources, timeout, stop and wrong-version rejection.
-Manual `Publish verified container` dispatch checks a trusted main commit without
+Manual `Release / Tag` dispatch checks a trusted main commit without
 publication. Version-tag runs add the publication step only after verification.
 
 Suggested required checks for this phase are `Fast checks`,
@@ -165,3 +165,20 @@ Use the recorded source SHA to obtain the matching repository checkout, inspect
 the included QEMU pin/archives, then follow the clean build commands in
 [container.md](container.md) and [development.md](development.md). Include these
 notices and corresponding sources with any redistributed modified image.
+
+## Workflow naming
+
+Workflows follow the same `Category / Purpose` display-name convention as
+[numbers-go-up](https://github.com/DrewFerg11/numbers-go-up/tree/main/.github/workflows).
+
+| File | Actions display name | Purpose |
+|---|---|---|
+| `ci-test.yml` | `CI / Test` | Fast checks, golden scenarios and image-verification dependency |
+| `ci-container.yml` | `CI / Container` | Reusable exact-image smoke/lifecycle/publication-rejection checks |
+| `release.yml` | `Release / Tag` | Trusted tag validation and verified GHCR publication |
+
+The firmware companion also uses `Release / Tag`. Job IDs/check names and trust
+controls are preserved. Local reusable-workflow references, cache identity paths
+and publication workflow validation point to the renamed files. The container
+verification host explicitly installs `packaging>=25,<27`, which its publication
+verifier imports; a runtime-only flapsim install does not provide that host tool.

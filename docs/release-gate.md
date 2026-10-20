@@ -1,7 +1,7 @@
 # Firmware release gate
 
-Phase 6 is a draft integration for emulator issue [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7).
-The emulator implementation is [draft PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17);
+Phase 6 is an integration under review for emulator issue [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7).
+The emulator implementation is [PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17);
 the companion workflow is [Split-Flap-Display draft #85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85). It is not an active,
 verified production gate yet: no immutable image has been published, and no
 positive/negative hosted release-workflow runs have been recorded.
