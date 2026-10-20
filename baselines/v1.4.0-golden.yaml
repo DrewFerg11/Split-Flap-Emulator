@@ -28,10 +28,12 @@ serial:
     regex: '^\[\s*\d+\]\[E\]\[Wire\.cpp:\d+\] requestFrom\(\): i2cRead returned Error 263$'
   - issue: DrewFerg11/Split-Flap-Display#86
     reason: >-
-      Raw UART capture shows /text request logging inserted inside the timestamp of an otherwise
-      already allowed fresh-NVS begin/NOT_FOUND diagnostic. Record only this exact numeric suffix
-      and message; the writer/SDK locking path remains to be established and repaired.
-    regex: '^\d{1,10}\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
+      Raw UART capture shows /text request logging spliced into the timestamp of an otherwise
+      already allowed fresh-NVS begin/NOT_FOUND diagnostic. Where the split lands varies run to run:
+      the line may start with the timestamp's digit suffix, or with the other task's partial output
+      (e.g. a request-body fragment). Only a prefix with no brackets and no error keywords is
+      accepted, followed by the exact message; the writer/SDK locking path remains to be repaired.
+    regex: '^(?![^\[\]]*?(?i:error|failed|panic|abort|exception))[^\[\]]*?\d{1,10}\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
 
 expected_failures:
   - issue: DrewFerg11/Split-Flap-Display#54

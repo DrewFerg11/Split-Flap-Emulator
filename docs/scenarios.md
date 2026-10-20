@@ -229,8 +229,11 @@ and the corresponding merges; the implementation PR uses `Refs #5`.
 The checksum-bound golden baseline also records the exact Preferences.begin
 NOT_FOUND timestamp fragment documented in [SFD #86](https://github.com/DrewFerg11/Split-Flap-Display/issues/86).
 Its retained raw UART capture shows request logging inserted inside a diagnostic
-record. Only a numeric timestamp suffix and the exact Preferences.cpp:50 message
-match; counts/first occurrence remain visible. Strict default and new-release
+record. Where the split lands varies between runs: the fragment may start with the
+timestamp's digit suffix or with the other task's partial output (for example a
+request-body fragment). Only a prefix with no brackets and no error keywords,
+followed by the exact Preferences.cpp:50 message, matches; counts/first occurrence
+remain visible. Strict default and new-release
 runs still reject it, as do other malformed messages. This records current-image
 behavior while the firmware maintainer investigates writer/SDK locking; it does
 not repair logging or establish physical-hardware behavior.

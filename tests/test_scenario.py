@@ -636,17 +636,24 @@ def test_baseline_tolerates_only_matching_serial_lines_and_records_them(context)
         ).execute(context)
 
 
-def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context):
-    # Raw serial tail from CI39511137762, container-smoke-16 (SFD#86).
-    raw = (
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # Raw serial tail from CI39511137762, container-smoke-16 (SFD#86).
         "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
         "[ 3Received text update request\n"
         '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}\n'
-        "8055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
-    )
+        "8055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n",
+        # Raw serial tail from CI39514731449, golden smoke-16: the split lands in the request body.
+        "[ 38086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
+        "[ 3Received text update request\n"
+        '{"mode":"d8086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n',
+    ],
+)
+def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context, raw):
     (context.out / "serial.log").write_text(raw)
     step = {"assert_no_errors": {"fresh_nvs": True}}
-    with pytest.raises(ExecutionFailed, match="8055"):
+    with pytest.raises(ExecutionFailed, match=r"80\d\d\]\[E\]"):
         executor([step]).execute(context)
     known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.0-golden.yaml")
     engine = executor([step], firmware_sha256=GOLDEN_SHA256, known_issues=known)
@@ -666,6 +673,10 @@ def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context
         "8055][E][Preferences.cpp:51] begin(): nvs_open failed: NOT_FOUND",
         "8055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND panic",
         "8055][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263",
+        'Guru Meditation Error: {"mode":"d8086][E][Preferences.cpp:50] begin(): '
+        "nvs_open failed: NOT_FOUND",
+        "abort() was called d8086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
+        "[ 7][E][Wire.cpp:1] boom 8086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
     ],
 )
 def test_golden_fragment_baseline_does_not_accept_other_broken_errors(context, line):

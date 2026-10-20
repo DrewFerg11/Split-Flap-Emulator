@@ -24,6 +24,8 @@ TAG_PATTERN = r"v\d+\.\d+\.\d+(?:-rc\.\d+)?"
 LAYOUTS = {"8": ("esp32-8-single", "release-smoke-8"), "16": ("esp32-16-dual", "release-smoke-16")}
 PROBES = ("none", "wrong-version", "missing", "corrupt", "timeout")
 WRONG_VERSION = "v0.0.0-probe-mismatch"
+# The firmware's boot banner, e.g. "Firmware: v1.4.0-rc.1 (prebuilt (GitHub Actions))".
+BANNER_PATTERN = re.compile(r"^Firmware: (v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?) \(", re.MULTILINE)
 
 
 class GateFailure(Exception):
@@ -108,12 +110,16 @@ def inspect_result(out, code, checksum, layout, probe):
         ):
             raise GateFailure("timeout", manifest["error"])
         if code == 5 and probe == "wrong-version":
+            # The step's "actual" is only a serial tail, so read the banners from the full log:
+            # the firmware must have reported a parseable version that is not the probe's.
+            reported = BANNER_PATTERN.findall((out / "run/serial.log").read_text(errors="replace"))
             for step in manifest.get("steps", []):
                 if (
                     step.get("action") == "expect_serial"
                     and step.get("status") == "failed"
                     and WRONG_VERSION in str(step.get("expected"))
-                    and "Firmware: " in str(step.get("actual"))
+                    and reported
+                    and WRONG_VERSION not in reported
                     and int(junit.get("failures", "0")) > 0
                     and manifest.get("qemu_returncode") == 0
                 ):

@@ -61,6 +61,8 @@ def evidence(out, *, code=0, probe="none", checksum=CHECKSUM):
     (run / "junit.xml").write_text(f'<testsuite failures="{int(code != 0)}" skipped="0"/>')
     for name in ("serial.log", "timeline.jsonl", "report.md", "replay.html"):
         (run / name).touch()
+    if probe == "wrong-version":
+        (run / "serial.log").write_text("Firmware: v1.5.0 (prebuilt (GitHub Actions))\n")
     return manifest
 
 
@@ -291,3 +293,34 @@ def test_probe_assertion_requires_both_layouts_and_failed_publication(tmp_path):
     (tmp_path / "release-sim-16/evidence/release-gate.json").unlink()
     with pytest.raises(OSError):
         assert_probe(tmp_path, "wrong-version", "failure", "failure")
+
+
+@pytest.mark.parametrize(
+    "serial",
+    [
+        "",
+        "Firmware: (prebuilt)\n",
+        "Firmware: garbage (prebuilt)\n",
+        f"Firmware: {WRONG_VERSION} (prebuilt)\n",
+        f"Firmware: v1.5.0 (prebuilt)\nFirmware: {WRONG_VERSION} (prebuilt)\n",
+        "  Firmware: v1.5.0 (prebuilt)\n",
+    ],
+)
+def test_wrong_version_probe_requires_a_distinct_reported_version(tmp_path, serial):
+    evidence(tmp_path, code=5, probe="wrong-version")
+    (tmp_path / "run/serial.log").write_text(serial)
+    with pytest.raises(GateFailure) as caught:
+        inspect_result(tmp_path, 5, CHECKSUM, "8", "wrong-version")
+    assert caught.value.kind == "simulation"
+
+
+def test_wrong_version_probe_reads_the_banner_beyond_the_step_tail(tmp_path):
+    manifest = evidence(tmp_path, code=5, probe="wrong-version")
+    manifest["steps"][0]["actual"] = "[ 38033][E][Preferences.cpp:50] begin(): ...\nHoming\n"
+    (tmp_path / "run/run.json").write_text(json.dumps(manifest))
+    (tmp_path / "run/serial.log").write_text(
+        "Firmware: v1.5.0 (prebuilt (GitHub Actions))\n" + "noise\n" * 5000
+    )
+    with pytest.raises(GateFailure) as caught:
+        inspect_result(tmp_path, 5, CHECKSUM, "8", "wrong-version")
+    assert caught.value.kind == "wrong-version"

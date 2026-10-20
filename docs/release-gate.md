@@ -80,7 +80,7 @@ Repeat manual dry runs on that trusted tag with each probe:
 
 | Probe | Required rejection evidence |
 |---|---|
-| `wrong-version` | Actual simulator exit 5 at a serial version assertion with observed firmware banner and deliberately mismatched expectation |
+| `wrong-version` | Actual simulator exit 5 at a serial version assertion with a deliberately mismatched expectation, and the full serial log reporting a parseable firmware version banner that differs from the probe's |
 | `missing` | Missing exact factory path rejected before Docker; original same-run checksum retained |
 | `corrupt` | Private deliberately corrupt copy rejected before Docker; original same-run artifact unchanged |
 | `timeout` | Actual simulator exit 4 for its wall deadline, retained run reports and reaped native child |
