@@ -46,3 +46,7 @@ licence.
 
 QEMU source is pinned to [`e39508f79cb0681bbe15cfcebd40a3f45cdc3c48`](https://github.com/lcgamboa/qemu/tree/e39508f79cb0681bbe15cfcebd40a3f45cdc3c48).
 The build applies no source patches; integration sources are in [`qemu/`](qemu).
+
+Phase 6 [release-gate integration](docs/release-gate.md) is being prepared as a
+stacked draft after packaging. Publication and strict companion firmware
+acceptance remain pending; no active release gate is claimed.
