@@ -64,8 +64,8 @@ jobs:
             ninja --version
             pkg-config --modversion glib-2.0 libgcrypt slirp pixman-1
             dpkg-query -W build-essential libc6-dev
-            lscpu
           } > build/toolchain.txt
+          lscpu > build/runner-specs.txt
           echo "digest=$(sha256sum build/toolchain.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - name: Restore exact QEMU build cache
         uses: actions/cache@v4
@@ -102,6 +102,7 @@ jobs:
             runs/**/*.log
             runs/**/*.json
             build/toolchain.txt
+            build/runner-specs.txt
             build/qemu/install/build-info.json
             build/qemu/work/meson-logs/**
             build/qemu/work/config.log
