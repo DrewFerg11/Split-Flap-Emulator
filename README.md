@@ -9,11 +9,16 @@ virtual display.
 
 ## Status
 
-**Proof of concept complete; MVP not started.** The POC booted the unmodified `v1.4.0` release, homed virtual drums,
-and drove them through the firmware's own web API.
+**Proof of concept complete; MVP phase 1 in progress.** The POC booted the unmodified `v1.4.0` release, homed
+virtual drums, and drove them through the firmware's own web API. The first implementation adds a pinned build,
+an unmodified QEMU shared-library launcher, and a bounded real-firmware boot/I²C check. Motion simulation and the
+supervised runner remain later phases; `flapsim --help` currently provides the CLI skeleton.
 
 - Findings, results and the step-by-step MVP plan: [`docs/poc-findings-and-mvp-plan.md`](docs/poc-findings-and-mvp-plan.md)
 - POC code (reference only): [`poc/`](poc)
+- Build, installation, checks and boot reproduction: [`docs/development.md`](docs/development.md)
+- Ordered branch/PR workflow: [`docs/implementation-queue.md`](docs/implementation-queue.md)
+- QEMU integration decision and lifecycle: [`docs/adr/0001-qemu-integration.md`](docs/adr/0001-qemu-integration.md)
 
 ## How it works (short version)
 
@@ -27,3 +32,6 @@ and drove them through the firmware's own web API.
 
 GPL-2.0, because the emulator builds on QEMU (GPLv2). Firmware run inside the emulator is not affected by this
 licence.
+
+QEMU source is pinned to [`e39508f79cb0681bbe15cfcebd40a3f45cdc3c48`](https://github.com/lcgamboa/qemu/tree/e39508f79cb0681bbe15cfcebd40a3f45cdc3c48).
+The build applies no source patches; integration sources are in [`qemu/`](qemu).

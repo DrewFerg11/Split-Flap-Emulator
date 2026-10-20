@@ -1,6 +1,6 @@
 # Split-Flap-Emulator: POC findings and MVP implementation plan
 
-**Status:** Proof of concept complete (October 2026). MVP not started.
+**Status:** Proof of concept complete (October 2026). MVP phase 1 implementation and verification in progress.
 **Audience:** whoever builds the MVP. This document is meant to be enough on its own.
 
 ## Contents
@@ -304,11 +304,13 @@ GitHub Actions checks land with each phase, starting in phase 1. The original st
 technical references. Golden regression checks from step 11 are introduced incrementally in phases 1–4;
 maintenance documentation is completed in phase 5.
 
-All phases are **not started**. The issue backlog is prepared; no MVP implementation is complete.
+Phase 1 is **in progress** on `mvp/02-foundation`; later phases are queued. No phase is complete until its
+implementation is merged and acceptance passes. See the [ordered PR queue](implementation-queue.md) and
+[phase-1 reproduction instructions](development.md).
 
 | Phase | Tracking issue | Original steps | Status |
 |---|---|---|---|
-| 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | Not started |
+| 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | In progress: build, callback launcher and real-boot verification; [ADR](adr/0001-qemu-integration.md) |
 | 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | Not started |
 | 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | Not started |
 | 4 | [Scenarios, smoke tests, reports, and replay](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | 6–8; golden regression checks from 11 | Not started |
@@ -362,6 +364,11 @@ checklist. Tests and CI evolve within each phase rather than waiting until step 
 -nographic -serial stdio` prints `=== Split Flap Display ===`. The build takes ≤ ~10 min on a 4-vCPU machine.
 
 ### Step 2: Spike: unmodified QEMU (route B) vs patch (route A). Timebox 1–2 days
+**Implementation note (phase 1):** the pinned callback ABI and upstream shared-library link recipe support a
+single C launcher integration (route B). The launcher keeps initialization, main loop and cleanup on its original
+thread. See [ADR 0001](adr/0001-qemu-integration.md) for the spike evidence and phase-3 executable contract;
+the historical tasks below remain the original decision checklist.
+
 **Tasks**
 - Build the shared library with the fork's own `build_libqemu-esp32.sh` (it produces `libqemu-xtensa.so`).
 - Write a minimal C host program that `dlopen`s the library, registers a `callbacks_t` whose `picsimlab_i2c_event`
