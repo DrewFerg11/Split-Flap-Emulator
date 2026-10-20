@@ -1,6 +1,6 @@
 # ADR 0001: Unmodified QEMU library with a process-local C launcher
 
-Status: proposed pending the phase-1 real-firmware verification and CI.
+Status: accepted after the real-firmware callback spike; phase-1 CI/merge acceptance remains in progress.
 Tracking: [issue #2](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2).
 
 ## Context and spike
@@ -84,9 +84,22 @@ the firmware's own bus-0 discovery of 0x20 (not its configuration listing), and
 the callback ACK log against the unchanged published factory image. It also
 rechecks the input checksum after the emulator has written to its private flash.
 
-Record measured build/boot results here after the spike succeeds; keep the phase
-in progress until its PR is merged and acceptance has passed. CI supplies the
-clean standard-dependency reproduction independently of local toolchain setup.
+The bounded spike succeeded on 2026-10-19 (America/Indianapolis). The unmodified
+published image printed `=== Split Flap Display ===`, `Firmware: v1.4.0-rc.1`,
+and the scanner result `Wire  : [0]0x20`. stderr recorded
+`FLAPSIM probe: bus=0 address=0x20 ACK event=1`. The verifier passed in 41.591
+wall seconds, rechecked the original SHA-256, and terminated QEMU through its
+normal signal path with return code 0. The loaded engine reports QEMU 9.2.2.
+Evidence is retained in `runs/boot-foundation/verification.json`, `serial.log`,
+and `qemu.log`; CI retains the equivalent outputs as `qemu-boot-evidence`.
+
+Local host: Debian 13, x86-64, GCC 14.2, Python 3.12.14, three visible CPUs with
+a two-CPU cgroup quota. A rootless dependency repair required an incremental
+rebuild, measured at 699.222 seconds with three jobs. CI records cold-build
+timing and its full runner/toolchain details for comparison with the plan's
+roughly ten-minute/four-vCPU target. The phase remains in progress until its PR
+is merged and acceptance passes. Twenty fast checks, Ruff, clang-format 18,
+and actionlint passed locally.
 
 Route A remains a documented contingency if a future pin loses this library
 ABI or lifecycle. It would require a new decision and a minimal patch with
