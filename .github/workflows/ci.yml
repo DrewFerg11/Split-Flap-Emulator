@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fast-checks:
+    name: Fast checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install development tools
+        run: |
+          python -m pip install -e '.[dev]' clang-format==18.1.8
+      - name: Lint and format Python
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Format C integration sources
+        run: clang-format --dry-run --Werror qemu/*.c qemu/*.h tests/fixtures/*.c
+      - name: Verify editable install, CLI, and failure boundaries
+        run: |
+          flapsim --help
+          python -m pytest
+
+  qemu-boot:
+    name: Pinned QEMU build and boot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install QEMU build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential git ninja-build \
+            libglib2.0-dev libgcrypt20-dev libslirp-dev libpixman-1-dev \
+            python3-venv flex bison pkg-config
+      - name: Record toolchain for cache identity
+        id: toolchain
+        shell: bash
+        run: |
+          mkdir -p build runs
+          {
+            cc --version
+            ld --version
+            python --version
+            ninja --version
+            pkg-config --modversion glib-2.0 libgcrypt slirp pixman-1
+            dpkg-query -W build-essential libc6-dev
+          } > build/toolchain.txt
+          lscpu > build/runner-specs.txt
+          echo "digest=$(sha256sum build/toolchain.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Restore compatible QEMU build cache
+        uses: actions/cache@v4
+        with:
+          path: build/qemu
+          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/workflows/ci.yml') }}-${{ hashFiles('qemu/*.c', 'qemu/*.h') }}
+          restore-keys: |
+            qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/workflows/ci.yml') }}-
+      - name: Build pinned integration
+        shell: bash
+        run: |
+          set -o pipefail
+          timeout --kill-after=30s 18m qemu/build.sh --jobs 4 2>&1 | tee runs/qemu-build.log
+      - name: Verify actual golden firmware boot and I2C discovery
+        run: python tools/verify_boot.py --out runs/boot --timeout 120
+      - name: Record verification in summary
+        if: always()
+        shell: bash
+        run: |
+          if test -f runs/boot/verification.json; then
+            {
+              echo '### Pinned firmware boot and I2C verification'
+              echo '```json'
+              cat runs/boot/verification.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload available diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-boot-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            runs/**/*.log
+            runs/**/*.json
+            build/toolchain.txt
+            build/runner-specs.txt
+            build/qemu/install/build-info.json
+            build/qemu/work/meson-logs/**
+            build/qemu/work/config.log
