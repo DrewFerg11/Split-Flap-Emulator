@@ -10,7 +10,7 @@ virtual display.
 ## Status
 
 **MVP implementation in progress.** [Phase 1 / PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9)
-is merged, providing the pinned build and unmodified QEMU library launcher. Phase 2 adds the physical PCF8575, stepper, drum and hall
+is merged, providing the pinned build and unmodified QEMU library launcher. Phase 2 is also merged, adding the physical PCF8575, stepper, drum and hall
 model, validated 8/16-module hardware, atomic state, activity markers and timelines. Both layouts have booted the
 unmodified golden firmware and settled at X with zero stalls/anomalies. Review/merge acceptance is tracked per
 phase. Phase 3 implements `flapsim run` with private flash, loopback forwarding, process

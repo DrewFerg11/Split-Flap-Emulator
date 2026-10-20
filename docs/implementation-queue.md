@@ -12,8 +12,8 @@ when creating or rebasing it. Only the first unmerged item is ready for review.
 | Order | Issue | Branch | Initial PR base | State |
 |---|---|---|---|---|
 | 1 | [#2](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | `mvp/02-foundation` | `main` | [PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9) merged as `9663764`; CI passed and Hermes approved before merge |
-| 2 | [#3](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | `mvp/03-hardware-model` | `mvp/02-foundation` | [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10); rebased onto main `9663764`; both golden layouts passed before rebase; updated checks and Hermes review pending |
-| 3 | [#4](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | `mvp/04-runner` | `mvp/03-hardware-model` | [Draft PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11); lifecycle checks pass; real CLI verification running |
+| 2 | [#3](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | `mvp/03-hardware-model` | `mvp/02-foundation` | [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10) merged as `3eebd00`; CI passed both layouts and Hermes approved before merge |
+| 3 | [#4](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | `mvp/04-runner` | `mvp/03-hardware-model` | [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11); rebased onto main `3eebd00`; previous CI passed both real CLI boots; updated checks and Hermes review pending |
 | 4 | [#5](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | `mvp/05-scenarios` | `mvp/04-runner` | Queued |
 | 5 | [#6](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | `mvp/06-packaging` | `mvp/05-scenarios` | Queued |
 | 6 | [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | `mvp/07-release-gate` | `mvp/06-packaging` | Queued; requires a companion firmware PR and a verified published image |
