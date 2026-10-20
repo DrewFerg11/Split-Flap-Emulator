@@ -26,6 +26,12 @@ serial:
       Intermittent I2C read timeout in 16-module dual-bus runs; cause (firmware, QEMU scheduling or
       model) not yet established.
     regex: '^\[\s*\d+\]\[E\]\[Wire\.cpp:\d+\] requestFrom\(\): i2cRead returned Error 263$'
+  - issue: DrewFerg11/Split-Flap-Display#86
+    reason: >-
+      Raw UART capture shows /text request logging inserted inside the timestamp of an otherwise
+      already allowed fresh-NVS begin/NOT_FOUND diagnostic. Record only this exact numeric suffix
+      and message; the writer/SDK locking path remains to be established and repaired.
+    regex: '^\d{1,10}\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
 
 expected_failures:
   - issue: DrewFerg11/Split-Flap-Display#54

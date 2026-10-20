@@ -158,3 +158,11 @@ clean virtual environment. [Retained CI evidence](https://github.com/DrewFerg11/
 is not complete publication authorization: fresh CI must pass the full rejection
 guard on the updated source. No image was exported or published from that failed
 job, and no GHCR manifest digest exists yet.
+
+The first renamed-workflow run, CI39511137762, installed the missing host dependency
+successfully, but image smoke16's final sweep caught a raw interleaved serial
+record. The exact capture and retained artifact12305839532 are linked in
+[SFD #86](https://github.com/DrewFerg11/Split-Flap-Display/issues/86). A new explicit
+golden entry records only that checksum-bound Preferences.begin NOT_FOUND numeric
+suffix; strict error policy and release commands are unchanged. Fresh verification
+is required; this failed run did not execute lifecycle/rejection checks or publish.

@@ -225,3 +225,12 @@ is a separate unresolved investigation. A later run without that error is not
 proof of a fix; its checksum-bound golden allowance is tracked by #15. Issue #5
 remains open until genuine complete smoke acceptance
 and the corresponding merges; the implementation PR uses `Refs #5`.
+
+The checksum-bound golden baseline also records the exact Preferences.begin
+NOT_FOUND timestamp fragment documented in [SFD #86](https://github.com/DrewFerg11/Split-Flap-Display/issues/86).
+Its retained raw UART capture shows request logging inserted inside a diagnostic
+record. Only a numeric timestamp suffix and the exact Preferences.cpp:50 message
+match; counts/first occurrence remain visible. Strict default and new-release
+runs still reject it, as do other malformed messages. This records current-image
+behavior while the firmware maintainer investigates writer/SDK locking; it does
+not repair logging or establish physical-hardware behavior.

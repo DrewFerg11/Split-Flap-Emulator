@@ -16,7 +16,7 @@ when creating or rebasing it. Only the first unmerged item is ready for review.
 | 3 | [#4](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | `mvp/04-runner` | `mvp/03-hardware-model` | [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11) merged as `e237b07`; all three CI jobs and 144 local tests passed; Hermes approved before merge |
 | 4 | [#5](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | `mvp/05-scenarios` | `mvp/04-runner` | Implementation merged in [PR #12](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/12) as `2004377`; Hermes approved `6901917`; all seven CI jobs pass under the accepted known-issues baseline; strict firmware follow-up remains open |
 | 5 | [#6](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | `mvp/06-packaging` | `mvp/05-scenarios` | Implementation merged in [PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13) as `dd6a432`; Hermes approved `eb1aab1`; container cases pass with visible baseline, publication-rejection CI setup fixed in #17; publication pending |
-| 6 | [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | `mvp/07-release-gate` | `mvp/06-packaging` | [PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17), rebased onto main `dd6a432f5a0a1183c276ed0643abda9053af321b` after packaging merged; [companion firmware draft #85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85); 239 local tests pass; actual image/hosted gate evidence pending |
+| 6 | [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | `mvp/07-release-gate` | `mvp/06-packaging` | [PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17), rebased onto main `dd6a432f5a0a1183c276ed0643abda9053af321b` after packaging merged; [companion firmware draft #85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85); 244 local tests pass; actual image/hosted gate evidence pending |
 
 PR #12 includes the accepted checksum-bound known-issues baseline from [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15).
 Hermes verified its final head and approved it before the maintainer merged.
@@ -61,3 +61,11 @@ The maintainer requested workflow names matching `numbers-go-up` in #17:
 are updated. The same PR fixes the missing host `packaging` dependency found
 in CI39508190280 after all five image cases passed. No firmware assertion or
 known-issues policy changes are part of that CI fix.
+
+A subsequent image run exposed raw serial record interleaving, now documented in
+[SFD #86](https://github.com/DrewFerg11/Split-Flap-Display/issues/86). The explicit
+golden baseline records only its exact Preferences.begin NOT_FOUND numeric
+suffix; strict/default/release rules remain unchanged. A recorded-fixture test
+failed before the entry and passes afterward, with four unrelated malformed
+error controls still rejected. All 244 local tests pass; fresh image/rejection
+verification and current-head Hermes approval remain required.
