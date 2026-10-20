@@ -318,24 +318,30 @@ def test_new_settlement_and_spaces_wildcards_are_checked_in_module_order(context
     assert engine.results[0]["state"]["movement_id"] > baseline["movement_id"]
 
 
-def test_http_typed_json_and_negative_responses(context, server):
+@pytest.mark.parametrize("path", ["/version", "/error", "/bad-json", "/redirect"])
+def test_http_typed_json_and_negative_responses(context, server, path):
     context.endpoint = server[0]
+    # Each independent response assertion gets a fresh setup/exchange budget.
+    context.deadline = time.monotonic() + 10
     engine = executor(
         [
             {
                 "http": {
-                    "path": "/version",
+                    "path": path,
                     "status": 200,
                     "json": {"version": "v1.4.0-rc.1", "ok": True},
                 }
             }
         ]
     )
-    engine.execute(context)
-    for path in ["/error", "/bad-json", "/redirect"]:
-        engine = executor([{"http": {"path": path, "status": 200, "json": {"ok": True}}}])
+    if path == "/version":
+        engine.execute(context)
+    else:
         with pytest.raises(ExecutionFailed):
             engine.execute(context)
+
+
+def test_http_json_boolean_is_distinct_from_number():
     with pytest.raises(ExecutionFailed, match="type mismatch"):
         json_subset({"ok": 1}, {"ok": True})
 
