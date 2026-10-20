@@ -15,8 +15,10 @@ model, validated 8/16-module hardware, atomic state, activity markers and timeli
 unmodified golden firmware and settled at X with zero stalls/anomalies. Review/merge acceptance is tracked per
 phase. Phase 3 is merged as `e237b07`, adding `flapsim run` with private flash, loopback forwarding, process
 supervision and bounded boot scenarios. Phase 4 adds declarative serial/HTTP/display
-scenarios with strict versions, per-step deadlines and finalized reports/replays. Its implementation is now ready
-for review; complete strict golden smoke acceptance remains blocked by
+scenarios with strict versions, per-step deadlines and finalized reports/replays, and is merged as `2004377`.
+Golden CI uses the checksum-bound, issue-linked [known-issues baseline](baselines/v1.4.0-golden.yaml)
+per [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15); strict release runs use no baseline.
+Phase 5 packaging is next for review. Full firmware-functional follow-up remains tracked in
 [firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54) and the separate
 [I2C investigation #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14).
 See [runner usage](docs/runner.md) and [scenario usage](docs/scenarios.md).

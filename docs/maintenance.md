@@ -80,15 +80,19 @@ For early exits inspect `qemu.log`, `serial.log`, `run.json`, `build-info.json`
 and Meson/configure diagnostics. Permission failures usually mean the external
 firmware is unreadable or host output is not writable by the selected UID.
 HTTP success without fresh physical movement is a firmware/test failure, not
-permission to accept stale display state. A timeout must leave reports and
+permission to silently accept stale display state. The checksum-bound golden
+baseline may explicitly report a documented expected failure; strict release
+runs use no baseline. A timeout must leave reports and
 reaped children; unexpected cleanup failures are emulator defects to track.
 
 ## Workflows, evidence and protection
 
 PR/main CI keeps fast checks, both real boot/smoke layouts, all seeded homing
 jobs and independent asserted strict/wrong-version negatives. The container job
-depends on those gates; known smoke failures prevent
-image verification/publication and remain visible. The reusable container job
+depends on those gates. Golden scenarios use the accepted checksum-bound baseline
+from #15; matched issues remain visible, while unmatched failures prevent image
+verification/publication. Container golden checks mount that same baseline
+read-only; version-rejection probes and future release gating remain strict. The reusable container job
 also tests installed resources, timeout, stop and wrong-version rejection.
 Manual `Publish verified container` dispatch checks a trusted main commit without
 publication. Version-tag runs add the publication step only after verification.
@@ -126,7 +130,8 @@ timed out locally on both layouts (152.583/173.963 seconds total); model activit
 was still moving, with only 21.8/15.8 seconds of guest time elapsed. These runs
 did not reach HTTP assertions and do not establish a firmware regression. CI's
 three homing seeds pass, while its full smokes fail on the firmware paths.
-Full successful smoke/image durations remain unavailable while #54 blocks them.
+Those diagnostics predate the accepted #15 baseline. Record fresh image durations
+and every applied known issue when the exact current candidate passes verification.
 Record fresh CI timings and the immutable digest when acceptance passes; do not
 claim the release gate's approximately 15-minute target from these partial runs.
 

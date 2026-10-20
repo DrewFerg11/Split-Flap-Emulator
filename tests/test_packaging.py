@@ -19,11 +19,23 @@ from tools.publish_image import (
     release_version,
     validate_checkout,
 )
+from tools.verify_container import ImageVerifier
 from tools.verify_publication_gate import validate_workflows
 
 REVISION = "a" * 40
 IMAGE_ID = "sha256:" + "b" * 64
 DIGEST = "sha256:" + "c" * 64
+
+
+def test_container_golden_baseline_is_explicit_and_rejection_stays_strict():
+    verifier = ImageVerifier.__new__(ImageVerifier)
+    golden = verifier.command("esp32-8-single", "release-smoke-8", known_issues=True)
+    assert golden[golden.index("--known-issues") + 1] == "/known-issues.yaml"
+    wrong = verifier.command("esp32-8-single", "version-check", wrong_version=True)
+    assert "--known-issues" not in wrong and "--golden-version-exception" not in wrong
+    assert "--known-issues" not in verifier.command("esp32-8-single", "boot", timeout=3)
+    with pytest.raises(ValueError):
+        verifier.command("esp32-8-single", "version-check", wrong_version=True, known_issues=True)
 
 
 def candidate():

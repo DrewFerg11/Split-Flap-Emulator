@@ -140,7 +140,7 @@ class ImageVerifier:
             finally:
                 self.call(["rm", "--force", container_id], timeout=30)
 
-    def command(self, hardware, scenario, *, wrong_version=False, timeout=None):
+    def command(self, hardware, scenario, *, wrong_version=False, timeout=None, known_issues=False):
         command = [
             "run",
             "--firmware",
@@ -161,6 +161,10 @@ class ImageVerifier:
             ]
             if not wrong_version:
                 command += ["--golden-version-exception"]
+        if known_issues:
+            if wrong_version or scenario == "boot":
+                raise ValueError("known issues are only for golden smoke verification")
+            command += ["--known-issues", "/known-issues.yaml"]
         if timeout is not None:
             command += ["--timeout", str(timeout)]
         return command
@@ -173,6 +177,8 @@ class ImageVerifier:
             "expected_exit": expected,
             "wall_seconds": manifest["wall_seconds"],
             "error": manifest.get("error"),
+            "status": manifest.get("status"),
+            "known_issues": manifest.get("known_issues"),
         }
         self.cases.append(record)
         if exit_code != expected or manifest["exit_code"] != expected:
@@ -204,6 +210,9 @@ class ImageVerifier:
 
     def execute(self, name, board, scenario, *, expected=0, wrong_version=False, timeout=None):
         extra_mounts = []
+        known_issues = name in {"smoke-8", "smoke-16"} and not wrong_version
+        if known_issues:
+            extra_mounts.append((ROOT / "baselines/v1.4.0-golden.yaml", "/known-issues.yaml"))
         scale = self.args.timeout_scale
         if scale != 1 and scenario in self.resources["scenarios"]:
             document = yaml.safe_load(self.resources["scenarios"][scenario])
@@ -214,7 +223,9 @@ class ImageVerifier:
             scenario_path.write_text(yaml.safe_dump(document, sort_keys=False))
             extra_mounts.append((scenario_path, "/scenario.yaml"))
             scenario = "/scenario.yaml"
-        command = self.command(board, scenario, wrong_version=wrong_version, timeout=timeout)
+        command = self.command(
+            board, scenario, wrong_version=wrong_version, timeout=timeout, known_issues=known_issues
+        )
         with self.container(name, command, extra_mounts) as (container_id, case):
             completed = subprocess.run(
                 self.docker + ["start", "--attach", container_id],

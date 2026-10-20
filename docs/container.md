@@ -6,14 +6,16 @@ entrypoint. Firmware stays external; no firmware binary is baked into the image.
 Installed wheels include the hardware and scenario YAML, so commands work from
 `/work` without mounting the source checkout.
 
-**Publication is blocked.** The published golden firmware currently fails the
-strict smoke gates described in [SFD #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54).
-The maintainer will address that firmware defect. There is no verified published
-image or digest yet. Do not treat the examples below as evidence of publication,
-replace the baseline, retry commands to obtain a lucky pass, or relax assertions.
-An additional intermittent I2C read failure is tracked separately in
-[emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14);
-its cause is still under investigation and its strict error assertion remains.
+**No verified image or digest is published yet.** Current candidate image
+verification is pending. Golden image checks explicitly mount the checksum-bound
+[known-issues baseline](../baselines/v1.4.0-golden.yaml), following the accepted
+[#15 policy](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15).
+Matched diagnostics and expected failures remain visible as
+`passed_with_known_issues`/`xfail`, including the separate unresolved
+[I2C investigation #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14).
+A baseline is not a firmware fix; new-firmware release checks use no baseline.
+Publication still requires complete verification of the actual immutable candidate,
+including installed resources, both golden layouts, lifecycle and rejection.
 
 The local image from source `022a2b1` passed installed-resource, source/license,
 provenance, timeout, stop and wrong-version rejection checks
@@ -66,11 +68,15 @@ exception:
 
 ```sh
 # Add these arguments to a golden smoke command, not a firmware release gate:
---var FIRMWARE_VERSION=v1.4.0 --golden-version-exception
+--var FIRMWARE_VERSION=v1.4.0 --golden-version-exception \
+--known-issues /known-issues.yaml
 ```
 
-Its reported version is `v1.4.0-rc.1`. The exception is recorded and changes only
-that known version mismatch; all functional smoke assertions remain strict.
+Its reported version is `v1.4.0-rc.1`. Add a read-only mount from the checked-out
+`baselines/v1.4.0-golden.yaml` to `/known-issues.yaml` for this golden example.
+The version exception changes only the recorded banner mismatch; the separate
+known-issues baseline records exactly which diagnostics/expected failures were
+observed. Omit both exceptions when testing a new firmware release.
 
 ## Build and verify locally
 
