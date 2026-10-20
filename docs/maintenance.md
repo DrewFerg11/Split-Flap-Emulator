@@ -115,9 +115,19 @@ with four build jobs; runner CI real boots roughly 55/80 seconds for 8/16 module
 The slow local two-CPU/vfs container prototype's combined native/wheel/archive
 build step took 2137.8 seconds. Its Dockerfile predates the final split-cache
 layout, so this is a diagnostic measurement, not a final image CI benchmark.
+The exact-source local image at `39f9768` built in 4562.9 seconds on the same
+two-CPU/vfs host and passed resource/provenance, lifecycle and rejection checks.
+This is partial diagnostic evidence, not publication proof. Rebuild after source
+changes and verify that image's identity against the recorded source revision.
 Full successful smoke/image durations remain unavailable while #54 blocks them.
 Record fresh CI timings and the immutable digest when acceptance passes; do not
 claim the release gate's approximately 15-minute target from these partial runs.
+
+[Emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14)
+tracks a separate intermittent `Wire.cpp` I2C read Error 263 observed before
+the 16-module smoke's HTTP command. Its cause is unknown; do not attribute it
+to firmware #54, allowlist it, or retry until a run happens to pass. Preserve
+the same source, firmware hash, seed, logs and model evidence when investigating.
 
 ## GPL source availability
 

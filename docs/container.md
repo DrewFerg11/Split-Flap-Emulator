@@ -11,6 +11,15 @@ strict smoke gates described in [SFD #54](https://github.com/DrewFerg11/Split-Fl
 The maintainer will address that firmware defect. There is no verified published
 image or digest yet. Do not treat the examples below as evidence of publication,
 replace the baseline, retry commands to obtain a lucky pass, or relax assertions.
+An additional intermittent I2C read failure is tracked separately in
+[emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14);
+its cause is still under investigation and its strict error assertion remains.
+
+The local diagnostic image from source `39f9768` passed installed-resource,
+source/license, provenance, timeout, stop and wrong-version rejection checks
+([evidence](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6#issuecomment-6295887101)).
+These partial checks do not authorize publication. Later source heads require
+their own matching image and complete verification.
 
 ## Run a released image
 

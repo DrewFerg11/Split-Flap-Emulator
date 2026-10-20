@@ -15,7 +15,7 @@ when creating or rebasing it. Only the first unmerged item is ready for review.
 | 2 | [#3](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | `mvp/03-hardware-model` | `mvp/02-foundation` | [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10) merged as `3eebd00`; CI passed both layouts and Hermes approved before merge |
 | 3 | [#4](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | `mvp/04-runner` | `mvp/03-hardware-model` | [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11) merged as `e237b07`; all three CI jobs and 144 local tests passed; Hermes approved before merge |
 | 4 | [#5](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | `mvp/05-scenarios` | `mvp/04-runner` | [PR #12](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/12); rebased onto main `e237b07` for review; three homing seeds pass; strict smoke acceptance blocked by firmware #54 and separate I2C issue #14 |
-| 5 | [#6](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | `mvp/06-packaging` | `mvp/05-scenarios` | [Draft PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13); local prototype lifecycle passes; exact image smoke/publication acceptance blocked by firmware #54 |
+| 5 | [#6](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | `mvp/06-packaging` | `mvp/05-scenarios` | [Draft PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13); local image at `39f9768` passes lifecycle/rejection checks; current-source image verification pending; smoke/publication acceptance blocked by firmware #54 and emulator #14 |
 | 6 | [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | `mvp/07-release-gate` | `mvp/06-packaging` | Queued; requires a companion firmware PR and a verified published image |
 
 Hermes' current scenario review identified two useful gaps: the final serial
@@ -44,3 +44,5 @@ discovered work or blockers in the affected issue (or a linked new issue when it
 has separate scope), and keep the durable six-phase tracker current.
 
 The maintainer chose to retain the strict smoke failures on [SFD #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54) and owns that firmware fix. Phases 4–6 remain blocked for acceptance. Do not relax assertions, change the baseline, or add firmware workarounds to obtain green gates. Packaging publication needs an actual verified digest after merge, so its implementation PR references issue #6 without prematurely closing it.
+
+The intermittent I2C read Error 263 in [emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14) is a separate unresolved failure, not an established symptom of firmware #54. Keep the strict serial-error assertion and preserve failing evidence.
