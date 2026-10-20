@@ -13,7 +13,8 @@ virtual display.
 is merged, providing the pinned build and unmodified QEMU library launcher. Phase 2 adds the physical PCF8575, stepper, drum and hall
 model, validated 8/16-module hardware, atomic state, activity markers and timelines. Both layouts have booted the
 unmodified golden firmware and settled at X with zero stalls/anomalies. Review/merge acceptance is tracked per
-phase. The supervised runner arrives in phase 3; `flapsim --help` currently provides the CLI skeleton.
+phase. Phase 3 implements `flapsim run` with private flash, loopback forwarding, process
+supervision and bounded boot scenarios. See [runner usage](docs/runner.md).
 
 - Findings, results and the step-by-step MVP plan: [`docs/poc-findings-and-mvp-plan.md`](docs/poc-findings-and-mvp-plan.md)
 - POC code (reference only): [`poc/`](poc)

@@ -2,7 +2,8 @@
 
 The verified build host is Linux x86-64 with Python 3.11 or newer. The integration
 runs the production physical model through an unmodified pinned QEMU library.
-Phase 3 adds the supervised `flapsim run` CLI; the current CLI provides help/version.
+Phase 3 adds the supervised `flapsim run` CLI; see [runner.md](runner.md) for its
+executor, isolation, exit-code and evidence contracts.
 The POC remains frozen under `poc/` (only its tracked bytecode cache was removed).
 
 On Debian/Ubuntu, install system build dependencies as an administrator:
@@ -37,8 +38,13 @@ Build and verify the real firmware:
 mkdir -p runs
 set -o pipefail
 qemu/build.sh --jobs 4 2>&1 | tee runs/qemu-build.log
-python -m tools.verify_model --hardware esp32-8-single --out runs/model-8 --timeout 240
-python -m tools.verify_model --hardware esp32-16-dual --out runs/model-16 --timeout 240
+python -m tools.verify_model --fetch-only
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.0-factory.bin \
+  --hardware esp32-8-single --scenario scenarios/boot-esp32-8-single.yaml --out runs/model-8
+python -m tools.verify_model --hardware esp32-8-single --out runs/model-8
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.0-factory.bin \
+  --hardware esp32-16-dual --scenario scenarios/boot-esp32-16-dual.yaml --out runs/model-16
+python -m tools.verify_model --hardware esp32-16-dual --out runs/model-16
 ```
 
 The build fetches precisely `qemu/QEMU_COMMIT` from the upstream lcgamboa fork,
@@ -74,7 +80,7 @@ it preserves the source fetch. For a fully cold build, remove `build/qemu/`.
 `--install-dir <path>` stages a separate runtime while reusing a compatible
 `--build-root`. Stop users of an installation before replacing that runtime.
 
-The model verifier downloads the exact published factory artifact named in
+The fetch command downloads the exact published factory artifact named in
 `tools/golden_firmware.json` (v1.4.0, esp32_n4). Its 4,128,768-byte input must hash
 to `a087801e2ba5e08154af28a636c310b988b43417f28c7ddb7bae4f3df9f6221e`.
 The checksum was measured from the published release download; it is a regression
@@ -86,11 +92,12 @@ Verification requires the firmware banner and actual discovery, the exact
 expected missing-address set, and a fresh all-module X settlement with zero
 stalls/anomalies. The eight-module golden boot allows only its known default
 bus-1 write failures and the exact benign fresh-NVS error; unrelated serial
-errors fail. The verifier terminates the emulator process group on success, failure,
-timeout, Ctrl-C or SIGTERM, escalating after five seconds. Its output directory
-must be empty to prevent stale logs from passing. Inspect `serial.log`,
-`qemu.log`, `flash.bin`, `verification.json`, `model-config.json`, `state.json`,
-`activity.json`, and `timeline.jsonl` in each output directory. Repeat with a new
+errors fail. The CLI owns process management; the golden checker only inspects
+completed evidence. The CLI terminates and reaps the emulator group on success,
+failure, timeout, Ctrl-C or SIGTERM, with bounded TERM/KILL escalation. Its output
+directory must be empty. Inspect `serial.log`, `qemu-attempt-N.log`, `run.json`,
+`flash.bin`, `verification.json`, `model-config.json`, `state.json`, `activity.json`
+and `timeline.jsonl` in each output directory. Repeat with a new
 output directory, or deliberately remove the old generated run.
 
 The golden image reports `v1.4.0-rc.1` despite its release tag. This phase does not
