@@ -1,0 +1,91 @@
+name: Publish verified container
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flapsim-publication
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate trusted source and release version
+    if: github.repository == 'DrewFerg11/Split-Flap-Emulator'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install 'packaging>=25,<27'
+      - name: Require a commit on main; tags must match the package version
+        env:
+          RELEASE_EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if test "$RELEASE_EVENT" = push; then
+            python -m tools.publish_image --validate-only --revision "$GITHUB_SHA" \
+              --tag "$RELEASE_TAG" --out runs/release-validation.json
+          else
+            python -m tools.publish_image --validate-only --revision "$GITHUB_SHA" \
+              --out runs/release-validation.json
+          fi
+
+  verify:
+    needs: validate
+    uses: ./.github/workflows/verify-container.yml
+    with:
+      export_image: true
+
+  publish:
+    name: Publish the tested image to GHCR
+    needs: [validate, verify]
+    if: github.repository == 'DrewFerg11/Split-Flap-Emulator' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install 'packaging>=25,<27'
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-container-candidate
+          path: runs/candidate
+      - name: Load the exact image that passed verification
+        run: docker load --input runs/candidate/candidate-image.tar.gz
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote verified bits and record immutable reference
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python -m tools.publish_image --proof runs/candidate/container/verification.json \
+            --image "$(cat runs/candidate/candidate-id.txt)" --revision "$GITHUB_SHA" \
+            --tag "$RELEASE_TAG" --out runs/publication.json
+          cat runs/publication.json >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain publication result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-publication-result
+          retention-days: 90
+          path: runs/publication.json

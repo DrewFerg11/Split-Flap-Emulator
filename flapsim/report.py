@@ -163,6 +163,7 @@ def write_reports(out: Path, manifest, steps, version_exception, known_issues=No
                 k: manifest.get(k)
                 for k in [
                     "firmware",
+                    "emulator",
                     "seed",
                     "hardware",
                     "build",

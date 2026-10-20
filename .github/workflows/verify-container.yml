@@ -1,0 +1,84 @@
+name: Verify container
+
+on:
+  workflow_call:
+    inputs:
+      export_image:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: Container smoke and lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install verification tools and fetch pinned external input
+        id: package
+        run: |
+          python -m pip install -e .
+          python -m tools.verify_model --fetch-only
+          python -c 'import tomllib; p=tomllib.load(open("pyproject.toml","rb")); print("version="+p["project"]["version"])' >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the candidate once
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          platforms: linux/amd64
+          tags: flapsim:candidate
+          build-args: |
+            BUILD_JOBS=4
+            SOURCE_REVISION=${{ github.sha }}
+            EMULATOR_VERSION=${{ steps.package.outputs.version }}
+          cache-from: type=gha,scope=flapsim-linux-amd64
+          cache-to: type=gha,scope=flapsim-linux-amd64,mode=max
+      - name: Verify installed image resources, both real smoke layouts, timeout and stop
+        run: |
+          python -m tools.verify_container --image flapsim:candidate --out runs/container \
+            --expected-source "$GITHUB_SHA"
+      - name: Prove a rejected candidate cannot pass publication validation
+        run: python -m tools.verify_publication_gate --image flapsim:candidate --out runs/publication-gate --expected-source "$GITHUB_SHA"
+      - name: Save the verified image without rebuilding
+        if: success() && inputs.export_image
+        run: |
+          docker image inspect --format '{{.Id}}' flapsim:candidate > runs/candidate-id.txt
+          docker save flapsim:candidate | gzip -1 > runs/candidate-image.tar.gz
+      - name: Upload verified candidate
+        if: success() && inputs.export_image
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-container-candidate
+          retention-days: 2
+          compression-level: 0
+          path: |
+            runs/candidate-id.txt
+            runs/candidate-image.tar.gz
+            runs/container/verification.json
+      - name: Log available image outcomes
+        if: always()
+        run: |
+          python -c 'import pathlib; p=pathlib.Path("runs/container/verification.json"); print(p.read_text() if p.exists() else "Image evidence unavailable")'
+          python -m tools.summarize_run runs/container/smoke-8/run/run.json
+          python -m tools.summarize_run runs/container/smoke-16/run/run.json
+      - name: Retain image diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-verification-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            runs/**/*.log
+            runs/**/*.json
+            runs/**/*.jsonl
+            runs/**/*.md
+            runs/**/*.xml
+            runs/**/*.html

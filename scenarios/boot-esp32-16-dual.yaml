@@ -1,4 +1,1 @@
-version: 1
-mode: boot
-timeout: 240
-expect_text: XXXXXXXXXXXXXXXX
+../flapsim/data/scenarios/boot-esp32-16-dual.yaml

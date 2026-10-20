@@ -43,6 +43,10 @@ per bus are supported. The reserved I²C ranges and the built-in bus-0 sensor
 at 0x48 are rejected with explicit diagnostics. Empty buses are valid; at least
 one physical module must exist.
 
+Existing file paths take priority. Only a bare name (optionally ending in
+`.yaml`) can resolve to an installed built-in; a missing path with a directory
+component never falls back. Load errors preserve the caller's original argument.
+
 `drum` contains integer `steps_per_rotation` (4–1,000,000), integer
 `magnet_position` (0 through steps−1), integer `sensor_window` (1 through steps),
 and `flaps` (2–95 distinct printable ASCII characters, no more than steps).
@@ -149,6 +153,12 @@ Missing or currently moving/stale outputs yield `None`; malformed complete data
 raises `ValueError`. Callers waiting for data can retain that reason for timeout
 diagnostics. A post-command scenario must additionally require an applicable
 new settlement and define its quiet/idempotent-command policy (phase 4).
+
+Freshness is a point-in-time observation ending at the second activity read,
+not a lock on the running guest. Motion may begin after that read or before the
+caller consumes the result; another final read would only move that boundary.
+Callers needing continued settlement must recheck activity and apply their
+post-command/quiet policy rather than treating the returned snapshot as a lease.
 
 ## Verification evidence
 

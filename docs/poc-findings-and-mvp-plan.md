@@ -1,6 +1,6 @@
 # Split-Flap-Emulator: POC findings and MVP implementation plan
 
-**Status:** Proof of concept complete (October 2026). MVP phases 1–3 are merged; phase 4 scenarios are rebased onto main for review.
+**Status:** Proof of concept complete (October 2026). MVP implementations 1–4 are merged; phase 5 packaging is rebased onto main for review.
 **Audience:** whoever builds the MVP. This document is meant to be enough on its own.
 
 ## Contents
@@ -304,7 +304,7 @@ GitHub Actions checks land with each phase, starting in phase 1. The original st
 technical references. Golden regression checks from step 11 are introduced incrementally in phases 1–4;
 maintenance documentation is completed in phase 5.
 
-Phases 1–3 are **merged** in main as `9663764`, `3eebd00` and `e237b07`; phase 4 is rebased onto main on `mvp/05-scenarios` for review. Later phases
+Implementations 1–4 are **merged** in main as `9663764`, `3eebd00`, `e237b07` and `2004377`. Golden CI uses the accepted checksum-bound known-issues baseline (#15); strict new-firmware release checks use no baseline. Phase 5 packaging is next for review. Later phases
 remain stacked drafts or queued work. No phase is complete until its
 implementation is merged and acceptance passes. See the [ordered PR queue](implementation-queue.md) and
 [phase-1 reproduction instructions](development.md).
@@ -314,9 +314,9 @@ implementation is merged and acceptance passes. See the [ordered PR queue](imple
 | 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | Merged: [PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9); [current CI passed](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39358214724); Hermes approved before merge; merged as `9663764`; [ADR](adr/0001-qemu-integration.md) |
 | 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | Merged: [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10) as `3eebd00`; both real layouts and CI passed; Hermes approved before merge; [hardware/schema contract](hardware-model.md) |
 | 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | Merged: [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11) as `e237b07`; [runner contract](runner.md); all three CI jobs and 144 local tests passed; Hermes approved before merge |
-| 4 | [Scenarios, smoke tests, reports, and replay](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | 6–8; golden regression checks from 11 | In progress: [PR #12](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/12); rebased onto main `e237b07`; [scenario contract](scenarios.md); strict version negative and three homing seeds pass; complete smoke acceptance remains blocked by firmware #54 and separate I2C issue #14 |
-| 5 | [Docker packaging, verified publishing, and maintenance](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | 9; maintenance from 11 | [Draft PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13) preserved; image verification/publication acceptance remains blocked |
-| 6 | [Firmware release gating](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | 10; companion firmware-repository PR | Blocked on strict smoke acceptance and an actual verified published immutable image; no companion release gate claimed |
+| 4 | [Scenarios, smoke tests, reports, and replay](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | 6–8; golden regression checks from 11 | Implementation merged in [PR #12](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/12) as `2004377`; Hermes approved, all seven CI jobs pass using [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15); full strict firmware-functional follow-up remains open |
+| 5 | [Docker packaging, verified publishing, and maintenance](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | 9; maintenance from 11 | [PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13) rebased onto main for review; golden container checks use the explicit accepted baseline; old image diagnostics are partial and current candidate/publication verification remains pending |
+| 6 | [Firmware release gating](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | 10; companion firmware-repository PR | Draft implementation follows packaging; activation/positive evidence requires an actual verified immutable image; release tests stay strict and use no golden baseline |
 
 [View all MVP issues](https://github.com/DrewFerg11/Split-Flap-Emulator/issues?q=is%3Aissue%20label%3Amvp).
 Each issue uses the `[MVP n/6]` title prefix and `mvp` label, with implementation checklists, dependencies,
@@ -517,6 +517,9 @@ each with `--timing ci`.
 last 50 serial lines.
 
 ### Step 9: Docker image
+
+**Implementation note:** built-in resources are packaged in the wheel; source archives, provenance and runtime dependencies are included in the image. MQTT/Mosquitto stays post-MVP. The candidate is built once, verified, exported and published without rebuilding; only the publication job has package-write permission. No image is published while the strict golden smokes fail on firmware #54. See [container documentation](container.md).
+
 **Tasks**
 - Multi-stage `Dockerfile`: stage 1 builds QEMU and the model; stage 2 is `debian:bookworm-slim` + Python + runtime
   libs (`libglib2.0-0 libgcrypt20 libslirp0 libpixman-1-0`) + Mosquitto (for post-MVP MQTT) + the `flapsim`
@@ -544,6 +547,9 @@ last 50 serial lines.
 (for example a wrong version string) blocks publishing.
 
 ### Step 11: Emulator self-tests and maintenance hooks
+
+**Implementation note:** the version check is not disabled. Only the checksum-pinned golden v1.4.0/v1.4.0-rc.1 mismatch has an explicit recorded exception; real release gating remains strict. Both golden smoke gates remain failing on firmware #54 by maintainer decision. QEMU/firmware update, clean rebuild, cache, fixture, source licensing and publication procedures are in [maintenance](maintenance.md).
+
 **Tasks**
 - A "golden run" in this repo's CI: boot a pinned known-good firmware (v1.4.0 image downloaded from releases) with
   `release-smoke-8` and the version check disabled. This catches emulator regressions.
