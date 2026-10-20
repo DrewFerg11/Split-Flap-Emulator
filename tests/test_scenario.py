@@ -648,12 +648,18 @@ def test_baseline_tolerates_only_matching_serial_lines_and_records_them(context)
         "[ 38086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
         "[ 3Received text update request\n"
         '{"mode":"d8086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n',
+        # Raw serial tail from CI39516600807, golden smoke-16: the whole diagnostic, timestamp
+        # included, is appended to the request body with no newline in between.
+        "[ 38162][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
+        "Received text update request\n"
+        '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}'
+        "[ 38162][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n",
     ],
 )
 def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context, raw):
     (context.out / "serial.log").write_text(raw)
     step = {"assert_no_errors": {"fresh_nvs": True}}
-    with pytest.raises(ExecutionFailed, match=r"80\d\d\]\[E\]"):
+    with pytest.raises(ExecutionFailed, match=r"\d\]\[E\]\[Preferences\.cpp:50\]"):
         executor([step]).execute(context)
     known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.0-golden.yaml")
     engine = executor([step], firmware_sha256=GOLDEN_SHA256, known_issues=known)
@@ -664,6 +670,17 @@ def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context
     assert len(records) == 1 and records[0]["count"] == 1
     assert records[0]["issue"] == "DrewFerg11/Split-Flap-Display#86"
     assert records[0]["first"] == raw.splitlines()[-1]
+
+
+def test_unspliced_diagnostic_stays_governed_by_the_fresh_nvs_policy(context):
+    line = "[ 38162][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.0-golden.yaml")
+    assert known.tolerated_serial(line) is None
+    (context.out / "serial.log").write_text(line + "\n")
+    with pytest.raises(ExecutionFailed):
+        executor(
+            [{"assert_no_errors": {}}], firmware_sha256=GOLDEN_SHA256, known_issues=known
+        ).execute(context)
 
 
 @pytest.mark.parametrize(
@@ -677,6 +694,9 @@ def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context
         "nvs_open failed: NOT_FOUND",
         "abort() was called d8086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
         "[ 7][E][Wire.cpp:1] boom 8086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
+        'Exception {"center":true}[ 38162][E][Preferences.cpp:50] begin(): '
+        "nvs_open failed: NOT_FOUND",
+        '{"x":[1]}[ 38162][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND',
     ],
 )
 def test_golden_fragment_baseline_does_not_accept_other_broken_errors(context, line):
