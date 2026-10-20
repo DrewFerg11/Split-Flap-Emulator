@@ -390,6 +390,42 @@ def test_known_serial_errors_are_narrow_and_cannot_leak_past_reconfiguration(con
             executor([first]).execute(context)
 
 
+@pytest.mark.parametrize("tail,code", [("[7][E] late firmware failure\n", 5), ("Ready\n", 0)])
+def test_runner_final_serial_sweep_without_an_explicit_error_assertion(
+    arguments, monkeypatch, tail, code
+):
+    path = arguments.out.parent / "tail-check.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "name": "tail-check",
+                "timeout": 10,
+                "steps": [{"wait_display": {"text": "XXXXXXXX"}}],
+            }
+        )
+    )
+    arguments.scenario = path
+    arguments.timeout = 10
+    engine = load_executor(path, load_hardware(arguments.hardware, seed=arguments.seed))
+    execute = engine.execute
+
+    def finish_with_serial_tail(context):
+        result = execute(context)
+        with (context.out / "serial.log").open("a") as log:
+            log.write(tail)
+        return result
+
+    monkeypatch.setattr(engine, "execute", finish_with_serial_tail)
+    assert run(arguments, executor=engine) == code
+    value = json.loads((arguments.out / "run.json").read_text())
+    assert value["steps"][0]["status"] == "passed"
+    assert value["passed"] == (code == 0) and value["source_unchanged"]
+    if code:
+        assert "unexpected serial error" in value["error"]
+    assert_reaped(value)
+
+
 def test_reports_escape_html_xml_and_keep_missing_partial_evidence_honest(tmp_path, monkeypatch):
     summary = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))

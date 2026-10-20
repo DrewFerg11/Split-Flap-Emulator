@@ -124,6 +124,8 @@ valid only for the eight physical bus-0 modules. It is used before single-bus
 configuration; later checks reject all such missing-module writes. No policy
 allows unrelated errors. A final check catches complete new errors after the
 last explicit assertion and before shutdown.
+When a scenario has no `assert_no_errors` step, that final check scans all
+complete serial lines with no allowances.
 
 ## Shipped scenarios
 
@@ -167,8 +169,9 @@ narrow error policies and report/replay safety. A minimal real-run fixture in
 the actual blank/X settlements. A local real-firmware strict version negative
 passed in 53.148s with QEMU exit 0 and unchanged source input.
 
-CI runs five real-firmware jobs (two smoke layouts and three homing seeds),
-plus asserted strict/wrong-version negatives in the eight-module job. Each
+CI runs six real-firmware jobs: two smoke layouts, three homing seeds, and an
+independent `negative-versions` job asserting strict/wrong-version rejection.
+The negative checks run even when a smoke job fails. Each
 scenario has a 300-second bound; logs, manifests, reports, JUnit and replays are
 uploaded on failure as well as success, excluding firmware/private flash.
 The [pre-rebase CI](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39460294879)

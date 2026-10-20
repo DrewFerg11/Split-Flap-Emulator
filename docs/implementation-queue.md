@@ -18,6 +18,13 @@ when creating or rebasing it. Only the first unmerged item is ready for review.
 | 5 | [#6](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | `mvp/06-packaging` | `mvp/05-scenarios` | [Draft PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13); preserved and restacked after scenarios; image publication acceptance remains blocked |
 | 6 | [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | `mvp/07-release-gate` | `mvp/06-packaging` | Queued; requires a companion firmware PR and a verified published image |
 
+Hermes' current scenario review identified two useful gaps: the final serial
+sweep now also covers scenarios without `assert_no_errors`, and asserted
+negative-version integration checks have an independent CI matrix entry.
+Fresh checks and exact-head review are required after these fixes. Hermes has
+withheld approval while the strict smoke gates fail; the maintainer's policy
+remains unchanged and acceptance stays blocked on the documented firmware work.
+
 After a squash merge, preserve the predecessor's old tip, fetch current main,
 and rebase only the next branch's own commits using
 `git rebase --onto origin/main <old-predecessor-tip> <next-branch>`. Do not replay

@@ -52,6 +52,7 @@ jobs:
           - {name: homing-7, hardware: esp32-8-single, scenario: homing-random, seed: 7}
           - {name: homing-19, hardware: esp32-8-single, scenario: homing-random, seed: 19}
           - {name: homing-42, hardware: esp32-8-single, scenario: homing-random, seed: 42}
+          - {name: negative-versions, hardware: esp32-8-single, scenario: version-check, seed: 7}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -92,20 +93,27 @@ jobs:
           timeout --kill-after=30s 18m qemu/build.sh --jobs 4 2>&1 | tee runs/qemu-build.log
       - name: Install Python configuration loader
         run: python -m pip install -e .
+      - name: Fetch checksum-verified golden firmware
+        run: python -m tools.verify_model --fetch-only
       - name: Run real-firmware golden scenario
+        if: matrix.name != 'negative-versions'
         run: |
-          python -m tools.verify_model --fetch-only
           flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.0-factory.bin \
             --hardware "${{ matrix.hardware }}" --scenario "scenarios/${{ matrix.scenario }}.yaml" \
             --seed "${{ matrix.seed }}" --var FIRMWARE_VERSION=v1.4.0 \
             --golden-version-exception --out runs/scenario
           python -c 'import json; m=json.load(open("runs/scenario/run.json")); print("Scenario wall seconds:", m["wall_seconds"])'
       - name: Prove strict and deliberately wrong versions fail
-        if: matrix.name == 'smoke-8'
+        if: matrix.name == 'negative-versions'
         run: python -m tools.verify_negative_version --out runs/negative-versions
       - name: Log available scenario outcome
-        if: always()
+        if: always() && matrix.name != 'negative-versions'
         run: python -m tools.summarize_run runs/scenario/run.json
+      - name: Log available negative-version outcomes
+        if: always() && matrix.name == 'negative-versions'
+        run: |
+          python -m tools.summarize_run runs/negative-versions/strict-tag/run.json
+          python -m tools.summarize_run runs/negative-versions/wrong-version/run.json
       - name: Upload available diagnostics
         if: always()
         uses: actions/upload-artifact@v4

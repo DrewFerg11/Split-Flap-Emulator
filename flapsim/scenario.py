@@ -482,13 +482,12 @@ class ScenarioExecutor:
                 context.pause()
 
     def verify_final(self, out, hardware):
-        if self.last_error_policy is not None:
-            serial = (out / "serial.log").read_text(errors="replace")
-            serial = serial[: serial.rfind("\n") + 1]
-            serial_errors(
-                serial[self.error_cursor :],
-                {"fresh_nvs": self.last_error_policy.get("fresh_nvs", False)},
-            )
+        serial = (out / "serial.log").read_text(errors="replace")
+        serial = serial[: serial.rfind("\n") + 1]
+        serial_errors(
+            serial[self.error_cursor :],
+            {"fresh_nvs": (self.last_error_policy or {}).get("fresh_nvs", False)},
+        )
         state = read_settlement(out, hardware)
         if state and (state["counters"]["stalls"] or state["counters"]["anomalies"]):
             raise ExecutionFailed(f"model faults after execution: {state['counters']}")

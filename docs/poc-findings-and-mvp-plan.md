@@ -464,6 +464,12 @@ settlement evidence and post-command movement identity. The golden-only version
 exception is explicit and checksum-guarded. Reports finalize after supervised
 shutdown on success and failure; [scenarios.md](scenarios.md) defines the schema,
 semantics, API expectations and validation evidence.
+Hermes review exposed a missing final serial sweep for scenarios without an
+explicit error assertion; the sweep now defaults to strict checking in that
+case. Asserted strict/wrong-version negatives run in an independent CI job so
+blocked positive smokes cannot skip them. These changes preserve every existing
+smoke assertion and error allowance; complete acceptance still needs the
+maintainer-owned firmware fix and passing strict gates.
 
 **Tasks**
 - YAML scenarios made of steps with timeouts (wall-clock seconds):
