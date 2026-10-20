@@ -9,6 +9,7 @@ description = "Run unmodified Split-Flap Display firmware on virtual ESP32 hardw
 readme = "README.md"
 requires-python = ">=3.11"
 license = "GPL-2.0-only"
+dependencies = ["PyYAML>=6,<7"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff==0.17.1"]

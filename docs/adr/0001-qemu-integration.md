@@ -107,6 +107,23 @@ model source staging. Maintaining both routes now would duplicate build and
 regression work without a proven need. The existing patch in `poc/` remains
 historical reference only.
 
+## Phase-2 model integration
+
+The production model replaces the temporary stub translation unit. The adapter
+compiles against the pinned checkout's real configured timer/reset headers,
+resolves their exported functions from the same loaded library, and uses QEMU's
+virtual clock for periodic snapshots. Physical configuration is prepared before
+`qemu_init`; reset registration and timer initialization occur after it because
+they require initialized QOM/clock subsystems. A real boot caught and verified
+the correction of an earlier reset-registration ordering error.
+
+All model callbacks execute through the existing QEMU integration. Guest resets
+abort controller transactions while retaining external hardware state; model
+finish removes hooks and closes outputs before QEMU cleanup. Information-only
+help/version requests require no model configuration. See the
+[hardware/schema contract](../hardware-model.md) for exact fields, freshness,
+reset behavior and both-layout verification evidence.
+
 The [first clean CI run](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39355571009) passed both jobs on Ubuntu 24.04 x86-64,
 GCC 13.3 and Python 3.11, using four build jobs with no cache hit. The build step
 ran from 01:50:00.120 to 01:51:59.206 UTC (119.1 seconds, including the initial

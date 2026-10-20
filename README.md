@@ -9,14 +9,16 @@ virtual display.
 
 ## Status
 
-**Proof of concept complete; MVP phase 1 in progress.** The POC booted the unmodified `v1.4.0` release, homed
-virtual drums, and drove them through the firmware's own web API. The first implementation adds a pinned build,
-an unmodified QEMU shared-library launcher, and a bounded real-firmware boot/I²C check. Motion simulation and the
-supervised runner remain later phases; `flapsim --help` currently provides the CLI skeleton.
+**MVP implementation in progress.** [Phase 1 / PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9)
+is merged, providing the pinned build and unmodified QEMU library launcher. Phase 2 adds the physical PCF8575, stepper, drum and hall
+model, validated 8/16-module hardware, atomic state, activity markers and timelines. Both layouts have booted the
+unmodified golden firmware and settled at X with zero stalls/anomalies. Review/merge acceptance is tracked per
+phase. The supervised runner arrives in phase 3; `flapsim --help` currently provides the CLI skeleton.
 
 - Findings, results and the step-by-step MVP plan: [`docs/poc-findings-and-mvp-plan.md`](docs/poc-findings-and-mvp-plan.md)
 - POC code (reference only): [`poc/`](poc)
 - Build, installation, checks and boot reproduction: [`docs/development.md`](docs/development.md)
+- Physical hardware, configuration and state/timeline schemas: [`docs/hardware-model.md`](docs/hardware-model.md)
 - Ordered branch/PR workflow: [`docs/implementation-queue.md`](docs/implementation-queue.md)
 - QEMU integration decision and lifecycle: [`docs/adr/0001-qemu-integration.md`](docs/adr/0001-qemu-integration.md)
 

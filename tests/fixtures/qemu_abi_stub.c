@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static pthread_t owner;
@@ -23,6 +24,11 @@ void qemu_picsimlab_register_callbacks(void *arg) {
 }
 
 void qemu_init(int argc, char **argv) {
+    if (argc == 2 && (!strcmp(argv[1], "--version") || !strcmp(argv[1], "--help"))) {
+        assert(stage == 0);
+        puts("QEMU fixture information");
+        exit(0);
+    }
     assert(stage++ == 1 && pthread_equal(owner, pthread_self()));
     assert(argc == 2 && strcmp(argv[1], "--fixture") == 0);
     puts("initialize");

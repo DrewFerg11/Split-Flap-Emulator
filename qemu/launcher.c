@@ -58,12 +58,22 @@ int main(int argc, char **argv) {
     void (*initialize)(int, char **) = symbol(library, "qemu_init");
     int (*main_loop)(void) = symbol(library, "qemu_main_loop");
     void (*cleanup)(int) = symbol(library, "qemu_cleanup");
+    if (argc == 2 &&
+        (!strcmp(argv[1], "--version") || !strcmp(argv[1], "-version") ||
+         !strcmp(argv[1], "--help") || !strcmp(argv[1], "-help") || !strcmp(argv[1], "-h"))) {
+        /* QEMU parses information requests before creating a machine. */
+        initialize(argc, argv);
+        return 0;
+    }
+    flapsim_model_prepare(library);
     flapsim_callbacks callbacks = {pin_event,  pin_event, flapsim_i2c_event, spi_event,
                                    uart_event, NULL,      rmt_event};
     register_callbacks(&callbacks);
     /* One board per process. All lifecycle calls stay on this original thread. */
     initialize(argc, argv);
+    flapsim_model_start();
     int status = main_loop();
+    flapsim_model_finish();
     cleanup(status);
     /* QEMU owns process-global/atexit state: leave the library loaded until exit. */
     return status;
