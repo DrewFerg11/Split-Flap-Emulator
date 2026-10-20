@@ -1,7 +1,7 @@
 # ADR 0001: Unmodified QEMU library with a process-local C launcher
 
-Status: accepted after the real-firmware callback spike; phase-1 CI/merge acceptance remains in progress.
-Tracking: [issue #2](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2).
+Status: accepted after real-firmware callback verification locally and in clean CI; review/merge pending.
+Tracking: [issue #2](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2), [PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9).
 
 ## Context and spike
 
@@ -106,3 +106,12 @@ ABI or lifecycle. It would require a new decision and a minimal patch with
 model source staging. Maintaining both routes now would duplicate build and
 regression work without a proven need. The existing patch in `poc/` remains
 historical reference only.
+
+The [first clean CI run](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39355571009) passed both jobs on Ubuntu 24.04 x86-64,
+GCC 13.3 and Python 3.11, using four build jobs with no cache hit. The build step
+ran from 01:50:00.120 to 01:51:59.206 UTC (119.1 seconds, including the initial
+fetch/configure/build/stage), within the roughly ten-minute target. The golden
+boot verifier then passed in about ten seconds. Full runner CPU/toolchain details,
+exact build timing and checksums are retained in the [verification artifact](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39355571009/artifacts/12235640650). The initial automated review found no major issues
+and requested confirmation of this CI/performance evidence; formal approval and
+the maintainer merge remain separate.

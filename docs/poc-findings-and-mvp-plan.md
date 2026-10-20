@@ -310,7 +310,7 @@ implementation is merged and acceptance passes. See the [ordered PR queue](imple
 
 | Phase | Tracking issue | Original steps | Status |
 |---|---|---|---|
-| 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | In progress: build, callback launcher and real-boot verification; [ADR](adr/0001-qemu-integration.md) |
+| 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | In progress: [PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9); [clean CI passed](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39355571009); review/merge pending; [ADR](adr/0001-qemu-integration.md) |
 | 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | Not started |
 | 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | Not started |
 | 4 | [Scenarios, smoke tests, reports, and replay](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | 6–8; golden regression checks from 11 | Not started |
