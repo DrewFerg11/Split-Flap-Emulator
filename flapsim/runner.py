@@ -161,7 +161,13 @@ def run(args, *, executor=None, interrupt=None):
     source, data = firmware_bytes(args.firmware)
     digest = hashlib.sha256(data).hexdigest()
     hardware = load_hardware(args.hardware, seed=args.seed)
-    executor = executor or load_executor(args.scenario, hardware)
+    executor = executor or load_executor(
+        args.scenario,
+        hardware,
+        variables=getattr(args, "variables", ()),
+        firmware_sha256=digest,
+        golden_exception=getattr(args, "golden_version_exception", False),
+    )
     timeout = positive_timeout(args.timeout if args.timeout is not None else executor.timeout)
     prefix, build = runtime_info(args.qemu_prefix)
     if interrupt and (signum := interrupt()) is not None:
@@ -261,6 +267,8 @@ def run(args, *, executor=None, interrupt=None):
         if read_settlement(out, hardware) is None:
             raise RuntimeError("missing fresh final model output")
         validate_timeline(out / "timeline.jsonl")
+        if hasattr(executor, "verify_final"):
+            executor.verify_final(out, hardware)
         manifest["status"] = "passed"
         exit_code = 0
     except InterruptedRun as error:
@@ -299,6 +307,18 @@ def run(args, *, executor=None, interrupt=None):
             manifest["status"] = "failed"
         manifest["exit_code"] = exit_code
         manifest["wall_seconds"] = round(time.monotonic() - started, 3)
+        try:
+            if hasattr(executor, "finalize"):
+                executor.finalize(out, manifest)
+            else:
+                from flapsim.report import write_reports
+
+                write_reports(out, manifest, [], None)
+        except Exception as error:
+            manifest.update(
+                passed=False, status="failed", exit_code=EXIT_RUNTIME, report_error=str(error)
+            )
+            exit_code = EXIT_RUNTIME
         try:
             save_manifest(out, manifest)
         except OSError as error:

@@ -20,7 +20,13 @@ def main() -> int:
     runner = commands.add_parser("run", help="run a bounded firmware scenario")
     runner.add_argument("--firmware", type=Path, required=True)
     runner.add_argument("--hardware", required=True)
-    runner.add_argument("--scenario", required=True, help="boot or a bounded boot YAML file")
+    runner.add_argument("--scenario", required=True, help="boot or a scenario YAML file")
+    runner.add_argument("--var", dest="variables", action="append", default=[], metavar="KEY=value")
+    runner.add_argument(
+        "--golden-version-exception",
+        action="store_true",
+        help="explicitly accept v1.4.0-rc.1 only for the checksum-pinned v1.4.0 golden image",
+    )
     runner.add_argument("--out", type=Path, required=True)
     runner.add_argument("--timing", choices=["ci", "accurate", "realtime"], default="ci")
     runner.add_argument("--seed", type=int)

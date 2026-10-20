@@ -14,7 +14,9 @@ is merged, providing the pinned build and unmodified QEMU library launcher. Phas
 model, validated 8/16-module hardware, atomic state, activity markers and timelines. Both layouts have booted the
 unmodified golden firmware and settled at X with zero stalls/anomalies. Review/merge acceptance is tracked per
 phase. Phase 3 implements `flapsim run` with private flash, loopback forwarding, process
-supervision and bounded boot scenarios. See [runner usage](docs/runner.md).
+supervision and bounded boot scenarios. Phase 4 adds declarative serial/HTTP/display
+scenarios with strict versions, per-step deadlines and finalized reports/replays.
+See [runner usage](docs/runner.md) and [scenario usage](docs/scenarios.md).
 
 - Findings, results and the step-by-step MVP plan: [`docs/poc-findings-and-mvp-plan.md`](docs/poc-findings-and-mvp-plan.md)
 - POC code (reference only): [`poc/`](poc)

@@ -34,7 +34,8 @@ banner. `version`, `mode`, and `timeout` are required. Missing fields report
 their names with invalid-input exit code 2 before launch. Unknown keys,
 unsupported modes, duplicate YAML keys, invalid deadlines
 and text that cannot fit the physical modules fail before launch. Full scenario
-steps, version checks, reports and replay arrive in phase 4. The separate golden
+steps, version checks, reports and replay are documented in
+[scenarios.md](scenarios.md). The separate golden
 evidence checker retains the narrowly scoped discovery/error assertions; a
 generic boot command does not silently allow or classify firmware serial errors.
 

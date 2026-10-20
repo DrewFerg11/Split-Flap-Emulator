@@ -1,0 +1,14 @@
+version: 1
+name: homing-random
+timeout: 300
+steps:
+  - wait_serial: "=== Split Flap Display ==="
+    timeout: 120
+  - wait_serial: "AP IP Address: http://192.168.4.1"
+  - expect_serial: "Firmware: ${FIRMWARE_VERSION} ("
+  - wait_display: {text: "        ", history: true}
+    timeout: 120
+  - assert_no_errors: {fresh_nvs: true, default_missing_bus1: true}
+  - wait_display: {text: XXXXXXXX}
+    timeout: 120
+  - assert_no_errors: {fresh_nvs: true}
