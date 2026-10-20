@@ -85,8 +85,9 @@ reaped children; unexpected cleanup failures are emulator defects to track.
 
 ## Workflows, evidence and protection
 
-PR/main CI keeps fast checks, both real boot/smoke layouts and all seeded homing
-jobs. The container job depends on those gates; known smoke failures prevent
+PR/main CI keeps fast checks, both real boot/smoke layouts, all seeded homing
+jobs and independent asserted strict/wrong-version negatives. The container job
+depends on those gates; known smoke failures prevent
 image verification/publication and remain visible. The reusable container job
 also tests installed resources, timeout, stop and wrong-version rejection.
 Manual `Publish verified container` dispatch checks a trusted main commit without
@@ -95,7 +96,7 @@ publication. Version-tag runs add the publication step only after verification.
 Suggested required checks for this phase are `Fast checks`,
 `Golden scenario (smoke-8)`, `Golden scenario (smoke-16)`,
 `Golden scenario (homing-7)`, `Golden scenario (homing-19)`,
-`Golden scenario (homing-42)`, and the reusable
+`Golden scenario (homing-42)`, `Golden scenario (negative-versions)`, and the reusable
 `Verified runtime image / Container smoke and lifecycle` job. Earlier phases
 use `Pinned QEMU build and boot` layout jobs. Confirm exact displayed names
 in a current Actions run before configuring branch protection; this work does
