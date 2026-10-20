@@ -33,6 +33,7 @@ static void *required_symbol(void *library, const char *name) {
 
 static void guest_reset(void *opaque) {
     (void)opaque;
+    fs_model_tick(clock_ns(QEMU_CLOCK_VIRTUAL));
     fs_model_guest_reset();
     check_model();
 }

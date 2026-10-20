@@ -116,17 +116,21 @@ def verify(args):
                         if missing != sorted(set(range(16)) - present):
                             raise RuntimeError(f"unexpected firmware discovery failures: {missing}")
                         check_serial_errors(serial, hardware)
-                        checked_firmware(args.firmware)
-                        result["passed"] = True
-                        return
+                        result["serial_checked_lines"] = len(serial.splitlines())
+                        result["serial_checked_tail"] = serial.splitlines()[-10:]
+                        break
                     if time.monotonic() >= deadline:
                         raise TimeoutError(
                             "firmware did not produce the expected fresh settled X display"
                         )
                     time.sleep(0.1)
             finally:
-                stop(process)
-                result["qemu_returncode"] = process.returncode
+                try:
+                    stop(process)
+                finally:
+                    result["qemu_returncode"] = process.poll()
+            checked_firmware(args.firmware)
+            result["passed"] = True
     except BaseException as error:
         result["error"] = str(error) or type(error).__name__
         raise

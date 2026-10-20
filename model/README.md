@@ -1,5 +1,10 @@
 # Hardware model
 
-Phase 2 introduces the production PCF8575, stepper, drum and bus model here.
-Phase 1's bounded integration probe is in `qemu/boot_stub.c`; it only ACKs
-bus 0 address 0x20 and cannot simulate homing or display output.
+The production core is split into `bus.c`, `pcf8575.c`, `stepper.c`, `drum.c`,
+`config.c` and `io.c`. `adapter.c` connects it to the pinned unmodified QEMU
+library using that checkout's configured timer/reset headers.
+
+Configuration, hardware semantics, output schema and reproduction commands:
+[`docs/hardware-model.md`](../docs/hardware-model.md).
+
+Run the native core tests without QEMU using `python -m pytest tests/test_model.py`.

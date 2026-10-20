@@ -1,5 +1,6 @@
 """Exercise the real C launcher against a controlled shared-library ABI."""
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -34,8 +35,7 @@ def launcher(tmp_path):
     return executable
 
 
-@pytest.mark.parametrize("missing_symbol", [False, True])
-def test_registration_lifecycle_and_loader_errors(launcher, missing_symbol):
+def compile_library(launcher, missing_symbol=False):
     library = launcher.parent.parent / "lib/libqemu-xtensa.so"
     command = [
         "cc",
@@ -52,7 +52,17 @@ def test_registration_lifecycle_and_loader_errors(launcher, missing_symbol):
     if missing_symbol:
         command.append("-DOMIT_CLEANUP")
     subprocess.run(command, check=True)
-    result = subprocess.run([str(launcher), "--fixture"], capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("missing_symbol", [False, True])
+def test_registration_lifecycle_and_loader_errors(launcher, missing_symbol):
+    compile_library(launcher, missing_symbol)
+    result = subprocess.run(
+        [str(launcher), "--fixture"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "FLAPSIM_CONFIG": "fixture-config"},
+    )
     if missing_symbol:
         assert result.returncode == 1
         assert "missing symbol qemu_cleanup" in result.stderr
@@ -67,3 +77,16 @@ def test_missing_library_fails_with_diagnostic(launcher):
     assert result.returncode == 1
     assert "flapsim-qemu:" in result.stderr
     assert "libqemu-xtensa.so" in result.stderr
+
+
+@pytest.mark.parametrize("option", ["--version", "--help"])
+def test_information_probe_needs_no_model_configuration(launcher, option):
+    compile_library(launcher)
+    result = subprocess.run(
+        [str(launcher), option],
+        capture_output=True,
+        text=True,
+        env={k: v for k, v in os.environ.items() if k != "FLAPSIM_CONFIG"},
+    )
+    assert result.returncode == 0
+    assert result.stdout == "QEMU fixture information\n"
