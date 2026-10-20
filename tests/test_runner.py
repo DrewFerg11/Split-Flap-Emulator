@@ -281,6 +281,54 @@ def test_two_concurrent_cli_instances_are_isolated(arguments, tmp_path):
                 child.wait()
 
 
+@pytest.mark.parametrize(
+    "missing",
+    [
+        ("version",),
+        ("mode",),
+        ("timeout",),
+        ("version", "mode"),
+        ("version", "timeout"),
+        ("mode", "timeout"),
+        ("version", "mode", "timeout"),
+    ],
+)
+def test_cli_missing_boot_fields_fail_before_launch(arguments, tmp_path, missing):
+    document = {"version": 1, "mode": "boot", "timeout": 2}
+    scenario = tmp_path / "incomplete.yaml"
+    scenario.write_text(
+        json.dumps({key: value for key, value in document.items() if key not in missing})
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "flapsim.cli",
+            "run",
+            "--firmware",
+            str(arguments.firmware),
+            "--hardware",
+            arguments.hardware,
+            "--scenario",
+            str(scenario),
+            "--out",
+            str(arguments.out),
+            "--qemu-prefix",
+            str(arguments.qemu_prefix),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert completed.returncode == 2
+    assert "Invalid run: boot scenario:" in completed.stderr
+    assert "missing [" in completed.stderr
+    assert all(field in completed.stderr for field in missing)
+    assert "Traceback" not in completed.stderr
+    assert not arguments.out.exists()
+
+
 def test_boot_document_rejects_unknown_fields_and_invalid_expectation(tmp_path):
     path = tmp_path / "scenario.yaml"
     hardware = load_hardware("esp32-8-single")

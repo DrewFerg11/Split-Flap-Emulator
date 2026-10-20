@@ -28,7 +28,9 @@ expect_text: XXXXXXXX
 It waits for the real firmware banner and a fresh settlement after movement,
 with no stalls/anomalies and, when specified, exact text in module order.
 `--scenario boot` omits the text assertion; it still requires movement and the
-banner. Unknown keys, unsupported modes, duplicate YAML keys, invalid deadlines
+banner. `version`, `mode`, and `timeout` are required. Missing fields report
+their names with invalid-input exit code 2 before launch. Unknown keys,
+unsupported modes, duplicate YAML keys, invalid deadlines
 and text that cannot fit the physical modules fail before launch. Full scenario
 steps, version checks, reports and replay arrive in phase 4. The separate golden
 evidence checker retains the narrowly scoped discovery/error assertions; a
