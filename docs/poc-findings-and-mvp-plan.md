@@ -304,15 +304,15 @@ GitHub Actions checks land with each phase, starting in phase 1. The original st
 technical references. Golden regression checks from step 11 are introduced incrementally in phases 1–4;
 maintenance documentation is completed in phase 5.
 
-Phase 1 is **approved, awaiting maintainer merge** on `mvp/02-foundation`; phase 2 is stacked on `mvp/03-hardware-model`. Later phases
+Phase 1 is **merged** in main as `9663764`; phase 2 is rebased onto main on `mvp/03-hardware-model` for review. Later phases
 are queued. No phase is complete until its
 implementation is merged and acceptance passes. See the [ordered PR queue](implementation-queue.md) and
 [phase-1 reproduction instructions](development.md).
 
 | Phase | Tracking issue | Original steps | Status |
 |---|---|---|---|
-| 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | In progress: [PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9); [current CI passed](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39358214724); Hermes approved `74c2b98`; maintainer merge pending; [ADR](adr/0001-qemu-integration.md) |
-| 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | In progress: [draft PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10); both real layouts verified; [hardware/schema contract](hardware-model.md); CI running |
+| 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | Merged: [PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9); [current CI passed](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39358214724); Hermes approved before merge; merged as `9663764`; [ADR](adr/0001-qemu-integration.md) |
+| 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | In progress: [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10); rebased onto main `9663764`; both real layouts verified before rebase; [hardware/schema contract](hardware-model.md); updated checks and Hermes review pending |
 | 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | Not started |
 | 4 | [Scenarios, smoke tests, reports, and replay](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | 6–8; golden regression checks from 11 | Not started |
 | 5 | [Docker packaging, verified publishing, and maintenance](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | 9; maintenance from 11 | Not started |
