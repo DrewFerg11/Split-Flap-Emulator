@@ -59,7 +59,7 @@ target; unit tests and old local image diagnostics are not timing evidence.
 ## Safe dry runs and negative proofs
 
 On a trusted authorized version tag containing the companion workflow, manually
-dispatch **Release** with `dry_run=true` (the manual default). The same approval,
+dispatch **Release / Tag** with `dry_run=true` (the manual default). The same approval,
 builds, factory artifact and simulation path execute. With `sim_probe=none`, both
 layouts must pass and publication eligibility must succeed while emitting
 `publish=false`. Neither GitHub Release nor Pages runs. A normal tag push still
