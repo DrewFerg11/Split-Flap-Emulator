@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -312,3 +313,30 @@ def test_failed_source_builds_are_reported_with_their_log(native_args, monkeypat
     monkeypatch.setenv("FLAPSIM_NATIVE_ROOT", str(tmp_path / "missing"))
     with pytest.raises(ValueError, match="needs the native sources"):
         native.build_from_source("golden", tmp_path / "b", tmp_path / "log")
+
+
+def test_source_build_timeout_stops_the_whole_build_tree(monkeypatch, tmp_path):
+    root = tmp_path / "native-root"
+    (root / "native").mkdir(parents=True)
+    pid_file = tmp_path / "grandchild.pid"
+    # Like git or the compiler: a grandchild the build script itself waits on.
+    (root / "native/build.py").write_text(
+        "import pathlib, subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+        "child.wait()\n"
+    )
+    monkeypatch.setenv("FLAPSIM_NATIVE_ROOT", str(root))
+    with pytest.raises(ValueError, match="native build exceeded 2 s"):
+        native.build_from_source("golden", tmp_path / "b", tmp_path / "log", timeout=2)
+    grandchild = int(pid_file.read_text())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            state = Path(f"/proc/{grandchild}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        except FileNotFoundError:
+            return
+        if state == "Z":
+            return
+        time.sleep(0.05)
+    pytest.fail("the build's grandchild survived the timeout")

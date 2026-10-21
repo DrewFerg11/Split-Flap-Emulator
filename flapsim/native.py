@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from flapsim.hardware import ROOT, write_model_config
+from flapsim.process import group_exists, stop_group
 
 SPEED_RANGE = (0.25, 50.0)
 DEFAULT_SPEED = 5.0
@@ -39,14 +40,19 @@ def build_from_source(spec, out, log, *, jobs=None, timeout=1800):
     if jobs:
         command += ["--jobs", str(jobs)]
     with open(log, "w") as output:
+        # Its own session, so a timeout or interrupt also stops git and the compiler tree.
+        process = subprocess.Popen(
+            command, stdout=output, stderr=subprocess.STDOUT, start_new_session=True
+        )
         try:
-            completed = subprocess.run(
-                command, stdout=output, stderr=subprocess.STDOUT, timeout=timeout, check=False
-            )
+            returncode = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired as error:
             raise ValueError(f"native build exceeded {timeout} s; see {log}") from error
-    if completed.returncode != 0:
-        raise ValueError(f"native build failed ({completed.returncode}); see {log}")
+        finally:
+            if process.poll() is None or group_exists(process):
+                stop_group(process)
+    if returncode != 0:
+        raise ValueError(f"native build failed ({returncode}); see {log}")
     return out
 
 

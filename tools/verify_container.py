@@ -263,20 +263,32 @@ class ImageVerifier:
             (source, "/firmware-src"),
             (ROOT / "baselines/v1.4.1-native.yaml", "/known-issues.yaml"),
         ]
+        # The case covers a full firmware build plus the scenario.
+        timeout = 1200 * self.args.timeout_scale
         with self.container(name, command, mounts) as (container_id, case):
-            completed = subprocess.run(
-                self.docker + ["start", "--attach", container_id], check=False, timeout=1200
+            record = {"case": name, "exit_code": None, "expected_exit": 0}
+            try:
+                completed = subprocess.run(
+                    self.docker + ["start", "--attach", container_id], check=False, timeout=timeout
+                )
+            except subprocess.TimeoutExpired as error:
+                record["error"] = f"container exceeded {timeout} s"
+                self.cases.append(record)
+                message = f"native container {name} failed verification: {record}"
+                raise RuntimeError(message) from error
+            record["exit_code"] = completed.returncode
+            try:
+                manifest = json.loads((case / "run/run.json").read_text())
+            except FileNotFoundError:
+                # A failed source build stops before the run manifest; native-build.log and
+                # docker.log hold the evidence.
+                manifest = {"error": "no run.json: the run stopped before its manifest"}
+            record.update(
+                wall_seconds=manifest.get("wall_seconds"),
+                error=manifest.get("error"),
+                status=manifest.get("status"),
+                known_issues=manifest.get("known_issues"),
             )
-            manifest = json.loads((case / "run/run.json").read_text())
-            record = {
-                "case": name,
-                "exit_code": completed.returncode,
-                "expected_exit": 0,
-                "wall_seconds": manifest.get("wall_seconds"),
-                "error": manifest.get("error"),
-                "status": manifest.get("status"),
-                "known_issues": manifest.get("known_issues"),
-            }
             self.cases.append(record)
             firmware = manifest.get("firmware", {})
             if (
