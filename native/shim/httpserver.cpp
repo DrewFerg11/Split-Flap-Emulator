@@ -87,8 +87,9 @@ String decode_path(const std::string &target) {
 Parsed parse(const std::string &data) {
     Parsed result;
     size_t end = data.find("\r\n\r\n");
-    if (end == std::string::npos) {
-        result.too_large = data.size() > kMaxHeader;
+    /* The limit holds whether or not the terminator arrived in the same read. */
+    if (end == std::string::npos || end > kMaxHeader) {
+        result.too_large = end != std::string::npos || data.size() > kMaxHeader;
         return result;
     }
     size_t line_end = data.find("\r\n");
