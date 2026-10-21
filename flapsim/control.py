@@ -98,6 +98,7 @@ class SnapshotClient:
         try:
             if self.closed:
                 raise Unavailable("model channel is unavailable")
+            stage = "intent_audit"
             try:
                 if command is not None:
                     journal({"phase": "intent", "command": command})
@@ -106,7 +107,9 @@ class SnapshotClient:
                     if command is None
                     else (b"FLAPSIM_MECH/1 " + json.dumps(command, separators=(",", ":")).encode())
                 )
+                stage = "model_exchange"
                 result = self._exchange(request)
+                stage = "reply_validation"
                 if command is not None and isinstance(result, dict) and set(result) == {"error"}:
                     if result["error"] not in {
                         "module_not_found",
@@ -126,12 +129,27 @@ class SnapshotClient:
                     ):
                         raise ValueError("model reply does not identify the command")
                 if command is not None:
+                    stage = "result_audit"
                     journal({"phase": "result", "command": command, "result": result})
                 return result
             except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
                 self.closed = True
                 self.connection.close()
-                # An intent without a result is explicitly unknown, never automatically retried.
+                if command is not None:
+                    try:
+                        journal(
+                            {
+                                "phase": "unknown",
+                                "command": command,
+                                "stage": stage,
+                                "error": type(error).__name__,
+                                "channel": "closed",
+                            }
+                        )
+                    except (OSError, ValueError, TypeError, KeyError, RecursionError):
+                        # The audit sink itself may be broken; never invent a durable outcome.
+                        pass
+                # An intent without a result is also unknown, never automatically retried.
                 raise Unavailable("model reply unavailable") from error
         finally:
             self.lock.release()

@@ -225,3 +225,38 @@ def test_bad_mechanics_cannot_be_exposed_as_valid_live_state():
     finally:
         client.close()
         worker.join(1)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "unwritable_audit"])
+def test_failed_edit_closes_channel_and_records_unknown_when_audit_is_writable(failure):
+    hardware, _ = recorded_snapshot()
+    parent, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    client = SnapshotClient(parent, hardware)
+    entries = []
+
+    def journal(entry):
+        if failure == "unwritable_audit":
+            raise OSError("injected persistent audit failure")
+        entries.append(entry)
+
+    command = {"id": 1, "expected_revision": 0, "bus": 0, "addr": 32, "patch": {"flap_offset": 5}}
+    try:
+        with pytest.raises(Unavailable):
+            client.dispatch(command, journal)
+        assert client.closed
+        with pytest.raises(Unavailable):
+            client.snapshot()
+        if failure == "timeout":
+            assert [entry["phase"] for entry in entries] == ["intent", "unknown"]
+            assert entries[-1] == {
+                "phase": "unknown",
+                "command": command,
+                "stage": "model_exchange",
+                "error": "TimeoutError",
+                "channel": "closed",
+            }
+        else:
+            assert entries == []
+    finally:
+        client.close()
+        peer.close()

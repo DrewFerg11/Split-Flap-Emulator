@@ -80,7 +80,9 @@ Reusing it with a different command, or using an older ID, returns
 `409 stale_or_reused_id`. Rejected commands do not consume their ID.
 
 A `202` response includes `status: applied` and `operation` with the original
-command, resulting revision, model sequence and guest time. This implementation
+command, resulting revision, model sequence and guest time. The runner verifies
+the entire command identity before returning 202, including for a deduplicated
+retry: `operation.command.id` always matches the submitted ID. This implementation
 waits for the bounded owner-context application before acknowledging; it has no
 asynchronous admission queue. `GET /api/emu/operations/{id}` returns that same
 receipt for the **latest applied command only**, even after a controller reset.
@@ -90,14 +92,34 @@ through native model resume. Older IDs remain below the durable high-water mark
 and cannot be reapplied. The result endpoint consults the live model, not the
 runner's journal.
 
-The runner appends and fsyncs an intent in `control.jsonl` before dispatch, then a
-result before acknowledging. The model writes a correlated `mechanics_changed`
-timeline/state record and fsyncs the timeline before success. Transport, deadline or audit-write failure
-returns `503 result_unknown`, closes the private channel, and never retries the
-command automatically. The edit may have applied: consult the model receipt if
-the backend is available, or the complete timeline record. An intent alone is not
-proof of application. A second concurrent backend request returns bounded 503;
-there is no waiting queue. HTTP validation failures never reach the model.
+The runner appends and fsyncs an intent in `control.jsonl` before every admitted
+edit dispatch, then a result before acknowledging, including deduplication hits
+and model rejections. The model writes a correlated `mechanics_changed`
+timeline/state record and fsyncs the timeline before success. Transport, deadline
+or audit-write failure returns `503 result_unknown`, closes the private channel,
+and never retries the command automatically. A best-effort `unknown` journal
+entry identifies the command, failed stage, exception class and channel closure; if the audit sink
+itself is broken, that entry may also be absent. An intent without a result is
+unknown, and neither an intent nor an `unknown` entry proves application failed.
+
+Channel poisoning makes **all control reads and edits unavailable for the current
+child**, including state and operation lookup. The current runner does not
+reconnect a poisoned channel to a running child. Firmware execution continues;
+control recovery requires a new child/run. Reconnection is future integration work.
+
+The latest receipt endpoint is usable only while the backend channel is available
+and that edit remains the latest applied command. A subsequent edit replaces that
+live receipt. The **append-only timeline retains every completed
+`mechanics_changed` record**, so the earlier command's receipt remains recoverable
+there even after a later edit. Preserve the run's timeline and audit journal.
+Use `control.run_id` in `run.json` to identify the timeline's run and match it
+with the journal's run ID and the receipt's command ID; IDs are scoped to a run.
+An acknowledged edit or deduplication also has a per-attempt journal result. Do
+not interpret an older ID's `404 unknown`, or an intent without a complete model
+record, as proof that the edit did not happen.
+
+A second concurrent backend request returns bounded 503; there is no waiting
+queue. HTTP validation failures never reach the model.
 
 Other mutation errors: malformed JSON 400, foreign Host/Origin 403, missing module
 404, body timeout 408, oversized body 413, wrong Content-Type 415 and invalid command
@@ -193,8 +215,8 @@ in its model library, passes shim tests, and passes boot and Improv re-exec
 verification on both layouts. This checks model compatibility; it does not add
 the native HTTP transport that depends on the remaining native runner stack.
 
-For the mechanics slice, the complete regression suite passes **453 tests**.
-The 162 model/control tests also pass with AddressSanitizer and UndefinedBehaviorSanitizer
+For the mechanics slice, the complete regression suite passes **456 tests**.
+The 165 model/control tests also pass with AddressSanitizer and UndefinedBehaviorSanitizer
 instrumentation. The native golden source builds and passes shim tests; boot and
 Improv reboot verification pass on both layouts, including a fresh reboot check
 with the final model. Direct C/HTTP tests cover atomic rejection, open transactions,

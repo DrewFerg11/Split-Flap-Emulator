@@ -1034,10 +1034,20 @@ def test_lost_acknowledgement_never_reapplies_a_mechanics_command(make_model):
     parent.close()  # Simulate the client disappearing after sending its command.
     with child:
         assert model.lib.fs_control_serve(child.fileno(), model.now) == 0
-    assert model.state()["last_operation"]["command"] == command
+    receipt = model.state()["last_operation"]
+    assert receipt["command"] == command
     before = model.timeline()
     assert model.control({"flap_offset": 5})["mechanics_revision"] == 1
     assert model.timeline() == before
+    second = model.control({"flap_offset": 9}, identifier=2, revision=1)
+    assert second["last_operation"]["command"]["id"] == 2
+    # Replacing the live receipt never removes the earlier append-only timeline record.
+    applied = [
+        frame["last_operation"]
+        for frame in model.timeline()
+        if frame["event"] == "mechanics_changed"
+    ]
+    assert applied == [receipt, second["last_operation"]]
 
 
 def test_native_resume_restores_overlay_before_validating_angle(make_model):
@@ -1075,6 +1085,11 @@ def test_http_lost_audit_commit_reports_unknown_even_after_model_applied(model_h
     )
     assert code == 503 and response == {"error": "result_unknown", "id": 1}
     assert model.state()["mechanics_revision"] == 1
+    journal = [json.loads(line) for line in (model.out / "control.jsonl").read_text().splitlines()]
+    assert [entry["phase"] for entry in journal] == ["intent", "result", "unknown"]
+    assert journal[-1]["stage"] == "result_audit" and journal[-1]["channel"] == "closed"
+    assert journal[-1]["error"] == "OSError"
+    assert journal[-1]["command"]["id"] == 1
     assert http_control(server, path="/api/emu/state")[0] == 503
 
 
@@ -1097,3 +1112,25 @@ def test_http_slow_body_is_bounded_and_does_not_touch_model(model_http):
         assert len(model.timeline()) == 1
     finally:
         connection.close()
+
+
+def test_private_transport_rejects_oversize_even_with_a_valid_maximum_size_prefix(make_model):
+    model = make_model()
+    command = {"id": 1, "expected_revision": 0, "bus": 0, "addr": 32, "patch": {"flap_offset": 5}}
+    prefix = b"FLAPSIM_MECH/1 "
+    encoded = json.dumps(command).encode()
+    valid = prefix + encoded[:-1] + b" " * (2048 - len(prefix) - len(encoded)) + b"}"
+    assert len(valid) == 2048
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    with parent, child:
+        before = model.timeline()
+        parent.sendall(valid + b"junk")
+        assert model.lib.fs_control_serve(child.fileno(), model.now) == 1
+        assert "error" in json.loads(parent.recv(65536))
+        assert model.timeline() == before
+        # Prove the truncated prefix would have been a valid command, rather than
+        # relying on invalid JSON to reject it. Linux recv(MSG_TRUNC) returns the
+        # original sequenced-packet length and the C size guard rejects that packet.
+        parent.sendall(valid)
+        assert model.lib.fs_control_serve(child.fileno(), model.now) == 1
+        assert json.loads(parent.recv(65536))["mechanics_revision"] == 1
