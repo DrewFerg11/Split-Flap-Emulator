@@ -32,7 +32,7 @@ struct Connection {
 };
 
 struct Parsed {
-    bool complete = false, invalid = false, too_large = false;
+    bool complete = false, invalid = false, too_large = false, unsupported = false;
     WebRequestMethodComposite method = 0;
     String url, content_type, body;
 };
@@ -127,6 +127,10 @@ Parsed parse(const std::string &data) {
                 return result;
             }
             length = size_t(parsed);
+        } else if (name == "transfer-encoding") {
+            /* Chunked request bodies are not decoded; refuse them rather than drop the body. */
+            result.unsupported = result.complete = true;
+            return result;
         }
     }
     if (data.size() - end - 4 < length)
@@ -200,8 +204,10 @@ void serve(AsyncWebServer *server, int listener) {
                 Parsed request = parse(connection.data);
                 if (request.complete || request.too_large) {
                     AsyncWebServerRequest::Response response;
-                    if (request.too_large || request.invalid || !request.method) {
+                    if (request.too_large || request.invalid || request.unsupported ||
+                        !request.method) {
                         response.code = request.too_large                   ? 413
+                                        : request.unsupported               ? 501
                                         : request.method || request.invalid ? 400
                                                                             : 501;
                     } else {

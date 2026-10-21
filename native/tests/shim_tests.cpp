@@ -349,6 +349,9 @@ void http_transport() {
     std::string oversized =
         "GET /echo HTTP/1.1\r\nX-Pad: " + std::string(17 * 1024, 'a') + "\r\n\r\n";
     CHECK(exchange(http_port, {oversized}).find("HTTP/1.1 413") == 0);
+    CHECK(exchange(http_port, {"POST /echo HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n"
+                               "5\r\nhello\r\n0\r\n\r\n"})
+              .find("HTTP/1.1 501") == 0);
     CHECK(exchange(http_port, {"garbage\r\n\r\n"}).find("HTTP/1.1 400") == 0);
     CHECK(exchange(http_port, {"BREW /echo HTTP/1.1\r\n\r\n"}).find("HTTP/1.1 501") == 0);
 }
