@@ -59,33 +59,53 @@ def positions(seed, count, steps):
     return result
 
 
+def mechanical_range(value, name, lower, upper):
+    """An integer or a bounded, inclusive uniform distribution in full steps."""
+    if isinstance(value, dict):
+        mapping(value, name, {"mean", "spread"})
+        mean = integer(value["mean"], f"{name}.mean", lower, upper)
+        spread = integer(value["spread"], f"{name}.spread", 0, min(mean - lower, upper - mean))
+        return mean, spread
+    return integer(value, name, lower, upper), 0
+
+
 def normalize_hardware(document, *, seed=None):
     document = mapping(document, "hardware", {"chip", "buses", "drum", "start_angles"})
     if document["chip"] != "esp32":
         raise ValueError("chip must be esp32 (ESP32-C3/S3 are outside the MVP)")
+    raw_drum = document["drum"]
     drum = mapping(
-        document["drum"],
+        {"flap_offset": 0, **raw_drum} if isinstance(raw_drum, dict) else raw_drum,
         "drum",
         {
             "steps_per_rotation",
             "flaps",
             "magnet_position",
             "sensor_window",
+            "flap_offset",
         },
     )
-    steps = integer(drum["steps_per_rotation"], "drum.steps_per_rotation", 4, 1_000_000)
+    steps, steps_spread = mechanical_range(
+        drum["steps_per_rotation"], "drum.steps_per_rotation", 4, 1_000_000
+    )
+    min_steps = steps - steps_spread
     flaps = drum["flaps"]
     if (
         not isinstance(flaps, str)
-        or not 2 <= len(flaps) <= min(95, steps)
+        or not 2 <= len(flaps) <= min(95, min_steps)
         or len(set(flaps)) != len(flaps)
         or any(not 32 <= ord(c) <= 126 for c in flaps)
     ):
         raise ValueError(
             "drum.flaps must contain 2–95 unique printable ASCII characters, at most one per step"
         )
-    integer(drum["magnet_position"], "drum.magnet_position", 0, steps - 1)
-    integer(drum["sensor_window"], "drum.sensor_window", 1, steps)
+    magnet, magnet_spread = mechanical_range(
+        drum["magnet_position"], "drum.magnet_position", 0, min_steps - 1
+    )
+    offset, offset_spread = mechanical_range(
+        drum["flap_offset"], "drum.flap_offset", 0, min_steps - 1
+    )
+    integer(drum["sensor_window"], "drum.sensor_window", 1, min_steps)
     buses = document["buses"]
     if not isinstance(buses, list) or not buses:
         raise ValueError("buses must be a nonempty list")
@@ -119,7 +139,7 @@ def normalize_hardware(document, *, seed=None):
     if isinstance(start, list):
         if len(start) != len(identities):
             raise ValueError("start_angles must have one angle per module in bus/address order")
-        angles = [integer(a, "start angle", 0, steps - 1) for a in start]
+        angles = [integer(a, "start angle", 0, min_steps - 1) for a in start]
         resolved_seed = None
     elif start == "random" or isinstance(start, dict):
         if isinstance(start, dict):
@@ -127,20 +147,53 @@ def normalize_hardware(document, *, seed=None):
             resolved_seed = integer(start["seed"], "start_angles.seed", 0, 0xFFFFFFFF)
         else:
             resolved_seed = secrets.randbits(32)
-        angles = positions(resolved_seed, len(identities), steps)
     else:
         raise ValueError("start_angles must be random, {seed: integer}, or an angle list")
     if seed is not None:
         resolved_seed = integer(seed, "seed override", 0, 0xFFFFFFFF)
-        angles = positions(resolved_seed, len(identities), steps)
+    # Separate streams keep starts and each mechanical parameter independent.
+    mechanical_seed = resolved_seed if resolved_seed is not None else 0
+    geometry = []
+    for mean, spread, salt in [
+        (steps, steps_spread, 0xA341316C),
+        (magnet, magnet_spread, 0xC8013EA4),
+        (offset, offset_spread, 0xAD90777D),
+    ]:
+        geometry.append(
+            [
+                mean - spread + n
+                for n in positions(mechanical_seed ^ salt, len(identities), 2 * spread + 1)
+            ]
+        )
+    if resolved_seed is not None:
+        angles = [
+            a % module_steps
+            for a, module_steps in zip(
+                positions(resolved_seed, len(identities), 0x100000000), geometry[0], strict=True
+            )
+        ]
     return {
         "schema_version": 1,
         "chip": "esp32",
         "seed": resolved_seed,
-        "drum": dict(drum),
+        "drum": {
+            **drum,
+            "steps_per_rotation": steps,
+            "magnet_position": magnet,
+            "flap_offset": offset,
+        },
         "modules": [
-            {"bus": b, "addr": a, "angle": angle}
-            for (b, a), angle in zip(identities, angles, strict=True)
+            {
+                "bus": b,
+                "addr": a,
+                "angle": angle,
+                "steps_per_rotation": rotation,
+                "magnet_position": magnet_at,
+                "flap_offset": flap_at,
+            }
+            for (b, a), angle, rotation, magnet_at, flap_at in zip(
+                identities, angles, *geometry, strict=True
+            )
         ],
     }
 

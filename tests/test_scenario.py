@@ -15,7 +15,7 @@ import yaml
 from test_runner import assert_reaped, cli_command
 
 from flapsim.baseline import KnownIssues, load_known_issues
-from flapsim.executor import ExecutionFailed, RunContext, load_executor
+from flapsim.executor import BootExecutor, ExecutionFailed, RunContext, load_executor
 from flapsim.hardware import load_hardware
 from flapsim.report import write_reports
 from flapsim.runner import run
@@ -281,6 +281,35 @@ def test_cached_display_after_http_needs_explicit_idempotent_opt_in(context, ser
 def test_partial_row_or_old_settlement_cannot_satisfy_wait(context):
     write_state(context.out, FIXTURE["states"][1], moving=True)
     engine = executor([{"wait_display": {"text": "........"}, "timeout": 0.1}])
+    with pytest.raises(TimeoutError):
+        engine.execute(context)
+
+
+@pytest.mark.parametrize("history", [False, True])
+@pytest.mark.parametrize("expected,passes", [("XXXXXXXX", False), (".XXXXXXX", True)])
+def test_stopped_half_flap_fails_named_display_but_wildcard_ignores_it(
+    context, history, expected, passes
+):
+    state = copy.deepcopy(FIXTURE["states"][1])
+    # X is still the nearest flap, but this drum is 0.498 flaps past its center.
+    state["modules"][0]["angle"] = 1356
+    write_state(context.out, state)
+    (context.out / "timeline.jsonl").write_text(json.dumps(state) + "\n")
+    engine = executor([{"wait_display": {"text": expected, "history": history}, "timeout": 0.1}])
+    if passes:
+        engine.execute(context)
+    else:
+        with pytest.raises(TimeoutError):
+            engine.execute(context)
+        assert engine.results[0]["flap_errors"][0] > 0.49
+
+
+def test_legacy_boot_expected_text_also_rejects_half_flap(context):
+    state = copy.deepcopy(FIXTURE["states"][1])
+    state["modules"][0]["angle"] = 1356
+    write_state(context.out, state)
+    context.deadline = time.monotonic() + 0.1
+    engine = BootExecutor(timeout=0.1, document={"expect_text": "XXXXXXXX"})
     with pytest.raises(TimeoutError):
         engine.execute(context)
 

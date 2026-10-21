@@ -88,6 +88,10 @@ void fs_emit(const char *event, bool state) {
         integer(entry, "bus", module->bus);
         integer(entry, "addr", module->addr);
         integer(entry, "angle", module->angle);
+        double position = fs_flap_position(module);
+        json_object_object_add(entry, "flap_position", json_object_new_double(position));
+        int nearest = (int)(position + 0.5);
+        json_object_object_add(entry, "flap_error", json_object_new_double(position - nearest));
         integer(entry, "latch", module->latch);
         integer(entry, "phase", module->phase);
         char shown = fs_shown(module);

@@ -12,7 +12,7 @@ import yaml
 
 from flapsim.hardware import HardwareLoader, mapping
 from flapsim.resources import resolve_resource
-from flapsim.state import read_settlement
+from flapsim.state import display_aligned, read_settlement
 
 
 class ExecutionFailed(RuntimeError):
@@ -89,7 +89,10 @@ class BootExecutor:
                 and "=== Split Flap Display ===" in context.serial()
                 and (
                     self.document.get("expect_text") is None
-                    or state["text"] == self.document["expect_text"]
+                    or (
+                        state["text"] == self.document["expect_text"]
+                        and display_aligned(state, self.document["expect_text"])
+                    )
                 )
             ):
                 return {"state": state}

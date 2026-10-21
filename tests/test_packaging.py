@@ -89,6 +89,8 @@ def test_builtins_resolve_outside_checkout_and_explicit_bad_paths_do_not_fall_ba
     monkeypatch.chdir(tmp_path)
     assert len(load_hardware("esp32-8-single")["modules"]) == 8
     assert len(load_hardware("esp32-16-dual.yaml")["modules"]) == 16
+    assert len(load_hardware("esp32-8-single-realistic")["modules"]) == 8
+    assert len(load_hardware("esp32-16-dual-realistic.yaml")["modules"]) == 16
     executor = load_executor(
         "release-smoke-8",
         load_hardware("esp32-8-single"),

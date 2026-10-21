@@ -10,7 +10,7 @@ import time
 from urllib.parse import urlsplit
 
 from flapsim.executor import ExecutionFailed, RunContext, positive_timeout
-from flapsim.state import read_settlement, validate_identity, validate_state
+from flapsim.state import display_aligned, read_settlement, validate_identity, validate_state
 
 VARIABLE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 STEPS = {"wait_serial", "expect_serial", "wait_display", "http", "assert_no_errors", "sleep_guest"}
@@ -497,7 +497,10 @@ class ScenarioExecutor:
                     )
                     if not unchanged:
                         continue
-                if display_matches(value["text"], state["text"]):
+                result["flap_errors"] = [m["flap_error"] for m in state["modules"]]
+                if display_matches(value["text"], state["text"]) and display_aligned(
+                    state, value["text"]
+                ):
                     self.display_cursor = state["sequence"]
                     self.command_baseline = None
                     result.update(actual=state["text"], state=state, unchanged=unchanged)

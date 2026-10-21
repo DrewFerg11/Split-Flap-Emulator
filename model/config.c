@@ -49,6 +49,15 @@ static int number(struct json_object *obj, const char *key, int lower, int upper
     return (int)integer;
 }
 
+static int optional_number(struct json_object *obj, const char *key, int lower, int upper,
+                           int fallback) {
+    struct json_object *value;
+    if (obj && json_object_is_type(obj, json_type_object) &&
+        !json_object_object_get_ex(obj, key, &value))
+        return fallback;
+    return number(obj, key, lower, upper);
+}
+
 static char *output_path(struct json_object *outputs, const char *key) {
     struct json_object *value = field(outputs, key, json_type_string);
     if (!value)
@@ -105,7 +114,16 @@ int fs_model_init(const char *config_path) {
             FsModule *module = &fs.modules[i];
             module->bus = number(entry, "bus", 0, 1);
             module->addr = number(entry, "addr", 0x20, 0x27);
-            module->angle = number(entry, "angle", 0, fs.steps - 1);
+            module->steps = optional_number(entry, "steps_per_rotation",
+                                            fs.nflaps > 4 ? fs.nflaps : 4, 1000000, fs.steps);
+            module->magnet =
+                optional_number(entry, "magnet_position", 0, module->steps - 1, fs.magnet);
+            module->flap_offset = optional_number(entry, "flap_offset", 0, module->steps - 1, 0);
+            if (module->magnet >= module->steps)
+                fs_fail("magnet_position exceeds module steps_per_rotation");
+            if (fs.window > module->steps)
+                fs_fail("sensor_window exceeds module steps_per_rotation");
+            module->angle = number(entry, "angle", 0, module->steps - 1);
             module->phase = -1;
             module->latch = 0xffe1;
             if (i &&
