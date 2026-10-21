@@ -25,7 +25,7 @@ RUN --mount=type=secret,id=ca_bundle \
       export SSL_CERT_FILE=/run/secrets/ca_bundle PIP_CERT=/run/secrets/ca_bundle; \
     fi; \
     python3 -m venv /build-venv \
-    && /build-venv/bin/pip wheel --wheel-dir /wheels . \
+    && /build-venv/bin/pip wheel --wheel-dir /wheels '.[control]' \
     && tar --exclude-vcs --exclude=build --exclude='*.egg-info' --exclude='__pycache__' \
       -cJf /source-archives/flapsim.tar.xz . \
     && python3 tools/build_provenance.py --revision "$SOURCE_REVISION" \
@@ -47,7 +47,7 @@ LABEL org.opencontainers.image.source="https://github.com/DrewFerg11/Split-Flap-
       org.opencontainers.image.version="$EMULATOR_VERSION" \
       org.opencontainers.image.licenses="GPL-2.0-only"
 COPY --from=build /wheels /wheels
-RUN /opt/flapsim/venv/bin/pip install --no-index --find-links=/wheels flapsim \
+RUN /opt/flapsim/venv/bin/pip install --no-index --find-links=/wheels 'flapsim[control]' \
     && rm -rf /wheels
 COPY --from=build /opt/flapsim/qemu /opt/flapsim/qemu
 COPY --from=build /source-archives /usr/share/doc/flapsim/sources

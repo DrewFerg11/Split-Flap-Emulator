@@ -34,10 +34,10 @@ def read_settlement(out: Path, hardware):
     return validate_state(state, hardware)
 
 
-def validate_state(state, hardware):
-    """Validate a complete, all-off historical settlement without reading live activity."""
+def validate_state(state, hardware, *, require_settled=True):
+    """Validate physical state; moving snapshots require an explicit opt-in."""
     validate_identity(state)
-    if not state["settled"]:
+    if require_settled and not state["settled"]:
         raise ValueError("historical snapshot is not settled")
     modules = state.get("modules")
     if not isinstance(modules, list) or len(modules) != len(hardware["modules"]):
@@ -48,7 +48,9 @@ def validate_state(state, hardware):
             type(actual.get(k)) is not int or actual[k] != expected[k] for k in ["bus", "addr"]
         ):
             raise ValueError("model module identity/order mismatch")
-        if actual.get("energized") is not False:
+        if type(actual.get("energized")) is not bool:
+            raise ValueError("invalid model energized flag")
+        if require_settled and actual["energized"]:
             raise ValueError("settled module still has energized coils")
         if type(actual.get("hall")) is not bool:
             raise ValueError("invalid model hall value")
@@ -82,6 +84,8 @@ def validate_state(state, hardware):
         raise ValueError("model text/row data does not match module order")
     if any(sum(m["counters"][k] for m in modules) != state["counters"][k] for k in COUNTERS):
         raise ValueError("model aggregate counters do not match module counters")
+    if state["settled"] != (not any(m["energized"] for m in modules)):
+        raise ValueError("model settled flag does not match coils")
     return state
 
 

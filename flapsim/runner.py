@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 from flapsim.baseline import load_known_issues
+from flapsim.control import channel
 from flapsim.executor import (
     ExecutionFailed,
     InterruptedRun,
@@ -181,6 +182,11 @@ def run(args, *, executor=None, interrupt=None):
         raise InterruptedRun(signum)
     if args.timing not in {"ci", "accurate", "realtime"}:
         raise ValueError("timing must be ci, accurate or realtime")
+    control_port = getattr(args, "control_port", None)
+    if control_port is not None:
+        from flapsim.control import check_port
+
+        check_port(control_port)
     enable_subreaper()
     out = claim_output(args.out)
     manifest = {
@@ -198,15 +204,21 @@ def run(args, *, executor=None, interrupt=None):
         "attempts": [],
     }
     process = None
+    control = None
     exit_code = EXIT_RUNTIME
     try:
+        if control_port is not None:
+            from flapsim.control import ControlServer
+
+            control = ControlServer(control_port, out, hardware)
+            manifest["control"] = control.metadata()
         (out / "flash.bin").write_bytes(data + b"\xff" * (FLASH_SIZE - len(data)))
         config = write_model_config(hardware, out, trace=args.trace)
         deadline = started + timeout
-        with tempfile.TemporaryDirectory(prefix="flapsim-") as control:
+        with tempfile.TemporaryDirectory(prefix="flapsim-") as control_dir:
             for attempt_number in range(1, 6):
                 port = choose_port()
-                qmp = Path(control) / f"qmp-{attempt_number}.sock"
+                qmp = Path(control_dir) / f"qmp-{attempt_number}.sock"
                 command = command_for(prefix, out, port, qmp, args.timing)
                 manifest.update(command=command, endpoint=f"http://127.0.0.1:{port}", port=port)
                 attempt = {"number": attempt_number, "port": port, "command": command}
@@ -223,17 +235,27 @@ def run(args, *, executor=None, interrupt=None):
                     "i2c.log",
                 ]:
                     (out / name).unlink(missing_ok=True)
-                with (out / f"qemu-attempt-{attempt_number}.log").open("wb") as log:
+                with (
+                    channel(control) as (control_env, pass_fds, connection, child_channel),
+                    (out / f"qemu-attempt-{attempt_number}.log").open("wb") as log,
+                ):
                     if time.monotonic() >= deadline:
                         raise TimeoutError("deadline reached before QEMU launch")
                     process = subprocess.Popen(
                         command,
-                        env={**os.environ, "FLAPSIM_CONFIG": str(config)},
+                        env={
+                            **{k: v for k, v in os.environ.items() if k != "FLAPSIM_CONTROL_FD"},
+                            "FLAPSIM_CONFIG": str(config),
+                            **control_env,
+                        },
                         stdin=subprocess.DEVNULL,
                         stdout=log,
                         stderr=subprocess.STDOUT,
                         start_new_session=True,
+                        pass_fds=pass_fds,
                     )
+                    if child_channel is not None:
+                        child_channel.close()
                     attempt["pid"] = process.pid
                     context = RunContext(
                         out, hardware, manifest["endpoint"], process, deadline, interrupt
@@ -244,6 +266,8 @@ def run(args, *, executor=None, interrupt=None):
                             if qmp_ready(qmp, context):
                                 break
                             context.pause()
+                        if control is not None:
+                            control.attach(connection)
                         manifest["status"] = "executing"
                         save_manifest(out, manifest)
                         manifest["result"] = executor.execute(context)
@@ -302,6 +326,13 @@ def run(args, *, executor=None, interrupt=None):
         if process is not None:
             try:
                 stop_group(process)
+            except Exception as error:
+                manifest["cleanup_error"] = str(error)
+                exit_code = EXIT_RUNTIME
+        if control is not None:
+            try:
+                control.close()
+                manifest["control"]["status"] = "stopped"
             except Exception as error:
                 manifest["cleanup_error"] = str(error)
                 exit_code = EXIT_RUNTIME

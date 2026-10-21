@@ -32,7 +32,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libjson-c-dev
-          python -m pip install -e '.[dev]' clang-format==18.1.8
+          python -m pip install -e '.[dev,control]' clang-format==18.1.8
       - name: Lint and format Python
         run: |
           ruff check .
@@ -119,6 +119,8 @@ jobs:
           - {name: homing-42, hardware: esp32-8-single, scenario: homing-random, seed: 42}
           - {name: negative-versions, hardware: esp32-8-single, scenario: version-check, seed: 7}
           - {name: calibration-8, hardware: esp32-8-single-calibration, scenario: calibration-8, seed: 7}
+          - {name: control-8, hardware: esp32-8-single, scenario: boot, seed: 7}
+          - {name: control-16, hardware: esp32-16-dual, scenario: boot, seed: 7}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -158,11 +160,11 @@ jobs:
           set -o pipefail
           timeout --kill-after=30s 18m qemu/build.sh --jobs 4 2>&1 | tee runs/qemu-build.log
       - name: Install Python configuration loader
-        run: python -m pip install -e .
+        run: python -m pip install -e '.[control]'
       - name: Fetch checksum-verified golden firmware
         run: python -m tools.verify_model --fetch-only
       - name: Run real-firmware golden scenario
-        if: matrix.name != 'negative-versions'
+        if: matrix.name != 'negative-versions' && !startsWith(matrix.name, 'control-')
         run: |
           flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
             --hardware "${{ matrix.hardware }}" --scenario "scenarios/${{ matrix.scenario }}.yaml" \
@@ -173,6 +175,12 @@ jobs:
       - name: Prove prerelease and deliberately wrong versions fail
         if: matrix.name == 'negative-versions'
         run: python -m tools.verify_negative_version --out runs/negative-versions
+      - name: Verify live control during motion, pause and reset
+        if: startsWith(matrix.name, 'control-')
+        run: |
+          python -m tools.verify_control \
+            --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+            --hardware "${{ matrix.hardware }}" --out runs/scenario
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
         run: python -m tools.summarize_run runs/scenario/run.json

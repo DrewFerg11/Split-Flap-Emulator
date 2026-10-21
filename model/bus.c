@@ -111,6 +111,7 @@ void fs_model_tick(int64_t guest_ns) {
 void fs_model_guest_reset(void) {
     if (!fs.initialized || fs.failed)
         return;
+    fs.guest_resets++;
     for (int b = 0; b < 2; b++) {
         memset(&fs.buses[b], 0, sizeof(fs.buses[b]));
         fs.buses[b].selected = -1;

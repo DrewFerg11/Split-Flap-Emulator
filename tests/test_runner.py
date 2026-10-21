@@ -9,6 +9,8 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -19,6 +21,43 @@ from flapsim.process import enable_subreaper
 from flapsim.runner import FLASH_SIZE, QEMU_COMMIT, command_for, run
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize("early_exit", [False, True])
+def test_control_listener_is_owned_by_the_run(arguments, monkeypatch, early_exit):
+    arguments.control_port = 0
+    if early_exit:
+        monkeypatch.setenv("FLAPSIM_FAKE_MODE", "exit")
+
+    # The standard fake intentionally has no control adapter. This exercises
+    # admission, metadata and cleanup; real model replies are verified separately.
+    class Probe:
+        timeout = 3
+        document = {"version": 1, "mode": "boot", "timeout": 3}
+
+        def execute(self, context):
+            value = json.loads((context.out / "run.json").read_text())
+            control = value["control"]
+            token = (context.out / "control-token").read_text().strip()
+            assert token not in json.dumps(value)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            request = urllib.request.Request(
+                control["endpoint"] + "/api/emu/state",
+                headers={"Authorization": "Bearer " + token},
+            )
+            with pytest.raises(urllib.error.HTTPError) as error:
+                opener.open(request, timeout=2)
+            assert error.value.code == 503
+            return {}
+
+    code = run(arguments, executor=Probe())
+    value = manifest(arguments)
+    assert code == (3 if early_exit else 0)
+    assert value["control"]["status"] == "stopped"
+    port = int(value["control"]["endpoint"].rsplit(":", 1)[1])
+    with socket.socket() as connection:
+        assert connection.connect_ex(("127.0.0.1", port)) != 0
+    assert_reaped(value)
 
 
 def manifest(args):

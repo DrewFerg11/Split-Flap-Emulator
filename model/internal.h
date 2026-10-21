@@ -30,6 +30,7 @@ typedef struct {
     FsCounters totals;
     bool initialized, failed, pending_anomaly;
     uint64_t movement_id, settlement_id, sequence;
+    uint64_t guest_resets;
     int64_t now, last_snapshot;
     char *state_path, *activity_path;
     FILE *timeline, *trace;
