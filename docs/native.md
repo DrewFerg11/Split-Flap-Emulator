@@ -18,10 +18,11 @@ coverage QEMU mode cannot reach.
 
 ## Status
 
-This first phase provides the build, the shims for everything the firmware touches before it
-needs a network (serial, NVS, LittleFS, Wire, FreeRTOS, Wi-Fi association, reset), and a
-bounded verifier. Host sockets, the HTTP transport and `flapsim run --mode native` follow in
-the next phase; until then the web server routes requests but does not listen.
+Phase 1 ([#27](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/27)): the build, the shims
+for everything the firmware touches without a network and a bounded verifier. Phase 2 adds host
+sockets (`WiFiClient`), the HTTP transport and `flapsim run --mode native`
+([runner](runner.md#native-mode)); the golden smoke scenarios run natively in CI under
+`baselines/v1.4.1-native.yaml`. MQTT and a controlled clock follow.
 
 ## Build
 
@@ -75,11 +76,13 @@ The binary takes one JSON configuration:
   "littlefs": "/abs/run/littlefs",
   "speed": 5,
   "random_seed": 1,
-  "wifi": {"station": "connect", "connect_delay_ms": 1500, "ip": "127.0.0.1"}
+  "wifi": {"station": "connect", "connect_delay_ms": 1500, "ip": "127.0.0.1"},
+  "http_fd": 3
 }
 ```
 
-`model_config` is the normalized hardware JSON that QEMU mode also uses
+`http_fd` is an inherited listening socket that serves the device's port 80 (the runner binds
+it). `model_config` is the normalized hardware JSON that QEMU mode also uses
 (`flapsim.hardware.write_model_config`). Outputs (`state.json`, `activity.json`,
 `timeline.jsonl`) have the same schema in both modes. `serial_input` is optional: it is
 usually a FIFO, read without blocking, and carries Improv frames or other UART input.
@@ -128,6 +131,14 @@ connected boot path homing to `OK` before blanking.
   `abort() was called` record. A fatal signal prints `Guru Meditation Error`. Both reboot with
   `crash/panic`. After a fatal signal, nothing more can be recorded safely: the model resumes
   from its last record, which can lag the drums by up to one 100 ms snapshot of motion.
+- **HTTP.** One server thread accepts on the inherited socket, parses HTTP/1.1 requests (16 KiB
+  headers, 1 MiB bodies) and runs every handler, concurrently with `loop()`, like the device's
+  async_tcp task; each response closes its connection. Routing follows ESPAsyncWebServer 3.6:
+  registration order, `uri`/`uri/…` prefixes, JSON handlers needing `application/json` and a
+  body below 16 KiB (else 400/413), static files preferring the plain file over its `.gz` twin
+  (served with `Content-Encoding: gzip`), and the decoded path without its query string.
+- **Sockets.** `WiFiClient` is a host TCP socket (copies share it). Like the device it connects
+  only once Wi-Fi has joined a network as a station; the connect timeout is in virtual time.
 - **Wi-Fi.** The access point always reports `192.168.4.1`, so scenarios read the same in
   both modes. Station mode associates with any SSID after `connect_delay_ms`, unless `station`
   is `fail`, and then reports `wifi.ip`. Scanning returns one network, `flapsim`. mDNS and OTA

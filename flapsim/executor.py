@@ -105,7 +105,9 @@ def load_executor(
     *,
     variables=(),
     firmware_sha256=None,
+    firmware_source=None,
     known_issues=None,
+    mode="qemu",
 ):
     if str(path) == "boot":
         document = {"version": 1, "mode": "boot", "timeout": 240}
@@ -126,7 +128,9 @@ def load_executor(
             hardware,
             variables,
             firmware_sha256=firmware_sha256,
+            firmware_source=firmware_source,
             known_issues=known_issues,
+            mode=mode,
         )
     if variables or known_issues is not None:
         raise ValueError("variables and known issues require a step-based scenario")

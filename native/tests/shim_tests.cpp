@@ -4,6 +4,7 @@
 #include "AsyncJson.h"
 #include "LittleFS.h"
 #include "Preferences.h"
+#include "WiFi.h"
 #include "Wire.h"
 #include "host.h"
 #include "vclock.h"
@@ -12,12 +13,17 @@ extern "C" {
 #include "model.h"
 }
 
+#include <arpa/inet.h>
 #include <cstdio>
 #include <fstream>
 #include <functional>
+#include <netinet/in.h>
 #include <sstream>
 #include <string>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <thread>
+#include <unistd.h>
 #include <vector>
 
 namespace {
@@ -284,6 +290,96 @@ void wire() {
     CHECK(read_file(directory + "/timeline.jsonl").find("\"anomalies\":0") != std::string::npos);
 }
 
+int listening_socket(uint16_t *port) {
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    socklen_t length = sizeof(address);
+    ::bind(fd, reinterpret_cast<sockaddr *>(&address), length);
+    ::listen(fd, 8);
+    ::getsockname(fd, reinterpret_cast<sockaddr *>(&address), &length);
+    *port = ntohs(address.sin_port);
+    return fd;
+}
+
+/* One raw HTTP exchange; the request may be sent in pieces to exercise incremental parsing. */
+std::string exchange(uint16_t port, const std::vector<std::string> &pieces) {
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (::connect(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0)
+        return "";
+    for (const auto &piece : pieces) {
+        ::send(fd, piece.data(), piece.size(), 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    std::string response;
+    char buffer[4096];
+    for (ssize_t count; (count = ::recv(fd, buffer, sizeof(buffer), 0)) > 0;)
+        response.append(buffer, size_t(count));
+    ::close(fd);
+    return response;
+}
+
+uint16_t http_port;
+
+void http_transport() {
+    static AsyncWebServer server(80);
+    server.on("/echo", HTTP_POST | HTTP_GET, [](AsyncWebServerRequest *r) {
+        r->send(200, "text/plain", r->url() + "|" + r->contentType() + "|" + r->body());
+    });
+    server.begin();
+    std::string reply =
+        exchange(http_port, {"POST /echo?x=1 HTTP/1.1\r\nContent-Type: application/json; "
+                             "charset=utf-8\r\nContent-Length: 5\r\n\r\n{\"",
+                             "a\"}"});
+    CHECK(reply.find("HTTP/1.1 200 OK\r\n") == 0);
+    CHECK(reply.find(
+              "Content-Length: 28\r\nConnection: close\r\n\r\n/echo|application/json|{\"a\"}") !=
+          std::string::npos);
+    CHECK(exchange(http_port, {"GET /%65cho HTTP/1.1\r\n\r\n"}).find("/echo||") !=
+          std::string::npos);
+    CHECK(exchange(http_port, {"GET /missing HTTP/1.1\r\n\r\n"}).find("HTTP/1.1 404 Not Found") ==
+          0);
+    CHECK(exchange(http_port, {"POST /echo HTTP/1.1\r\nContent-Length: 99999999\r\n\r\n"})
+              .find("HTTP/1.1 413") == 0);
+    CHECK(exchange(http_port, {"garbage\r\n\r\n"}).find("HTTP/1.1 400") == 0);
+    CHECK(exchange(http_port, {"BREW /echo HTTP/1.1\r\n\r\n"}).find("HTTP/1.1 501") == 0);
+}
+
+void sockets() {
+    uint16_t port;
+    int listener = listening_socket(&port);
+    WiFiClient client;
+    IPAddress loopback(127, 0, 0, 1);
+    CHECK(!client.connect(loopback, port)); /* no station association yet */
+    WiFi.mode(WIFI_STA);
+    WiFi.begin("lab", "secret");
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 5000)
+        delay(10);
+    CHECK(WiFi.status() == WL_CONNECTED && WiFi.localIP().toString() == "127.0.0.1");
+    CHECK(client.connect("localhost", port));
+    int peer = ::accept(listener, nullptr, nullptr);
+    CHECK(client.write(reinterpret_cast<const uint8_t *>("ping"), 4) == 4);
+    char buffer[8] = {};
+    CHECK(::recv(peer, buffer, sizeof(buffer), 0) == 4 && std::string(buffer) == "ping");
+    ::send(peer, "pong", 4, 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK(client.available() == 4 && client.peek() == 'p' && client.read() == 'p');
+    ::close(peer);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK(client.connected()); /* unread data keeps it connected, as on the device */
+    uint8_t rest[3];
+    CHECK(client.read(rest, 3) == 3);
+    CHECK(!client.connected());
+    WiFi.disconnect(true);
+    ::close(listener);
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -296,8 +392,10 @@ int main(int argc, char **argv) {
     config.serial_log = directory + "/serial.log";
     config.nvs = directory + "/nvs.json";
     config.littlefs = directory + "/littlefs";
+    config.http_fd = listening_socket(&http_port);
     flapsim::host::configure_for_tests(config);
-    for (auto test : {strings, preferences, clock, filesystem, webserver, wire})
+    for (auto test :
+         {strings, preferences, clock, filesystem, webserver, http_transport, sockets, wire})
         test();
     std::printf("%s (%d failure%s)\n", failures ? "FAIL" : "PASS", failures,
                 failures == 1 ? "" : "s");

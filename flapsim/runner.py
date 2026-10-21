@@ -11,6 +11,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from flapsim import native
 from flapsim.baseline import load_known_issues
 from flapsim.control import channel
 from flapsim.executor import (
@@ -159,6 +160,8 @@ def save_manifest(out, manifest):
 
 def run(args, *, executor=None, interrupt=None):
     """Return an exit code. Executors cooperate via context.checkpoint/pause for deadlines."""
+    if getattr(args, "mode", "qemu") == "native":
+        return run_native(args, executor=executor, interrupt=interrupt)
     started = time.monotonic()
     # All user configuration/runtime dependencies are checked before creating a child.
     source, data = firmware_bytes(args.firmware)
@@ -191,6 +194,7 @@ def run(args, *, executor=None, interrupt=None):
     out = claim_output(args.out)
     manifest = {
         "schema_version": 1,
+        "mode": "qemu",
         "passed": False,
         "status": "preparing",
         "firmware": {"path": str(source), "size": len(data), "sha256": digest},
@@ -293,35 +297,9 @@ def run(args, *, executor=None, interrupt=None):
                             attempt["returncode"] = process.poll()
                             manifest["qemu_returncode"] = process.poll()
                         process = None
-        # Confirm complete artifacts after stopping, not merely a transient success flag.
-        if not (out / "serial.log").is_file() or not (out / "timeline.jsonl").is_file():
-            raise RuntimeError("missing serial/model diagnostics")
-        if read_settlement(out, hardware) is None:
-            raise RuntimeError("missing fresh final model output")
-        validate_timeline(out / "timeline.jsonl")
-        if hasattr(executor, "verify_final"):
-            executor.verify_final(out, hardware)
-        summary = (
-            executor.known_issue_summary() if hasattr(executor, "known_issue_summary") else None
-        )
-        manifest["status"] = (
-            "passed_with_known_issues" if summary and summary["applied"] else "passed"
-        )
-        exit_code = 0
-    except InterruptedRun as error:
-        exit_code = 128 + error.signum
-        manifest["error"] = str(error)
-    except KeyboardInterrupt:
-        exit_code = 130
-        manifest["error"] = "interrupted by SIGINT"
-    except TimeoutError as error:
-        exit_code = EXIT_TIMEOUT
-        manifest["error"] = str(error)
-    except ExecutionFailed as error:
-        exit_code = EXIT_EXECUTION
-        manifest["error"] = str(error)
-    except Exception as error:
-        manifest["error"] = str(error) or type(error).__name__
+        exit_code = verify_outputs(out, hardware, executor, manifest)
+    except BaseException as error:
+        exit_code = failure_code(error, manifest)
     finally:
         if process is not None:
             try:
@@ -336,38 +314,200 @@ def run(args, *, executor=None, interrupt=None):
             except Exception as error:
                 manifest["cleanup_error"] = str(error)
                 exit_code = EXIT_RUNTIME
-        try:
-            manifest["source_unchanged"] = hashlib.sha256(source.read_bytes()).hexdigest() == digest
-            if not manifest["source_unchanged"]:
-                raise RuntimeError("source firmware changed during execution")
-        except Exception as error:
-            manifest["error"] = str(error)
-            exit_code = EXIT_RUNTIME
-        if interrupt and (signum := interrupt()) is not None:
-            manifest["error"] = str(InterruptedRun(signum))
-            exit_code = 128 + signum
-        manifest["passed"] = exit_code == 0
-        if exit_code:
-            manifest["status"] = "failed"
-        manifest["exit_code"] = exit_code
-        manifest["wall_seconds"] = round(time.monotonic() - started, 3)
-        try:
-            if hasattr(executor, "finalize"):
-                executor.finalize(out, manifest)
-            else:
-                from flapsim.report import write_reports
+        exit_code = finalize(
+            out, manifest, executor, exit_code, started, interrupt, source, digest, "firmware"
+        )
+    return exit_code
 
-                write_reports(out, manifest, [])
-        except Exception as error:
-            manifest.update(
-                passed=False, status="failed", exit_code=EXIT_RUNTIME, report_error=str(error)
+
+def run_native(args, *, executor=None, interrupt=None):
+    """Native mode: the firmware source build runs as a process against the host shims."""
+    started = time.monotonic()
+    if args.native_build is None:
+        args.native_build = native.build_from_source(args.firmware_src)
+    build = native.load_build(args.native_build)
+    firmware = build["info"]["firmware"]
+    speed = native.check_speed(args.speed if args.speed is not None else native.DEFAULT_SPEED)
+    hardware = load_hardware(args.hardware, seed=args.seed)
+    known_issues = None
+    if getattr(args, "known_issues", None) is not None:
+        known_issues = load_known_issues(args.known_issues)
+        known_issues.check_source(firmware.get("commit"), firmware.get("dirty"))
+    executor = executor or load_executor(
+        args.scenario,
+        hardware,
+        variables=getattr(args, "variables", ()),
+        firmware_source=firmware,
+        known_issues=known_issues,
+        mode="native",
+    )
+    timeout = positive_timeout(args.timeout if args.timeout is not None else executor.timeout)
+    emulator = emulator_provenance()
+    if interrupt and (signum := interrupt()) is not None:
+        raise InterruptedRun(signum)
+    enable_subreaper()
+    out = claim_output(args.out)
+    manifest = {
+        "schema_version": 1,
+        "mode": "native",
+        "passed": False,
+        "status": "preparing",
+        "firmware": {
+            **firmware,
+            "binary": {
+                "path": str(build["binary"]),
+                "size": build["binary_size"],
+                "sha256": build["binary_sha256"],
+            },
+        },
+        "hardware": hardware,
+        "seed": hardware["seed"],
+        "native": {**build["info"], "build_dir": str(build["path"]), "speed": speed},
+        "emulator": emulator,
+        "scenario": executor.document,
+        "timeout_seconds": timeout,
+        "attempts": [],
+    }
+    process = None
+    exit_code = EXIT_RUNTIME
+    try:
+        deadline = started + timeout
+        with native.listener() as server:
+            port = server.getsockname()[1]
+            config = native.prepare(
+                out,
+                build,
+                hardware,
+                trace=args.trace,
+                speed=speed,
+                http_fd=server.fileno(),
+                seed=hardware["seed"],
             )
-            exit_code = EXIT_RUNTIME
-        try:
+            command = [str(build["binary"]), "--config", str(config)]
+            manifest.update(command=command, endpoint=f"http://127.0.0.1:{port}", port=port)
+            attempt = {"number": 1, "port": port, "command": command}
+            manifest["attempts"].append(attempt)
+            manifest["status"] = "starting"
             save_manifest(out, manifest)
-        except OSError as error:
-            print(f"Cannot finalize run manifest: {error}", file=sys.stderr)
-            exit_code = EXIT_RUNTIME
+            with (out / "native-attempt-1.log").open("wb") as log:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("deadline reached before native launch")
+                process = subprocess.Popen(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    pass_fds=(server.fileno(),),
+                )
+                attempt["pid"] = process.pid
+                context = RunContext(
+                    out, hardware, manifest["endpoint"], process, deadline, interrupt
+                )
+                try:
+                    while not native.ready(out):
+                        context.pause()
+                    manifest["status"] = "executing"
+                    save_manifest(out, manifest)
+                    manifest["result"] = executor.execute(context)
+                    context.checkpoint()
+                finally:
+                    try:
+                        stop_group(process)
+                    finally:
+                        attempt["returncode"] = process.poll()
+                        manifest["native_returncode"] = process.poll()
+                    process = None
+        exit_code = verify_outputs(out, hardware, executor, manifest)
+    except BaseException as error:
+        exit_code = failure_code(error, manifest)
+    finally:
+        if process is not None:
+            try:
+                stop_group(process)
+            except Exception as error:
+                manifest["cleanup_error"] = str(error)
+                exit_code = EXIT_RUNTIME
+        exit_code = finalize(
+            out,
+            manifest,
+            executor,
+            exit_code,
+            started,
+            interrupt,
+            build["binary"],
+            build["binary_sha256"],
+            "native executable",
+        )
+    return exit_code
+
+
+def verify_outputs(out, hardware, executor, manifest):
+    """Confirm complete artifacts after stopping, not merely a transient success flag."""
+    if not (out / "serial.log").is_file() or not (out / "timeline.jsonl").is_file():
+        raise RuntimeError("missing serial/model diagnostics")
+    if read_settlement(out, hardware) is None:
+        raise RuntimeError("missing fresh final model output")
+    validate_timeline(out / "timeline.jsonl")
+    if hasattr(executor, "verify_final"):
+        executor.verify_final(out, hardware)
+    summary = executor.known_issue_summary() if hasattr(executor, "known_issue_summary") else None
+    manifest["status"] = "passed_with_known_issues" if summary and summary["applied"] else "passed"
+    return 0
+
+
+def failure_code(error, manifest):
+    """Map a run failure to its documented exit code; anything unexpected is a runtime error."""
+    if isinstance(error, InterruptedRun):
+        manifest["error"] = str(error)
+        return 128 + error.signum
+    if isinstance(error, KeyboardInterrupt):
+        manifest["error"] = "interrupted by SIGINT"
+        return 130
+    if not isinstance(error, Exception):
+        raise error
+    manifest["error"] = str(error) or type(error).__name__
+    if isinstance(error, TimeoutError):
+        return EXIT_TIMEOUT
+    if isinstance(error, ExecutionFailed):
+        return EXIT_EXECUTION
+    return EXIT_RUNTIME
+
+
+def finalize(out, manifest, executor, exit_code, started, interrupt, source, digest, what):
+    """Shared closing evidence: input integrity, verdict, reports and the atomic manifest."""
+    try:
+        manifest["source_unchanged"] = hashlib.sha256(source.read_bytes()).hexdigest() == digest
+        if not manifest["source_unchanged"]:
+            raise RuntimeError(f"source {what} changed during execution")
+    except Exception as error:
+        manifest["error"] = str(error)
+        exit_code = EXIT_RUNTIME
+    if interrupt and (signum := interrupt()) is not None:
+        manifest["error"] = str(InterruptedRun(signum))
+        exit_code = 128 + signum
+    manifest["passed"] = exit_code == 0
+    if exit_code:
+        manifest["status"] = "failed"
+    manifest["exit_code"] = exit_code
+    manifest["wall_seconds"] = round(time.monotonic() - started, 3)
+    try:
+        if hasattr(executor, "finalize"):
+            executor.finalize(out, manifest)
+        else:
+            from flapsim.report import write_reports
+
+            write_reports(out, manifest, [])
+    except Exception as error:
+        manifest.update(
+            passed=False, status="failed", exit_code=EXIT_RUNTIME, report_error=str(error)
+        )
+        exit_code = EXIT_RUNTIME
+    try:
+        save_manifest(out, manifest)
+    except OSError as error:
+        print(f"Cannot finalize run manifest: {error}", file=sys.stderr)
+        exit_code = EXIT_RUNTIME
     return exit_code
 
 

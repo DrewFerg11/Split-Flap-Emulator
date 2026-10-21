@@ -1,0 +1,74 @@
+# Known-issue baseline for native-mode builds of the golden v1.4.1 source (a clean checkout of the
+# commit below). Policy and exit criteria: https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15
+#
+# Used only by the emulator's own native CI on the golden source (--known-issues). Firmware PR
+# builds and release gating never pass a baseline, so everything below fails there. Native mode
+# runs the loop and web-server tasks as truly parallel host threads, so the SFD#54 settings race
+# loses writes far more often than in QEMU mode; see docs/native.md#limits.
+version: 1
+firmware_source_commit: 062f5f4eab842326883dbb919587dbcd76f22862
+description: >-
+  Golden v1.4.1 source built natively. The same firmware defects as the QEMU golden baseline: an
+  unsynchronized settings store shared by the loop and web-server tasks (SFD#54) and unlocked UART
+  output from two tasks (SFD#86). The QEMU-only intermittent I2C timeouts (#14) cannot occur here.
+
+serial:
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 4: reading a key that was never written logs NOT_FOUND. Harmless noise that floods the log
+      after the first save creates the namespace.
+    regex: '^\[\s*\d+\]\[E\]\[Preferences\.cpp:\d+\] (getString|getBytesLength)\(\): nvs_get_(str|blob) len fail: \w+ NOT_FOUND$'
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1: the loop and web-server tasks share one Preferences handle without a lock, so one task's
+      end() invalidates the other's read.
+    regex: '^\[\s*\d+\]\[E\]\[Preferences\.cpp:\d+\] (getString|getBytesLength)\(\): nvs_get_(str|blob) (len )?fail: \w+ INVALID_HANDLE$'
+  - issue: DrewFerg11/Split-Flap-Display#86
+    reason: >-
+      Two firmware tasks print to the UART without a shared lock, so request logging gets spliced into
+      the fresh-NVS begin/NOT_FOUND diagnostic, exactly as in the QEMU golden baseline. Only a prefix
+      with no brackets and no error keywords is accepted.
+    regex: '^(?!\[\s*\d+\]\[E\])(?![^\[\]]*?(?i:error|failed|panic|abort|exception))[^\[\]]*?(?:\[\s*)?\d{1,10}\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
+
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Consequence of the lost pre-reboot settings write below (release-smoke-8 step 10): the reboot
+      keeps the default sixteen-module configuration, so the absent bus-1 modules (0x20-0x27, 32-39)
+      are reported once more by the final sweep. Policy checks that expect those lines are applied
+      before this baseline; other write codes and addresses still fail.
+    regex: '^Error writing data to module 3[2-9], error code: 2$'
+
+expected_failures:
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race: POST /settings returns success but the web task's writes are dropped (the loop task
+      owns or closes the shared handle), so the reboot keeps 16 configured modules and never shows
+      WIFI ERR.
+    scenario: release-smoke-8
+    step: 10
+    action: wait_display
+    error: timeout
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race: GET /settings intermittently returns compiled defaults although the saved
+      single-bus setting is in effect after the reboot.
+    scenario: release-smoke-8
+    step: 11
+    action: http
+    error:
+      regex: '^JSON mismatch at \$\.wire1(Addresses|Offsets): expected '''', got ''[0-9,]+''$'
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race: POST /text returns success but the mode write is lost, so the drums never move.
+    scenario: release-smoke-8
+    step: 14
+    action: wait_display
+    error: timeout
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race: POST /text (dual-single) returns success but the mode write is lost, so the drums
+      never move.
+    scenario: release-smoke-16
+    step: 8
+    action: wait_display
+    error: timeout

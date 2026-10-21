@@ -9,6 +9,7 @@ from flapsim.hardware import HardwareLoader
 
 ISSUE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[1-9][0-9]*")
 SHA256 = re.compile(r"[0-9a-f]{64}")
+COMMIT = re.compile(r"[0-9a-f]{40}")
 ACTIONS = {
     "wait_serial",
     "expect_serial",
@@ -58,24 +59,29 @@ def _issue(entry, where):
 
 
 class KnownIssues:
-    """A validated baseline. Applies only to the firmware whose SHA-256 it names."""
+    """A validated baseline. Applies only to the firmware it names: a QEMU-mode image by its
+    SHA-256, or a native-mode build by its clean firmware source commit."""
 
     def __init__(self, document, source="known issues"):
+        binding = (
+            "firmware_source_commit" if "firmware_source_commit" in document else "firmware_sha256"
+        )
         _fields(
             document,
             source,
-            {"version", "firmware_sha256", "description"},
+            {"version", binding, "description"},
             {"serial", "expected_failures"},
         )
         if type(document["version"]) is not int or document["version"] != 1:
             raise ValueError(f"{source}: version must be 1")
-        if not isinstance(document["firmware_sha256"], str) or not SHA256.fullmatch(
-            document["firmware_sha256"]
-        ):
-            raise ValueError(f"{source}: firmware_sha256 must be a lowercase SHA-256")
+        pattern = COMMIT if binding == "firmware_source_commit" else SHA256
+        if not isinstance(document[binding], str) or not pattern.fullmatch(document[binding]):
+            kind = "commit SHA" if binding == "firmware_source_commit" else "SHA-256"
+            raise ValueError(f"{source}: {binding} must be a full lowercase {kind}")
         _text(document["description"], f"{source}.description")
         self.source = source
-        self.firmware_sha256 = document["firmware_sha256"]
+        self.firmware_sha256 = document.get("firmware_sha256")
+        self.firmware_source_commit = document.get("firmware_source_commit")
         self.serial = []
         for index, entry in enumerate(document.get("serial") or []):
             where = f"{source}.serial[{index}]"
@@ -117,9 +123,22 @@ class KnownIssues:
             raise ValueError(f"{source}: an empty baseline should be deleted, not loaded")
 
     def check_firmware(self, sha256):
+        if self.firmware_sha256 is None:
+            raise ValueError(f"{self.source} binds native firmware source, not a QEMU image")
         if sha256 != self.firmware_sha256:
             raise ValueError(
                 f"{self.source} applies only to firmware {self.firmware_sha256}; got {sha256}"
+            )
+
+    def check_source(self, commit, dirty):
+        """Native mode: only an unmodified checkout of the named commit qualifies."""
+        if self.firmware_source_commit is None:
+            raise ValueError(f"{self.source} binds a QEMU firmware image, not native source")
+        if commit != self.firmware_source_commit or dirty is not False:
+            state = "dirty " if dirty else ""
+            raise ValueError(
+                f"{self.source} applies only to clean firmware source "
+                f"{self.firmware_source_commit}; got {state}{commit}"
             )
 
     def tolerated_serial(self, line):
@@ -144,6 +163,7 @@ class KnownIssues:
         return {
             "source": self.source,
             "firmware_sha256": self.firmware_sha256,
+            "firmware_source_commit": self.firmware_source_commit,
             "serial": [{k: v for k, v in e.items() if k != "compiled"} for e in self.serial],
             "expected_failures": [
                 {k: v for k, v in e.items() if k != "compiled"} for e in self.failures

@@ -166,7 +166,9 @@ def write_reports(out: Path, manifest, steps, known_issues=None):
             {
                 k: manifest.get(k)
                 for k in [
+                    "mode",
                     "firmware",
+                    "native",
                     "emulator",
                     "seed",
                     "hardware",

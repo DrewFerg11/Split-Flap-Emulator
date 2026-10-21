@@ -13,6 +13,7 @@ from flapsim.executor import ExecutionFailed, RunContext, positive_timeout
 from flapsim.state import display_aligned, read_settlement, validate_identity, validate_state
 
 VARIABLE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+MODES = ("qemu", "native")
 STEPS = {"wait_serial", "expect_serial", "wait_display", "http", "assert_no_errors", "sleep_guest"}
 
 
@@ -267,16 +268,32 @@ class ScenarioExecutor:
         variables,
         *,
         firmware_sha256=None,
+        firmware_source=None,
         known_issues=None,
+        mode="qemu",
     ):
         if known_issues is not None:
-            known_issues.check_firmware(firmware_sha256)
+            if mode == "native":
+                source = firmware_source or {}
+                known_issues.check_source(source.get("commit"), source.get("dirty"))
+            else:
+                known_issues.check_firmware(firmware_sha256)
         self.known_issues = known_issues
         self.known_serial = {}
         self.known_failure = None
         requested = parse_variables(variables)
         self.document = substitute(document, copy.deepcopy(requested))
-        fields(self.document, {"version", "name", "timeout", "steps"})
+        fields(self.document, {"version", "name", "timeout", "steps"}, {"modes"})
+        modes = self.document.get("modes", list(MODES))
+        if (
+            not isinstance(modes, list)
+            or not modes
+            or len(set(modes)) != len(modes)
+            or any(m not in MODES for m in modes)
+        ):
+            raise ValueError(f"scenario modes must be a nonempty list drawn from {list(MODES)}")
+        if mode not in modes:
+            raise ValueError(f"scenario {self.document['name']!r} does not support {mode} mode")
         if type(self.document["version"]) is not int or self.document["version"] != 1:
             raise ValueError("scenario version must be 1")
         if not isinstance(self.document["name"], str) or not self.document["name"]:
@@ -382,6 +399,7 @@ class ScenarioExecutor:
         return {
             "baseline": self.known_issues.source,
             "firmware_sha256": self.known_issues.firmware_sha256,
+            "firmware_source_commit": self.known_issues.firmware_source_commit,
             "applied": bool(self.known_failure or self.known_serial),
             "expected_failure": self.known_failure,
             "expected_failures_not_observed": [

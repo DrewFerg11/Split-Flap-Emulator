@@ -81,12 +81,23 @@ The manifest (`status`, `known_issues`), `report.md`, JUnit (`skipped` with the
 issue link) and the Actions job summary all show the baseline prominently.
 Remove entries as their issues are fixed, and delete the file when it is empty.
 
+### Native-mode baseline
+
+`baselines/v1.4.1-native.yaml` is the native-mode counterpart for the emulator's own native
+CI. Instead of an image checksum it binds `firmware_source_commit`, and applies only to a
+**clean** build of that commit (a dirty or different checkout is rejected before launch). A
+baseline binds exactly one of `firmware_sha256` (QEMU mode) or `firmware_source_commit`
+(native mode) and is refused by the other mode. Native mode runs the loop and web-server tasks
+as truly parallel threads, so the SFD#54 lost-write race reproduces far more often than in
+QEMU mode, including before the smoke-8 reboot (step 10).
+
 ## Schema
 
 ```yaml
 version: 1
 name: example
 timeout: 300
+modes: [qemu, native]   # optional; default both. Restrict when a step needs one mode.
 steps:
   - wait_serial: "AP IP Address: http://192.168.4.1"
     timeout: 120
