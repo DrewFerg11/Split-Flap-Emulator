@@ -6,11 +6,14 @@ These are emulator findings, pending comparison with a physical display.
 
 ## Validation after rebasing onto #26
 
-The branch is based on `e5b3dde`. All 302 native/Python tests pass, including a
+The branch is based on `e5b3dde`. All 303 native/Python tests pass, including a
 regression for the review finding about inheriting a global flap offset in a
 mixed v1 configuration. Python lint/format and C format checks pass.
+An additional regression ensures an observed matching-but-misaligned display
+cannot be accepted by a golden lost-command timeout allowance.
 The v1.4.1 factory input downloads successfully and matches the new pin:
 `5a71579b127ee87f0716cb1df938c9f98d3519a9283f72c003dfb857db32e6f4`.
+The pinned QEMU integration also rebuilds successfully with the inheritance fix.
 Fresh golden CI must complete on the rebased branch; the earlier runs below
 describe the old v1.4.0 input and are not evidence about v1.4.1.
 

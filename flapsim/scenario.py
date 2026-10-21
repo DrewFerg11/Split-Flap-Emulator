@@ -353,6 +353,9 @@ class ScenarioExecutor:
         """Only assertion failures and the step's own timeout can match a baseline entry."""
         if self.known_issues is None or not isinstance(error, (ExecutionFailed, TimeoutError)):
             return None
+        if result.get("alignment_failed"):
+            # A lost-command timeout must not excuse an observed partial landing.
+            return None
         step_timed_out = (
             isinstance(error, TimeoutError)
             and step_deadline < run_deadline
@@ -498,9 +501,10 @@ class ScenarioExecutor:
                     if not unchanged:
                         continue
                 result["flap_errors"] = [m["flap_error"] for m in state["modules"]]
-                if display_matches(value["text"], state["text"]) and display_aligned(
-                    state, value["text"]
-                ):
+                matches = display_matches(value["text"], state["text"])
+                aligned = display_aligned(state, value["text"])
+                result["alignment_failed"] = matches and not aligned
+                if matches and aligned:
                     self.display_cursor = state["sequence"]
                     self.command_baseline = None
                     result.update(actual=state["text"], state=state, unchanged=unchanged)

@@ -314,6 +314,21 @@ def test_legacy_boot_expected_text_also_rejects_half_flap(context):
         engine.execute(context)
 
 
+def test_lost_command_baseline_cannot_accept_a_matching_but_misaligned_display(context):
+    state = copy.deepcopy(FIXTURE["states"][1])
+    state["modules"][0]["angle"] = 1356
+    write_state(context.out, state)
+    engine = executor(
+        [{"wait_display": {"text": "XXXXXXXX"}, "timeout": 0.1}],
+        firmware_sha256=GOLDEN_SHA256,
+        known_issues=baseline(),
+    )
+    with pytest.raises(TimeoutError):
+        engine.execute(context)
+    assert engine.results[0]["status"] == "failed"
+    assert engine.known_failure is None
+
+
 def test_new_settlement_and_spaces_wildcards_are_checked_in_module_order(context):
     state = copy.deepcopy(FIXTURE["states"][1])
     baseline = {"movement_id": state["movement_id"], "state": state}
