@@ -152,6 +152,11 @@ def write_reports(out: Path, manifest, steps, known_issues=None):
                 f"- Tolerated {record['count']} serial line(s) for {record['issue']}, "
                 f"first: `{record['first']}`"
             )
+        if stalls := known_issues.get("tolerated_stalls"):
+            lines.append(
+                f"- Tolerated {stalls['stalls']} drum stall(s), explained by "
+                f"{stalls['allowance']} logged timeout(s): {', '.join(stalls['issues'])}"
+            )
         for entry in known_issues["expected_failures_not_observed"]:
             lines.append(
                 f"- Not observed this run: {entry['issue']} at step {entry['step']} "

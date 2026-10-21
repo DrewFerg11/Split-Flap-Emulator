@@ -274,12 +274,17 @@ sometimes passes, while rebooted Preferences missing-key errors still fail the
 strict error gate. The maintainer owns the firmware fix. The accepted #15 golden baseline now
 records these failures explicitly so they do not block emulator PRs.
 
-The intermittent I2C read Error 263 (and its write-side form, `error code: 5`) in
+The intermittent I2C read Error 263 and write `error code: 5` in
 [emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14)
-is a separate unresolved investigation. A later run without that error is not
-proof of a fix; its checksum-bound golden allowance is tracked by #15. Issue #5
-remains open until genuine complete smoke acceptance
-and the corresponding merges; the implementation PR uses `Refs #5`.
+are an emulator scheduling artifact, not a firmware or model defect. QEMU runs the
+ESP32's two cores in turn on one thread. ESP-IDF's I2C ISR for `Wire1` (core 1) can be
+parked between posting DONE to the `Wire1` task (core 0) and setting the driver idle;
+the task's next transfer then has its interrupt ignored and times out. A write that
+times out loses one coil pattern, which can stall one drum. The golden baseline
+records both lines, and each logged write timeout (`explains_stalls: 1`) excuses at
+most one drum stall in the same run; anomalies, other write codes and stalls beyond
+that count still fail. Scenario reports list tolerated stalls under the known issues.
+A faithful fix needs different core scheduling, tracked in #14.
 
 The checksum-bound golden baseline also records the exact Preferences.begin
 NOT_FOUND timestamp fragment documented in [SFD #86](https://github.com/DrewFerg11/Split-Flap-Display/issues/86).

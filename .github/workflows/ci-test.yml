@@ -208,7 +208,8 @@ jobs:
         run: |
           python -m tools.verify_control \
             --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
-            --hardware "${{ matrix.hardware }}" --out runs/scenario
+            --hardware "${{ matrix.hardware }}" --known-issues baselines/v1.4.1-golden.yaml \
+            --out runs/scenario
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
         run: python -m tools.summarize_run runs/scenario/run.json

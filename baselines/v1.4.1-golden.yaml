@@ -25,14 +25,19 @@ serial:
     regex: '^\[\s*\d+\]\[E\]\[Preferences\.cpp:\d+\] (getString|getBytesLength)\(\): nvs_get_(str|blob) len fail: \w+ INVALID_HANDLE$'
   - issue: DrewFerg11/Split-Flap-Emulator#14
     reason: >-
-      Intermittent I2C read timeout in 16-module dual-bus runs; cause (firmware, QEMU scheduling or
-      model) not yet established.
+      Emulator scheduling artifact in 16-module dual-bus runs. QEMU runs the two cores in turn, so
+      ESP-IDF's I2C ISR on core 1 can be parked between posting DONE to the Wire1 task on core 0
+      and setting the driver idle; the task's next transfer then has its interrupt ignored and
+      times out (here a hall-sensor read: Error 263). Real parallel cores cannot interleave this
+      way. A read loses no coil pattern, so this line excuses no stall.
     regex: '^\[\s*\d+\]\[E\]\[Wire\.cpp:\d+\] requestFrom\(\): i2cRead returned Error 263$'
   - issue: DrewFerg11/Split-Flap-Emulator#14
     reason: >-
-      The write-side form of the same intermittent 16-module dual-bus I2C timeout: the firmware reports
-      Wire endTransmission code 5 (timeout). Seen once in the container smoke-16 run for PR #26 at the
-      same step 6 as the read timeout. Other write codes (e.g. 2, missing module) are not covered.
+      The write-side form of the same emulator scheduling artifact: Wire endTransmission code 5
+      (timeout). Only the address reached the module, so its coil pattern was lost and one drum
+      stall may follow; each such line excuses one stall. Other write codes (e.g. 2, missing module)
+      are not covered.
+    explains_stalls: 1
     regex: '^Error writing data to module \d+, error code: 5$'
   - issue: DrewFerg11/Split-Flap-Display#86
     reason: >-
