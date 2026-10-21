@@ -99,8 +99,9 @@ environment variables are not production configuration inputs.
 
 Each normalized module additionally records its resolved `steps_per_rotation`,
 `magnet_position`, and `flap_offset`; `drum` holds the nominal means. The C model
-uses each module's own mechanics. Old normalized v1 inputs without module
-geometry retain the global rotation/magnet and zero flap offset.
+uses each module's own mechanics. Normalized v1 inputs without module geometry
+inherit the global rotation/magnet/flap offset (zero if the global flap offset
+is also absent), consistently in both the C model and Python reader.
 
 ## Hardware behavior
 
@@ -208,7 +209,7 @@ post-command/quiet policy rather than treating the returned snapshot as a lease.
 ## Verification evidence
 
 See [realistic drum findings](mechanics-findings.md) for the issue #16 native
-checks, golden-input checksum blocker, and separately labeled exploratory
+checks, historical golden-input checksum blocker, and separately labeled exploratory
 landing errors. The historical golden results below predate that change.
 
 Core/configuration/schema and native launcher tests run without QEMU. Real

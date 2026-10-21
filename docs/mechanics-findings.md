@@ -4,7 +4,23 @@ Measured on 2026-10-20 (America/Indianapolis) for issue
 [#16](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/16).
 These are emulator findings, pending comparison with a physical display.
 
-## Golden input blocker
+## Validation after rebasing onto #26
+
+The branch is based on `e5b3dde`. All 302 native/Python tests pass, including a
+regression for the review finding about inheriting a global flap offset in a
+mixed v1 configuration. Python lint/format and C format checks pass.
+The v1.4.1 factory input downloads successfully and matches the new pin:
+`5a71579b127ee87f0716cb1df938c9f98d3519a9283f72c003dfb857db32e6f4`.
+Fresh golden CI must complete on the rebased branch; the earlier runs below
+describe the old v1.4.0 input and are not evidence about v1.4.1.
+
+## Historical v1.4.0 input blocker (resolved on main)
+
+The following records the initial investigation before rebasing onto
+`e5b3dde` ([#26](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/26)).
+That main-branch change deliberately pins the v1.4.1 firmware and retires the
+rc.1 version exception. The v1.4.0 checksum failure below is historical and no
+longer describes the current golden input.
 
 The checksum-pinned QEMU revision `e39508f79cb0681bbe15cfcebd40a3f45cdc3c48`
 builds successfully with the updated C integration. All 301 native/Python tests,
@@ -19,10 +35,10 @@ the input; the six golden CI jobs fail at that fetch/checksum step, after their
 QEMU integration builds succeed. The verified runtime image job is consequently
 skipped. No pin, version exception, or known-issue baseline was changed.
 
-Full pinned-golden scenario re-verification remains blocked until the exact
-original input is available or the project explicitly reviews a new pin.
+At that point full pinned-golden scenario re-verification was blocked. The
+reviewed v1.4.1 pin now supersedes the replaced v1.4.0 input.
 
-## Exploratory runs with the currently published input
+## Exploratory v1.4.0 runs (historical)
 
 The different download was saved separately as
 `firmware/published-v1.4.0-06754c55.bin`. Its firmware banner reports

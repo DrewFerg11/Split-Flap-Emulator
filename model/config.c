@@ -90,6 +90,7 @@ int fs_model_init(const char *config_path) {
     fs.steps = number(drum, "steps_per_rotation", 4, 1000000);
     fs.magnet = number(drum, "magnet_position", 0, fs.steps - 1);
     fs.window = number(drum, "sensor_window", 1, fs.steps);
+    int flap_offset = optional_number(drum, "flap_offset", 0, fs.steps - 1, 0);
     struct json_object *flaps = field(drum, "flaps", json_type_string);
     if (flaps) {
         fs.nflaps = json_object_get_string_len(flaps);
@@ -118,7 +119,10 @@ int fs_model_init(const char *config_path) {
                                             fs.nflaps > 4 ? fs.nflaps : 4, 1000000, fs.steps);
             module->magnet =
                 optional_number(entry, "magnet_position", 0, module->steps - 1, fs.magnet);
-            module->flap_offset = optional_number(entry, "flap_offset", 0, module->steps - 1, 0);
+            module->flap_offset =
+                optional_number(entry, "flap_offset", 0, module->steps - 1, flap_offset);
+            if (module->flap_offset >= module->steps)
+                fs_fail("flap_offset exceeds module steps_per_rotation");
             if (module->magnet >= module->steps)
                 fs_fail("magnet_position exceeds module steps_per_rotation");
             if (fs.window > module->steps)

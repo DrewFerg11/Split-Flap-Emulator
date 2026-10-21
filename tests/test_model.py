@@ -473,6 +473,16 @@ def test_legacy_v1_normalized_geometry_still_loads(make_model):
     assert read_settlement(model.out, config)
 
 
+def test_mixed_v1_config_inherits_global_flap_offset_like_python_reader(make_model):
+    model = make_model(angles=(730,), flap_offset=3)
+    config = json.loads(model.config.read_text())
+    del config["modules"][0]["flap_offset"]
+    model.config.write_text(json.dumps(config))
+    assert model.lib.fs_model_init(str(model.config).encode()) == 0
+    state = read_settlement(model.out, config)
+    assert state["modules"][0]["flap_position"] == pytest.approx((730 - 3) * 37 / 2048)
+
+
 def test_firmware_assumed_rotation_does_not_reset_physical_drum(make_model):
     model = make_model(steps=2038)
     model.write(COILS[0])
