@@ -160,6 +160,7 @@ def cli_args(**values):
         "firmware_src": None,
         "speed": None,
         "timing": None,
+        "control_port": None,
     }
     return argparse.Namespace(**{**base, **values})
 
@@ -175,6 +176,10 @@ def cli_args(**values):
         (
             {"mode": "native", "native_build": Path("b"), "timing": "ci"},
             "apply only to --mode qemu",
+        ),
+        (
+            {"mode": "native", "native_build": Path("b"), "control_port": 0},
+            "--control-port applies only to --mode qemu",
         ),
     ],
 )

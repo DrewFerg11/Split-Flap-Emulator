@@ -110,6 +110,8 @@ def check_mode_arguments(args):
             raise ValueError("native mode requires exactly one of --native-build or --firmware-src")
         if args.firmware is not None or args.timing is not None:
             raise ValueError("--firmware and --timing apply only to --mode qemu")
+        if getattr(args, "control_port", None) is not None:
+            raise ValueError("--control-port applies only to --mode qemu")
 
 
 if __name__ == "__main__":
