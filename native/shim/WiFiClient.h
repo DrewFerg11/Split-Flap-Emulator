@@ -12,8 +12,8 @@ using Resolver = bool (*)(const char *host, uint32_t *address);
 void set_resolver(Resolver resolver);
 } // namespace flapsim::net
 
-/* TCP client on a host socket. Copies share one connection, as arduino-esp32's do. Connect and
- * write use the client's timeout in virtual milliseconds; reads never block. */
+/* TCP client on a host socket. Copies share one connection, as arduino-esp32's do. Connect uses
+ * its timeout and write the device's retry rule, both in virtual time; reads never block. */
 class WiFiClient : public Client {
   public:
     WiFiClient();

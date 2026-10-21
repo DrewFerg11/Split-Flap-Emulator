@@ -394,6 +394,23 @@ void sockets() {
         CHECK(numeric.connect("127.0.0.1", port));
         ::close(::accept(listener, nullptr, nullptr));
     }
+    {
+        /* A peer that stops reading: ten 1 s waits without progress end the write, keeping what
+         * was sent and the connection, as on the device. */
+        WiFiClient flooding;
+        CHECK(flooding.connect(loopback, port));
+        int idle = ::accept(listener, nullptr, nullptr);
+        std::vector<uint8_t> payload(16 << 20, 'x');
+        flapsim::vclock::set_speed(50.0);
+        auto before = std::chrono::steady_clock::now();
+        size_t written = flooding.write(payload.data(), payload.size());
+        auto waited = std::chrono::steady_clock::now() - before;
+        flapsim::vclock::set_speed(1.0);
+        CHECK(written > 0 && written < payload.size());
+        CHECK(waited >= std::chrono::milliseconds(150) && waited < std::chrono::milliseconds(2000));
+        CHECK(flooding.connected());
+        ::close(idle);
+    }
     CHECK(client.write(reinterpret_cast<const uint8_t *>("ping"), 4) == 4);
     char buffer[8] = {};
     CHECK(::recv(peer, buffer, sizeof(buffer), 0) == 4 && std::string(buffer) == "ping");

@@ -42,6 +42,17 @@ bool wait_for(int fd, short events, int timeout_ms) {
     }
 }
 
+/* Whether the socket became ready or failed within `timeout_ms` of virtual time. */
+bool ready(int fd, short events, int timeout_ms) {
+    pollfd entry{fd, events, 0};
+    auto host = flapsim::vclock::host_duration(int64_t(timeout_ms) * 1000000);
+    int milliseconds = int(std::chrono::ceil<std::chrono::milliseconds>(host).count());
+    int result;
+    while ((result = ::poll(&entry, 1, milliseconds)) < 0 && errno == EINTR) {
+    }
+    return result > 0;
+}
+
 /* The device only reaches other hosts once it has joined a network as a station. */
 bool station_online() { return WiFi.status() == WL_CONNECTED; }
 
@@ -128,16 +139,20 @@ int WiFiClient::connect(const char *host, uint16_t port, int32_t timeout_ms) {
     return address ? connect(IPAddress(*address), port, timeout_ms) : 0;
 }
 
+/* As arduino-esp32 2.0.17: each wait for room lasts 1 s, ten waits in a row without progress give
+ * up, and any progress resets the count, so a slowly draining peer is followed for as long as data
+ * keeps moving. A socket error ends the connection. */
 size_t WiFiClient::write(const uint8_t *buffer, size_t size) {
+    constexpr int kWriteRetries = 10, kWriteWaitMs = 1000;
     size_t sent = 0;
-    while (socket && sent < size) {
+    for (int retries = kWriteRetries; socket && sent < size && retries > 0; retries--) {
+        if (!ready(socket->fd, POLLOUT, kWriteWaitMs))
+            continue;
         ssize_t count = ::send(socket->fd, buffer + sent, size - sent, MSG_NOSIGNAL);
         if (count > 0) {
             sent += size_t(count);
-        } else if (count < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
-            if (!wait_for(socket->fd, POLLOUT, int(timeout)))
-                break;
-        } else {
+            retries = kWriteRetries + 1;
+        } else if (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
             stop();
         }
     }
