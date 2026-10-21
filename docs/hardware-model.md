@@ -207,6 +207,10 @@ post-command/quiet policy rather than treating the returned snapshot as a lease.
 
 ## Verification evidence
 
+See [realistic drum findings](mechanics-findings.md) for the issue #16 native
+checks, golden-input checksum blocker, and separately labeled exploratory
+landing errors. The historical golden results below predate that change.
+
 Core/configuration/schema and native launcher tests run without QEMU. Real
 golden checks passed locally with eight modules at `XXXXXXXX` and sixteen at
 `XXXXXXXXXXXXXXXX`, zero stalls/anomalies, unchanged source hashes and child
