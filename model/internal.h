@@ -49,5 +49,6 @@ void fs_pcf_finish(FsBus *bus, FsModule *module);
 uint8_t fs_pcf_read(FsBus *bus);
 void fs_emit(const char *event, bool state);
 void fs_write_activity(void);
+bool fs_restore(const char *timeline_path, bool *recorded_reset);
 
 #endif

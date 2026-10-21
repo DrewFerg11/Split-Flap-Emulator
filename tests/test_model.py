@@ -13,7 +13,7 @@ from flapsim.hardware import normalize_hardware, write_model_config
 from flapsim.state import read_settlement
 
 ROOT = Path(__file__).resolve().parents[1]
-CORE = ["bus", "config", "drum", "io", "pcf8575", "stepper"]
+CORE = ["bus", "config", "drum", "io", "pcf8575", "resume", "stepper"]
 COILS = [0xFFE7, 0xFFF3, 0xFFF9, 0xFFED]
 OFF = 0xFFE1
 
@@ -49,6 +49,8 @@ def model_library(tmp_path_factory):
     lib.fs_model_init.restype = ctypes.c_int
     lib.fs_model_event.argtypes = [ctypes.c_uint8, ctypes.c_uint8, ctypes.c_uint16, ctypes.c_int64]
     lib.fs_model_event.restype = ctypes.c_int
+    lib.fs_model_resume.argtypes = [ctypes.c_char_p, ctypes.c_int64]
+    lib.fs_model_resume.restype = ctypes.c_int
     lib.fs_model_tick.argtypes = [ctypes.c_int64]
     lib.fs_model_error.restype = ctypes.c_char_p
     return lib
@@ -519,6 +521,85 @@ def test_bad_normalized_module_geometry_fails(make_model, key, value):
     model.config.write_text(json.dumps(config))
     assert model.lib.fs_model_init(str(model.config).encode()) != 0
     assert model.lib.fs_model_error()
+
+
+def resume(model, guest_ns):
+    model.tick(0)
+    model.lib.fs_model_guest_reset()
+    model.lib.fs_model_close()
+    result = model.lib.fs_model_resume(str(model.config).encode(), guest_ns)
+    model.now = guest_ns
+    return result
+
+
+def test_native_resume_keeps_drums_latches_ids_and_appends(make_model):
+    model = make_model(angles=(100, 200), buses=(0, 0))
+    for coils in COILS[:3]:
+        model.write(coils)
+    before = model.timeline()
+    last = before[-1]
+    guest = model.now + 5_000_000
+    assert resume(model, guest) == 0, model.lib.fs_model_error()
+    after = model.timeline()
+    assert after[: len(before)] == before
+    # Exactly one reset record, written before the restart with the live (not stale) state.
+    resets = [r for r in after if r["event"] == "guest_reset"]
+    assert len(resets) == 1 and after[-1] == resets[0]
+    reset = resets[0]
+    assert reset["modules"][0]["angle"] == 102 and reset["modules"][0]["energized"]
+    assert reset["sequence"] == last["sequence"] + 1
+    # Aggregates are re-summed from the restored per-module counters (only anomalies are kept).
+    assert reset["counters"] == {
+        key: sum(m["counters"][key] for m in reset["modules"]) for key in reset["counters"]
+    }
+    assert reset["counters"]["forward"] == 2 and reset["counters"]["writes"] == 3
+    assert (reset["movement_id"], reset["settlement_id"]) == (
+        last["movement_id"],
+        last["settlement_id"],
+    )
+    assert model.activity()["guest_ns"] == guest
+    # The motor keeps stepping from where it was: no invented step, no stall.
+    model.write(COILS[3])
+    model.write(OFF)
+    final = model.state()
+    assert final["modules"][0]["angle"] == 103 and final["counters"]["stalls"] == 0
+    assert final["settlement_id"] == last["settlement_id"] + 1
+
+
+def test_native_resume_discards_a_torn_final_line(make_model):
+    model = make_model()
+    model.write(COILS[0])
+    complete = model.timeline()
+    model.lib.fs_model_close()
+    with (model.out / "timeline.jsonl").open("a") as timeline:
+        timeline.write('{"schema_version": 1, "sequ')
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) == 0
+    resumed = model.timeline()
+    # A crash records no reset: resume discards the torn line and records it instead.
+    assert resumed[:-1] == complete and resumed[-1]["event"] == "guest_reset"
+
+
+@pytest.mark.parametrize("problem", ["backwards", "other_hardware", "empty", "forged"])
+def test_native_resume_rejects_inconsistent_history(make_model, problem):
+    model = make_model(angles=(100,))
+    model.write(COILS[0])
+    model.lib.fs_model_close()
+    guest = model.now
+    timeline = model.out / "timeline.jsonl"
+    if problem == "backwards":
+        guest -= 1
+    elif problem == "empty":
+        timeline.write_text("")
+    elif problem == "forged":
+        records = timeline.read_text().splitlines()
+        last = json.loads(records[-1])
+        last["modules"][0]["counters"]["anomalies"] = 3
+        timeline.write_text("\n".join([*records[:-1], json.dumps(last)]) + "\n")
+    else:
+        config = json.loads(model.config.read_text())
+        config["modules"][0]["addr"] = 33
+        model.config.write_text(json.dumps(config))
+    assert model.lib.fs_model_resume(str(model.config).encode(), guest) != 0
 
 
 @pytest.mark.parametrize("polarity", ["active-high", "active-low"])

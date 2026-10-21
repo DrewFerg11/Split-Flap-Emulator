@@ -89,7 +89,8 @@ static char *output_path(struct json_object *outputs, const char *key) {
     return strdup(path);
 }
 
-int fs_model_init(const char *config_path) {
+/* Parse and validate the normalized config; returns the timeline path for the caller to open. */
+static char *load(const char *config_path, const char *mode) {
     fs_model_close();
     memset(&fs, 0, sizeof(fs));
     for (int b = 0; b < 2; b++)
@@ -99,7 +100,7 @@ int fs_model_init(const char *config_path) {
         fs_fail("cannot read normalized model JSON: %s", config_path ? config_path : "(unset)");
         if (config)
             json_object_put(config);
-        return -1;
+        return NULL;
     }
     number(config, "schema_version", 1, 1);
     struct json_object *chip = field(config, "chip", json_type_string);
@@ -164,17 +165,11 @@ int fs_model_init(const char *config_path) {
     fs.state_path = output_path(outputs, "state");
     fs.activity_path = output_path(outputs, "activity");
     char *timeline = output_path(outputs, "timeline");
-    if (!fs.failed) {
-        fs.timeline = fopen(timeline, "w");
-        if (!fs.timeline)
-            fs_fail("cannot open timeline: %s", timeline);
-    }
-    free(timeline);
     struct json_object *trace;
     if (outputs && json_object_object_get_ex(outputs, "trace", &trace) && trace) {
         char *path = output_path(outputs, "trace");
         if (!fs.failed) {
-            fs.trace = fopen(path, "w");
+            fs.trace = fopen(path, mode);
             if (!fs.trace)
                 fs_fail("cannot open I2C trace: %s", path);
         }
@@ -182,14 +177,60 @@ int fs_model_init(const char *config_path) {
     }
     json_object_put(config);
     if (fs.failed) {
+        free(timeline);
+        fs_model_close();
+        return NULL;
+    }
+    return timeline;
+}
+
+static int start(char *timeline, const char *mode, const char *event, bool state) {
+    /* event is NULL when the restored record already describes this reset. */
+    if (!timeline) {
+        fs_model_close();
+        return -1;
+    }
+    if (!fs.failed) {
+        fs.timeline = fopen(timeline, mode);
+        if (!fs.timeline)
+            fs_fail("cannot open timeline: %s", timeline);
+    }
+    free(timeline);
+    if (fs.failed) {
         fs_model_close();
         return -1;
     }
     fs.initialized = true;
-    fs_emit("initialized", true);
+    if (event)
+        fs_emit(event, state);
+    else
+        fs_write_activity();
     if (fs.failed) {
         fs_model_close();
         return -1;
     }
     return 0;
+}
+
+int fs_model_init(const char *config_path) {
+    return start(load(config_path, "w"), "w", "initialized", true);
+}
+
+int fs_model_resume(const char *config_path, int64_t guest_ns) {
+    char *timeline = load(config_path, "a");
+    bool recorded_reset = false;
+    if (timeline && !fs_restore(timeline, &recorded_reset)) {
+        free(timeline);
+        timeline = NULL;
+    }
+    if (timeline && guest_ns < fs.now) {
+        fs_fail("cannot resume: guest clock moved backwards");
+        free(timeline);
+        timeline = NULL;
+    }
+    /* Like a QEMU guest reset: the controller restarts, the expanders and drums do not. A clean
+     * native reset already recorded its exact guest_reset; after a crash the last record may lag
+     * the drums by up to one snapshot interval, and the reset is recorded here instead. */
+    fs.now = fs.last_snapshot = guest_ns;
+    return start(timeline, "a", recorded_reset ? NULL : "guest_reset", false);
 }
