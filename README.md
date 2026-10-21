@@ -5,6 +5,9 @@ The emulator runs release builds on an emulated ESP32, with virtual I²C modules
 hall sensors in place of the real display. Release builds can then be tested automatically in CI or watched on a
 virtual display.
 
+The Docker image is `ghcr.io/drewferg11/split-flap-emulator`; the command inside it (and the Python package) is
+`flapsim`.
+
 ![Real v1.4.0 firmware homing 8 virtual modules](docs/images/poc-homing.gif)
 
 ## Status

@@ -1,5 +1,8 @@
 # Container use and publication
 
+The image is `ghcr.io/drewferg11/split-flap-emulator`; the command inside it is
+`flapsim`, so `docker run <image> run ...` is `flapsim run ...`.
+
 Only Linux amd64 is supported and verified by the workflows. The runtime is
 Debian bookworm-slim, runs as UID/GID 10001 by default, and has `flapsim` as its
 entrypoint. Firmware stays external; no firmware binary is baked into the image.
