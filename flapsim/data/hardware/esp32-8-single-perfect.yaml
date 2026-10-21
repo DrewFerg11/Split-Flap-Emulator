@@ -1,0 +1,13 @@
+# Perfect mechanics: matches firmware defaults, without seeded mechanical variance.
+chip: esp32
+buses:
+  - id: 0
+    modules: [0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27]
+  - id: 1
+    modules: []
+drum:
+  steps_per_rotation: 2048
+  flaps: ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  magnet_position: 730
+  sensor_window: 40
+start_angles: {seed: 7}

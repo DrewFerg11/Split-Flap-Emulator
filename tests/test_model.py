@@ -67,12 +67,19 @@ class Model:
         window=40,
         flaps=" ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
         flap_offset=0,
+        polarity="active-high",
+        module_overrides=None,
     ):
         self.lib, self.out, self.now = library, out, 0
         modules = [
             {"id": b, "modules": [32 + i for i, bus in enumerate(buses) if bus == b]}
             for b in sorted(set(buses))
         ]
+        if module_overrides:
+            for bus in modules:
+                bus["modules"] = [
+                    {"addr": addr, **module_overrides.get(addr - 32, {})} for addr in bus["modules"]
+                ]
         # One address per supplied module; tests use [0,1] for the slow-row regression.
         document = {
             "chip": "esp32",
@@ -83,6 +90,7 @@ class Model:
                 "sensor_window": window,
                 "flaps": flaps,
                 "flap_offset": flap_offset,
+                "sensor_polarity": polarity,
             },
             "start_angles": list(angles),
         }
@@ -505,6 +513,78 @@ def test_firmware_assumed_rotation_does_not_reset_physical_drum(make_model):
     ],
 )
 def test_bad_normalized_module_geometry_fails(make_model, key, value):
+    model = make_model()
+    config = json.loads(model.config.read_text())
+    config["modules"][0][key] = value
+    model.config.write_text(json.dumps(config))
+    assert model.lib.fs_model_init(str(model.config).encode()) != 0
+    assert model.lib.fs_model_error()
+
+
+@pytest.mark.parametrize("polarity", ["active-high", "active-low"])
+@pytest.mark.parametrize(
+    "angle,present", [(0, True), (1, True), (2, False), (11, False), (12, True), (15, True)]
+)
+def test_sensor_polarity_changes_electrical_input_not_physical_angle(
+    make_model, polarity, angle, present
+):
+    model = make_model(
+        steps=16, magnet=12, window=6, flaps=" AB", angles=(angle,), polarity=polarity
+    )
+    level = present if polarity == "active-high" else not present
+    assert bool(model.read() & 0x8000) is level
+    assert model.state()["modules"][0]["hall"] is level
+    assert model.state()["modules"][0]["angle"] == angle
+
+
+def test_sensor_width_and_polarity_are_per_module_and_survive_reset(make_model):
+    model = make_model(
+        angles=(733, 733),
+        buses=(0, 1),
+        module_overrides={
+            0: {"sensor_window": 3},
+            1: {"sensor_window": 7, "sensor_polarity": "active-low"},
+        },
+    )
+    # Both signals low here, for different physical reasons. After one reverse
+    # step module 0 enters its narrow window; module 1 remains active-low.
+    assert not model.read(bus=0, addr=32) & 0x8000
+    assert not model.read(bus=1, addr=33) & 0x8000
+    model.write(COILS[0])
+    model.write(COILS[3])
+    model.write(OFF)
+    assert model.read(bus=0, addr=32) & 0x8000
+    model.lib.fs_model_guest_reset()
+    assert model.read(bus=0, addr=32) & 0x8000
+    assert not model.read(bus=1, addr=33) & 0x8000
+
+
+def test_legacy_sensor_fields_inherit_global_defaults(make_model):
+    model = make_model(angles=(730,), polarity="active-low", window=3)
+    config = json.loads(model.config.read_text())
+    for field in ["sensor_window", "sensor_polarity"]:
+        del config["modules"][0][field]
+    model.config.write_text(json.dumps(config))
+    assert model.lib.fs_model_init(str(model.config).encode()) == 0
+    assert not model.read() & 0x8000
+    del config["drum"]["sensor_polarity"]
+    model.config.write_text(json.dumps(config))
+    assert model.lib.fs_model_init(str(model.config).encode()) == 0
+    assert model.read() & 0x8000
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("sensor_window", 0),
+        ("sensor_window", 2049),
+        ("sensor_window", True),
+        ("sensor_polarity", "random"),
+        ("sensor_polarity", "active-low\u0000extra"),
+        ("sensor_polarity", False),
+    ],
+)
+def test_bad_normalized_sensor_fields_fail(make_model, key, value):
     model = make_model()
     config = json.loads(model.config.read_text())
     config["modules"][0][key] = value

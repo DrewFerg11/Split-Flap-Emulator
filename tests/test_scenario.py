@@ -613,6 +613,7 @@ def test_checked_in_scenarios_load_with_the_required_version_variable():
         ("release-smoke-8", "esp32-8-single"),
         ("release-smoke-16", "esp32-16-dual"),
         ("homing-random", "esp32-8-single"),
+        ("calibration-8", "esp32-8-single-calibration"),
     ]:
         load_executor(
             root / f"scenarios/{name}.yaml",

@@ -2,7 +2,9 @@
 #include "internal.h"
 
 int fs_hall(const FsModule *module) {
-    return (module->angle - module->magnet + module->steps) % module->steps < fs.window;
+    bool present =
+        (module->angle - module->magnet + module->steps) % module->steps < module->window;
+    return present != module->active_low;
 }
 
 double fs_flap_position(const FsModule *module) {

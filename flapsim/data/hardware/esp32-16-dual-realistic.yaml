@@ -9,5 +9,6 @@ drum:
   flaps: ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
   magnet_position: {mean: 730, spread: 2}
   flap_offset: {mean: 2, spread: 2}
-  sensor_window: 40
+  sensor_window: {mean: 40, spread: 8}
+  sensor_polarity: random
 start_angles: {seed: 7}
