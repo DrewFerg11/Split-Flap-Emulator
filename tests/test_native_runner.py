@@ -210,6 +210,23 @@ def test_native_baseline_binds_a_clean_source_commit():
         golden.check_source(COMMIT, False)
 
 
+def test_native_baseline_carries_the_golden_firmware_defect_entries():
+    # The same v1.4.1 defects (SFD#86 splices, SFD#54 item 4) must be expected in both modes.
+    native = load_known_issues(ROOT / "baselines/v1.4.1-native.yaml")
+    golden = load_known_issues(ROOT / "baselines/v1.4.1-golden.yaml")
+
+    def splices(baseline):
+        return [e["regex"] for e in baseline.serial if e["issue"].endswith("#86")]
+
+    assert len(splices(golden)) == 2 and splices(native) == splices(golden)
+    key = ("release-smoke-16", 11, "assert_no_errors")
+    shared = [
+        [e["error"] for e in b.failures if (e["scenario"], e["step"], e["action"]) == key]
+        for b in (native, golden)
+    ]
+    assert len(shared[0]) == 1 and shared[0] == shared[1]
+
+
 def test_baseline_binding_is_one_validated_identity():
     entry = {"issue": "a/b#1", "reason": "r", "regex": "^x$"}
     with pytest.raises(ValueError, match="full lowercase commit"):

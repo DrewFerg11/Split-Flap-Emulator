@@ -26,9 +26,20 @@ serial:
   - issue: DrewFerg11/Split-Flap-Display#86
     reason: >-
       Two firmware tasks print to the UART without a shared lock, so request logging gets spliced into
-      the fresh-NVS begin/NOT_FOUND diagnostic, exactly as in the QEMU golden baseline. Only a prefix
-      with no brackets and no error keywords is accepted.
-    regex: '^(?!\[\s*\d+\]\[E\])(?![^\[\]]*?(?i:error|failed|panic|abort|exception))[^\[\]]*?(?:\[\s*)?\d{1,10}\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
+      the otherwise allowed fresh-NVS begin/NOT_FOUND diagnostic. Where the split lands varies run to
+      run. This entry covers the diagnostic's tail: it may start anywhere from its "[ timestamp]" through
+      the "0" of ":50" (e.g. "p:50] begin(): ..."), preceded by the other task's partial output
+      (e.g. request-body JSON). Only a prefix with no brackets and no error keywords is accepted, and an
+      unspliced line is left to the normal fresh_nvs policy. The writer/SDK locking path remains to be
+      repaired.
+    regex: '^(?!\[\s*\d+\]\[E\])(?![^\[\]]*?(?i:error|failed|panic|abort|exception))[^\[\]]*?(?:(?:\[\s*)?\d{1,10}\]\[E\]\[Preferences\.cpp:50|(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:\])?\[)?E)?\])?\[)?P)?r)?e)?f)?e)?r)?e)?n)?c)?e)?s)?\.)?c)?p)?p)?:)?5)?0)\] begin\(\): nvs_open failed: NOT_FOUND$'
+  - issue: DrewFerg11/Split-Flap-Display#86
+    reason: >-
+      The head form of the same splice: the line starts with the diagnostic up to some character (from
+      "[ timestamp][E][" through the whole "NOT_FOUND") and continues with the other task's output, which
+      must be its request log ("Received ... update request") or request-body JSON with no brackets and no
+      error keywords. Any other continuation, e.g. a different NVS error code, is still reported.
+    regex: '^\[\s*\d+\]\[E\]\[(?:P(?:r(?:e(?:f(?:e(?:r(?:e(?:n(?:c(?:e(?:s(?:\.(?:c(?:p(?:p(?::(?:5(?:0(?:\](?:\ (?:b(?:e(?:g(?:i(?:n(?:\((?:\)(?::(?:\ (?:n(?:v(?:s(?:_(?:o(?:p(?:e(?:n(?:\ (?:f(?:a(?:i(?:l(?:e(?:d(?::(?:\ (?:N(?:O(?:T(?:_(?:F(?:O(?:U(?:N(?:D)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?(?:Received [a-z]+ update request|\{(?![^\[\]]*?(?i:error|failed|panic|abort|exception))[^\[\]]*)$'
 
   - issue: DrewFerg11/Split-Flap-Display#54
     reason: >-
@@ -72,3 +83,13 @@ expected_failures:
     step: 8
     action: wait_display
     error: timeout
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 4: when the step-8 race does not occur, the scenario reaches its strict final check, and
+      v1.4.1 is still logging the fresh-NVS begin/NOT_FOUND diagnostic because nothing has created the
+      config namespace. Only that exact unspliced line is expected here; any other error still fails.
+    scenario: release-smoke-16
+    step: 11
+    action: assert_no_errors
+    error:
+      regex: '^unexpected serial error: \[\s*\d+\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
