@@ -73,6 +73,8 @@ static bool restore(const char *text, size_t end, bool *recorded_reset) {
                  json_object_object_get_ex(record, "modules", &modules) &&
                  json_object_is_type(modules, json_type_array) &&
                  (int)json_object_array_length(modules) == fs.count;
+    if (valid)
+        valid = fs_restore_overlay(record);
     uint64_t anomalies = 0;
     for (int i = 0; valid && i < fs.count; i++) {
         valid = module(json_object_array_get_idx(modules, i), &fs.modules[i]);

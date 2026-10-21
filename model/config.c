@@ -18,6 +18,9 @@ void fs_fail(const char *format, ...) {
 const char *fs_model_error(void) { return fs.error; }
 
 void fs_model_close(void) {
+    if (fs.operation)
+        json_object_put(fs.operation);
+    fs.operation = NULL;
     if (fs.timeline)
         fclose(fs.timeline);
     if (fs.trace)
@@ -160,6 +163,7 @@ static char *load(const char *config_path, const char *mode) {
             }
         }
         fs.count = (int)count;
+        memcpy(fs.initial_modules, fs.modules, sizeof(fs.modules));
     }
     struct json_object *outputs = field(config, "outputs", json_type_object);
     fs.state_path = output_path(outputs, "state");
@@ -232,5 +236,7 @@ int fs_model_resume(const char *config_path, int64_t guest_ns) {
      * native reset already recorded its exact guest_reset; after a crash the last record may lag
      * the drums by up to one snapshot interval, and the reset is recorded here instead. */
     fs.now = fs.last_snapshot = guest_ns;
+    if (timeline && !recorded_reset)
+        fs.guest_resets++;
     return start(timeline, "a", recorded_reset ? NULL : "guest_reset", false);
 }

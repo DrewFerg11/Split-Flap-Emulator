@@ -140,7 +140,10 @@ def test_real_http_auth_origin_capabilities_and_shutdown(tmp_path):
         document = json.loads(body)
         assert document["backend"] == "qemu"
         assert document["capabilities"]["snapshot"] is True
-        assert not any(v for k, v in document["capabilities"].items() if k != "snapshot")
+        assert document["capabilities"]["set_mechanics"] is True
+        assert not any(
+            v for k, v in document["capabilities"].items() if k not in {"snapshot", "set_mechanics"}
+        )
         assert document["boot_generation"] == 0
         assert document["state"]["text"] == state["text"]
         assert request(server, method="POST")[0] == 405

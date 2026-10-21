@@ -11,10 +11,10 @@ from pathlib import Path
 import pytest
 
 from flapsim.hardware import normalize_hardware, write_model_config
-from flapsim.state import read_settlement
+from flapsim.state import read_settlement, validate_state
 
 ROOT = Path(__file__).resolve().parents[1]
-CORE = ["bus", "config", "control", "drum", "io", "pcf8575", "resume", "stepper"]
+CORE = ["bus", "config", "control", "drum", "io", "mechanics", "pcf8575", "resume", "stepper"]
 COILS = [0xFFE7, 0xFFF3, 0xFFF9, 0xFFED]
 OFF = 0xFFE1
 
@@ -123,6 +123,20 @@ class Model:
         self.now += advance
         self.lib.fs_model_tick(self.now)
         assert not self.lib.fs_model_error(), self.lib.fs_model_error()
+
+    def control(self, patch, *, identifier=1, revision=0, bus=0, addr=32):
+        command = {
+            "id": identifier,
+            "expected_revision": revision,
+            "bus": bus,
+            "addr": addr,
+            "patch": patch,
+        }
+        parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        with parent, child:
+            parent.sendall(b"FLAPSIM_MECH/1 " + json.dumps(command).encode())
+            assert self.lib.fs_control_serve(child.fileno(), self.now) == 1
+            return json.loads(parent.recv(65536))
 
     def state(self):
         return json.loads((self.out / "state.json").read_text())
@@ -724,3 +738,360 @@ def test_control_protocol_rejects_bad_and_truncated_requests_without_model_failu
     finally:
         parent.close()
         child.close()
+
+
+def test_atomic_mechanics_change_updates_real_hall_and_preserves_physical_state(make_model):
+    model = make_model(angles=(730, 730), buses=(0, 1))
+    before = model.state()
+    config = model.config.read_bytes()
+    assert model.read() & 0x8000
+    model.tick()
+    unchanged = model.timeline()[-1]["modules"][1]
+    result = model.control({"sensor_polarity": "active-low", "flap_offset": 700})
+    assert result["mechanics_revision"] == 1
+    module = result["modules"][0]
+    assert module["angle"] == before["modules"][0]["angle"]
+    assert (module["latch"], module["phase"]) == (0xFFE1, -1)
+    assert not module["hall"] and not model.read() & 0x8000
+    assert model.read(bus=1, addr=33) & 0x8000
+    assert result["modules"][1]["angle"] == unchanged["angle"]
+    assert result["modules"][1]["mechanics"]["sensor_polarity"] == "active-high"
+    assert model.config.read_bytes() == config
+    hardware = json.loads(config)
+    validate_state(result, hardware)
+    assert read_settlement(model.out, hardware)["mechanics_revision"] == 1
+    assert model.timeline()[-1]["event"] == "mechanics_changed"
+    assert model.timeline()[-1]["last_operation"]["sequence"] == model.timeline()[-1]["sequence"]
+    # Historical v1 records still derive geometry from the immutable initial hardware.
+    for frame in model.timeline():
+        validate_state(frame, hardware, require_settled=False)
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {},
+        {"angle": 0},
+        {"steps_per_rotation": True},
+        {"flap_offset": 2048},
+        {"sensor_window": 0},
+        {"sensor_window": 2049},
+        {"sensor_polarity": "active-low\0bad"},
+        {"steps_per_rotation": 700},
+        {"steps_per_rotation": 1_000_001},
+        {"steps_per_rotation": 800, "magnet_position": 900},
+        {"magnet_position": 0.0},
+        {"flap_offset": -1},
+        {"flap_offset": 100, "sensor_polarity": False},
+    ],
+)
+def test_invalid_mechanics_are_atomic_and_leave_evidence_unchanged(make_model, patch):
+    model = make_model(angles=(900,))
+    before = {p.name: p.read_bytes() for p in model.out.iterdir()}
+    assert model.control(patch) == {"error": "invalid_mechanics"}
+    assert {p.name: p.read_bytes() for p in model.out.iterdir()} == before
+    assert not model.lib.fs_model_error()
+
+
+def test_mechanics_rejects_open_bus_and_running_motor_without_interrupting_reads(make_model):
+    model = make_model(angles=(730,))
+    assert model.event(0) == 0  # START read, captures both hall bytes
+    assert model.event(6) == 0xE1
+    assert model.control({"sensor_polarity": "active-low"}) == {"error": "model_busy"}
+    assert model.event(6) == 0xFF  # original latched high hall input
+    model.event(4)
+    model.event(3)
+    model.write(COILS[0])
+    assert model.control({"flap_offset": 1}) == {"error": "model_busy"}
+    model.write(OFF)
+    assert model.control({"sensor_polarity": "active-low"})["mechanics_revision"] == 1
+
+
+def test_mechanics_cas_deduplication_and_native_resume(make_model):
+    model = make_model(angles=(1500,))
+    patch = {"steps_per_rotation": 4096, "flap_offset": 3000, "sensor_window": 10}
+    first = model.control(patch)
+    before = {p.name: p.read_bytes() for p in model.out.iterdir()}
+    assert model.control(patch) == first
+    assert model.control({"flap_offset": 0}) == {"error": "stale_or_reused_id"}
+    assert model.control({"flap_offset": 0}, identifier=2) == {"error": "revision_conflict"}
+    assert {p.name: p.read_bytes() for p in model.out.iterdir()} == before
+    model.lib.fs_model_guest_reset()
+    reset = model.timeline()[-1]
+    model.lib.fs_model_close()
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) == 0
+    duplicate = model.control(patch)
+    assert duplicate["mechanics_revision"] == 1 and duplicate["guest_resets"] == 1
+    assert duplicate["modules"] == first["modules"]
+    assert model.timeline()[-1] == reset
+    second = model.control({"flap_offset": 0}, identifier=5, revision=1)
+    assert second["mechanics_revision"] == 2
+    assert model.control(patch) == {"error": "stale_or_reused_id"}
+    assert model.control({"flap_offset": 1}, identifier=4, revision=2) == {
+        "error": "stale_or_reused_id"
+    }
+    model.lib.fs_model_close()
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) == 0
+    assert model.control({"flap_offset": 0}, identifier=5, revision=1)["guest_resets"] == 2
+
+
+def test_rotation_change_rejects_inherited_geometry_and_never_wraps_angle(make_model):
+    model = make_model(angles=(1000,))
+    assert model.control({"steps_per_rotation": 800}) == {"error": "invalid_mechanics"}
+    changed = model.control({"steps_per_rotation": 1001})
+    assert changed["modules"][0]["angle"] == 1000
+    assert changed["modules"][0]["mechanics"]["steps_per_rotation"] == 1001
+
+
+@pytest.mark.parametrize(
+    "problem", ["initial", "flaps", "geometry", "angle", "receipt", "version", "missing"]
+)
+def test_native_resume_rejects_invalid_mechanics_overlay(make_model, problem):
+    model = make_model(angles=(730,))
+    model.control({"sensor_polarity": "active-low"})
+    model.lib.fs_model_close()
+    path = model.out / "timeline.jsonl"
+    lines = path.read_text().splitlines()
+    last = json.loads(lines[-1])
+    if problem == "initial":
+        last["initial_mechanics"][0]["sensor_window"] += 1
+    elif problem == "flaps":
+        last["initial_flaps"] = last["initial_flaps"][::-1]
+    elif problem == "geometry":
+        last["modules"][0]["mechanics"]["magnet_position"] = 2048
+    elif problem == "angle":
+        last["modules"][0]["angle"] = 2048
+    elif problem == "receipt":
+        last["last_operation"]["command"]["patch"]["sensor_polarity"] = "active-high"
+    elif problem == "version":
+        last["mechanics_version"] = 2
+    else:
+        del last["modules"][0]["mechanics"]
+    path.write_text("\n".join([*lines[:-1], json.dumps(last)]) + "\n")
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0
+
+
+@pytest.fixture
+def model_http(make_model):
+    import threading
+
+    from flapsim.control import ControlServer
+
+    model = make_model(angles=(730,))
+    hardware = json.loads(model.config.read_text())
+    server = ControlServer(0, model.out, hardware)
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    server.attach(parent)
+    stopped = threading.Event()
+
+    def serve():
+        while not stopped.is_set():
+            if not model.lib.fs_control_serve(child.fileno(), model.now):
+                break
+            stopped.wait(0.001)
+
+    worker = threading.Thread(target=serve)
+    worker.start()
+    try:
+        yield model, server
+    finally:
+        server.close()
+        stopped.set()
+        worker.join(1)
+        assert not worker.is_alive()
+        child.close()
+
+
+def http_control(server, *, data=None, path="/api/emu/modules/0/32/mech", headers=None):
+    import urllib.error
+    import urllib.request
+
+    headers = {
+        "Authorization": "Bearer " + server.token,
+        "Content-Type": "application/json",
+        **(headers or {}),
+    }
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        response = opener.open(
+            urllib.request.Request(server.endpoint + path, headers=headers, data=data), timeout=2
+        )
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        return response.status, json.loads(response.read())
+
+
+def test_http_mechanics_operations_audit_and_replay_use_the_real_model(model_http):
+    from flapsim.report import replay_data, write_replay
+
+    model, server = model_http
+    command = {
+        "id": 1,
+        "expected_revision": 0,
+        "patch": {"sensor_polarity": "active-low", "flap_offset": 700},
+    }
+    assert http_control(server, path="/api/emu/operations/1")[0] == 404
+    code, applied = http_control(server, data=json.dumps(command).encode())
+    assert code == 202 and applied["status"] == "applied"
+    operation = applied["operation"]
+    assert operation["revision"] == 1
+    assert http_control(server, path="/api/emu/operations/1")[1]["operation"] == operation
+    assert http_control(server, data=json.dumps(command).encode())[1]["operation"] == operation
+    assert len([v for v in model.timeline() if v["event"] == "mechanics_changed"]) == 1
+    command["patch"] = {"flap_offset": 0}
+    assert http_control(server, data=json.dumps(command).encode()) == (
+        409,
+        {"error": "stale_or_reused_id"},
+    )
+    command["id"] = 2
+    assert http_control(server, data=json.dumps(command).encode()) == (
+        409,
+        {"error": "revision_conflict"},
+    )
+    command["expected_revision"] = 1
+    assert http_control(server, data=json.dumps(command).encode())[0] == 202
+    assert http_control(server, path="/api/emu/operations/1")[1]["status"] == "unknown"
+    assert http_control(server, path="/api/emu/state")[1]["state"]["mechanics_revision"] == 2
+    journal = [json.loads(line) for line in (model.out / "control.jsonl").read_text().splitlines()]
+    assert [v["phase"] for v in journal] == ["intent", "result"] * 5
+    assert journal[1]["result"]["last_operation"] == operation
+    assert server.token not in (model.out / "control.jsonl").read_text()
+    assert all(v["run_id"] == server.run_id for v in journal)
+    frames, warning = replay_data(model.out)
+    assert warning is None and frames[-1]["mechanics_revision"] == 2
+    assert frames[-2]["mechanics_revision"] == 1
+    write_replay(model.out, frames, warning)
+    assert '"mechanics_revision": 1' in (model.out / "replay.html").read_text()
+
+
+@pytest.mark.parametrize(
+    "data,headers,path,code",
+    [
+        (b"{", {}, "/api/emu/modules/0/32/mech", 400),
+        (b'{"id":1,"id":2}', {}, "/api/emu/modules/0/32/mech", 400),
+        (b'{"patch":{"sensor_window":NaN}}', {}, "/api/emu/modules/0/32/mech", 400),
+        (b"{}" * 1100, {}, "/api/emu/modules/0/32/mech", 413),
+        (b"{}", {"Content-Type": "text/plain"}, "/api/emu/modules/0/32/mech", 415),
+        (b"{}", {"Origin": "http://foreign.example"}, "/api/emu/modules/0/32/mech", 403),
+        (b"{}", {"Host": "foreign.example"}, "/api/emu/modules/0/32/mech", 403),
+        (b"{}", {"Authorization": "Bearer invalid"}, "/api/emu/modules/0/32/mech", 401),
+        (b"{}", {}, "/api/emu/modules/1/32/mech", 404),
+        (b"{}", {}, "/api/emu/modules/0/32/mech", 422),
+        (
+            b'{"id":true,"expected_revision":0,"patch":{"flap_offset":1}}',
+            {},
+            "/api/emu/modules/0/32/mech",
+            422,
+        ),
+        (
+            b'{"id":1,"expected_revision":0,"patch":{"flap_offset":1.5}}',
+            {},
+            "/api/emu/modules/0/32/mech",
+            422,
+        ),
+        (
+            b'{"id":1,"expected_revision":0,"patch":{"flap_offset":true}}',
+            {},
+            "/api/emu/modules/0/32/mech",
+            422,
+        ),
+        (
+            b'{"id":1,"expected_revision":0,"patch":{"sensor_window":0}}',
+            {},
+            "/api/emu/modules/0/32/mech",
+            422,
+        ),
+        (
+            b'{"id":1,"expected_revision":0,"patch":{"fault":"dead"}}',
+            {},
+            "/api/emu/modules/0/32/mech",
+            422,
+        ),
+        (
+            b'{"id":1,"expected_revision":0,"patch":{"flap_offset":1},"extra":0}',
+            {},
+            "/api/emu/modules/0/32/mech",
+            422,
+        ),
+    ],
+)
+def test_http_rejection_never_mutates_model(model_http, data, headers, path, code):
+    model, server = model_http
+    before = model.timeline()
+    assert http_control(server, data=data, headers=headers, path=path)[0] == code
+    assert model.timeline() == before
+    assert http_control(server, path="/api/emu/state")[0] == 200
+
+
+def test_lost_acknowledgement_never_reapplies_a_mechanics_command(make_model):
+    model = make_model()
+    command = {"id": 1, "expected_revision": 0, "bus": 0, "addr": 32, "patch": {"flap_offset": 5}}
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    parent.sendall(b"FLAPSIM_MECH/1 " + json.dumps(command).encode())
+    parent.close()  # Simulate the client disappearing after sending its command.
+    with child:
+        assert model.lib.fs_control_serve(child.fileno(), model.now) == 0
+    assert model.state()["last_operation"]["command"] == command
+    before = model.timeline()
+    assert model.control({"flap_offset": 5})["mechanics_revision"] == 1
+    assert model.timeline() == before
+
+
+def test_native_resume_restores_overlay_before_validating_angle(make_model):
+    model = make_model(angles=(2047,))
+    model.control({"steps_per_rotation": 4096})
+    model.write(COILS[0])
+    model.write(COILS[1])
+    model.write(OFF)
+    assert model.state()["modules"][0]["angle"] == 2048
+    model.lib.fs_model_guest_reset()
+    model.lib.fs_model_close()
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) == 0
+    resumed = model.control({"steps_per_rotation": 4096})
+    assert resumed["modules"][0]["angle"] == 2048
+    validate_state(resumed, json.loads(model.config.read_text()))
+
+
+def test_http_lost_audit_commit_reports_unknown_even_after_model_applied(model_http, monkeypatch):
+    import flapsim.control
+
+    model, server = model_http
+    original = os.fsync
+    count = 0
+
+    def fail_result(descriptor):
+        nonlocal count
+        count += 1
+        if count == 2:
+            raise OSError("injected result fsync failure")
+        original(descriptor)
+
+    monkeypatch.setattr(flapsim.control.os, "fsync", fail_result)
+    code, response = http_control(
+        server, data=b'{"id":1,"expected_revision":0,"patch":{"flap_offset":5}}'
+    )
+    assert code == 503 and response == {"error": "result_unknown", "id": 1}
+    assert model.state()["mechanics_revision"] == 1
+    assert http_control(server, path="/api/emu/state")[0] == 503
+
+
+def test_http_slow_body_is_bounded_and_does_not_touch_model(model_http):
+    import http.client
+    import time
+
+    model, server = model_http
+    connection = http.client.HTTPConnection("127.0.0.1", server.port, timeout=2)
+    try:
+        connection.putrequest("POST", "/api/emu/modules/0/32/mech")
+        connection.putheader("Authorization", "Bearer " + server.token)
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", "100")
+        connection.endheaders()
+        started = time.monotonic()
+        response = connection.getresponse()
+        assert response.status == 408 and time.monotonic() - started < 1.8
+        response.read()
+        assert len(model.timeline()) == 1
+    finally:
+        connection.close()
