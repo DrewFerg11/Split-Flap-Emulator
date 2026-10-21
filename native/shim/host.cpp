@@ -9,6 +9,7 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <csignal>
 #include <cstdarg>
@@ -38,6 +39,7 @@ constexpr int kExitRuntime = 3;
 Config settings;
 unsigned boots = 1;
 esp_reset_reason_t reason = ESP_RST_POWERON;
+std::atomic<bool> clock_set{false};
 int serial_fd = -1, input_fd = -1;
 std::mutex input_mutex;
 std::deque<uint8_t> input;
@@ -83,8 +85,8 @@ void load_config(const char *file) {
     if (!root || !json_object_is_type(root, json_type_object))
         fail(std::string("cannot read native config JSON: ") + file);
     static const char *known[] = {
-        "schema_version", "model_config", "serial_log",  "serial_input", "nvs",
-        "littlefs",       "speed",        "random_seed", "wifi",         "http_fd"};
+        "schema_version", "model_config", "serial_log", "serial_input", "nvs",  "littlefs",
+        "speed",          "random_seed",  "wifi",       "http_fd",      "clock"};
     json_object_object_foreach(root, key, unused) {
         (void)unused;
         if (std::none_of(std::begin(known), std::end(known),
@@ -111,6 +113,31 @@ void load_config(const char *file) {
         if (fd < 3 || fd > 1023 || fcntl(int(fd), F_GETFD) < 0)
             fail("native config: http_fd must be an open inherited descriptor");
         settings.http_fd = int(fd);
+    }
+    if (json_object *clock = member(root, "clock", json_type_object, false)) {
+        json_object_object_foreach(clock, key, unused) {
+            (void)unused;
+            if (std::strcmp(key, "mode") && std::strcmp(key, "start") && std::strcmp(key, "sync"))
+                fail(std::string("native config: unknown clock field ") + key);
+        }
+        if (json_object *mode = member(clock, "mode", json_type_string, false)) {
+            std::string value = json_object_get_string(mode);
+            if (value != "host" && value != "fixed")
+                fail("native config: clock.mode must be host or fixed");
+            settings.clock.fixed = value == "fixed";
+        }
+        if (json_object *start = member(clock, "start", json_type_int, settings.clock.fixed)) {
+            settings.clock.start = json_object_get_int64(start);
+            if (!settings.clock.fixed || settings.clock.start < 0 ||
+                settings.clock.start > 4102444800LL)
+                fail("native config: clock.start is a fixed-mode epoch second before 2100");
+        }
+        if (json_object *sync = member(clock, "sync", json_type_string, false)) {
+            std::string value = json_object_get_string(sync);
+            if (value != "station" && value != "boot")
+                fail("native config: clock.sync must be station or boot");
+            settings.clock.sync_at_boot = value == "boot";
+        }
     }
     if (json_object *wifi = member(root, "wifi", json_type_object, false)) {
         json_object_object_foreach(wifi, key, unused) {
@@ -140,19 +167,21 @@ void load_config(const char *file) {
     json_object_put(root);
 }
 
-/* FLAPSIM_NATIVE_BOOT=<boot>:<reason>:<guest_ns> is set only by an emulated reset. */
+/* FLAPSIM_NATIVE_BOOT=<boot>:<reason>:<guest_ns>:<rtc set> is set only by an emulated reset; the
+ * RTC keeps a synchronized wall clock across software resets, as on the device. */
 int64_t load_boot_state() {
     const char *value = std::getenv(kBootVariable);
     if (!value)
         return 0;
-    unsigned long long count = 0, code = 0;
+    unsigned long long count = 0, code = 0, rtc = 0;
     long long guest = 0;
     char tail;
-    if (std::sscanf(value, "%llu:%llu:%lld%c", &count, &code, &guest, &tail) != 3 || count < 2 ||
-        code > ESP_RST_SDIO || guest < 0)
+    if (std::sscanf(value, "%llu:%llu:%lld:%llu%c", &count, &code, &guest, &rtc, &tail) != 4 ||
+        count < 2 || code > ESP_RST_SDIO || guest < 0 || rtc > 1)
         fail("invalid reset state in FLAPSIM_NATIVE_BOOT");
     boots = unsigned(count);
     reason = esp_reset_reason_t(code);
+    clock_set = rtc == 1;
     return guest;
 }
 
@@ -205,6 +234,8 @@ void write_text(int fd, const char *text) { write_all(fd, text, std::strlen(text
     out = append_number(out, unsigned(next));
     *out++ = ':';
     out = append_number(out, (unsigned long long)vclock::now_ns());
+    *out++ = ':';
+    out = append_number(out, clock_set ? 1 : 0);
     *out = '\0';
     execve("/proc/self/exe", saved_argv, exec_environment.data());
     write_text(STDERR_FILENO, "flapsim-native: emulated reset failed: cannot re-execute\n");
@@ -341,6 +372,7 @@ void fill_input() {
 } // namespace
 
 const Config &config() { return settings; }
+std::atomic<bool> &rtc_clock_set() { return clock_set; }
 unsigned boot_count() { return boots; }
 esp_reset_reason_t reset_reason() { return reason; }
 

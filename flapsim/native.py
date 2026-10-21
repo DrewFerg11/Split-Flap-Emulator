@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import socket
+import struct
 import sys
 from pathlib import Path
 
@@ -82,7 +83,22 @@ def listener():
     return server
 
 
-def prepare(out, build, hardware, *, trace, speed, http_fd, seed):
+def nvs_document(seed):
+    """A scenario's settings seed in the shim's typed NVS file (str, i32, float32 blob)."""
+    spaces = {}
+    for space, values in seed.items():
+        entries = spaces.setdefault(space, {})
+        for key, value in values.items():
+            if isinstance(value, str):
+                entries[key] = {"type": "str", "value": value}
+            elif isinstance(value, int):
+                entries[key] = {"type": "i32", "value": value}
+            else:
+                entries[key] = {"type": "blob", "value": struct.pack("<f", value).hex()}
+    return {"schema_version": 1, "namespaces": spaces}
+
+
+def prepare(out, build, hardware, *, trace, speed, http_fd, seed, setup=None):
     """Write a fresh native run directory: model config, LittleFS copy and native config."""
     for name in [
         "state.json",
@@ -107,6 +123,11 @@ def prepare(out, build, hardware, *, trace, speed, http_fd, seed):
         "random_seed": seed if seed is not None else 1,
         "http_fd": http_fd,
     }
+    setup = setup or {}
+    if setup.get("clock"):
+        config["clock"] = setup["clock"]
+    if setup.get("nvs"):
+        (out / "nvs.json").write_text(json.dumps(nvs_document(setup["nvs"]), indent=2) + "\n")
     path = out / "native-config.json"
     path.write_text(json.dumps(config, indent=2) + "\n")
     return path

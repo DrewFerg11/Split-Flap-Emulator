@@ -7,6 +7,10 @@
   an explicit idempotent repeat.
 - `homing-random.yaml`: recorded seeded start, historical blank homing settlement,
   then X startup; CI runs seeds 7, 19 and 42 independently.
+- `mqtt-native-8.yaml` (native only): provisioned Wi-Fi and broker; Home Assistant
+  discovery, availability, MQTT `set` → drums and state publishing.
+- `clock-dst-native-8.yaml` / `date-rollover-native-8.yaml` (native only): time mode
+  across a DST transition and date mode across New Year with a fixed wall clock.
 - `version-check.yaml`: strict serial version expectation, also used by the
   asserted negative integration checks.
 - `calibration-8.yaml`: save eight different offsets through `POST /settings`,

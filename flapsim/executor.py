@@ -41,6 +41,7 @@ class RunContext:
     process: object
     deadline: float
     interrupt: object = None
+    services: dict | None = None
 
     def checkpoint(self):
         if self.interrupt and (signum := self.interrupt()) is not None:
@@ -108,6 +109,7 @@ def load_executor(
     firmware_source=None,
     known_issues=None,
     mode="qemu",
+    implicit_variables=None,
 ):
     if str(path) == "boot":
         document = {"version": 1, "mode": "boot", "timeout": 240}
@@ -131,6 +133,7 @@ def load_executor(
             firmware_source=firmware_source,
             known_issues=known_issues,
             mode=mode,
+            implicit_variables=implicit_variables,
         )
     if variables or known_issues is not None:
         raise ValueError("variables and known issues require a step-based scenario")
