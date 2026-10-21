@@ -6,7 +6,7 @@ These are emulator findings, pending comparison with a physical display.
 
 ## Validation after rebasing onto #26
 
-The branch is based on `e5b3dde`. All 303 native/Python tests pass, including a
+The branch is based on `e5b3dde`. All 305 native/Python tests pass, including a
 regression for the review finding about inheriting a global flap offset in a
 mixed v1 configuration. Python lint/format and C format checks pass.
 An additional regression ensures an observed matching-but-misaligned display

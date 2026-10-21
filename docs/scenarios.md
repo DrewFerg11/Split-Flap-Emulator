@@ -29,6 +29,8 @@ retain the report and triage it against the physical model and firmware.
 An observed matching-but-misaligned landing remains a real failure even when
 that step has a golden lost-command timeout allowance; that allowance cannot
 turn the landing error into a known-issue pass.
+That evidence persists through later nonmatching settlements in the same wait;
+an actual matching, aligned settlement can still satisfy the wait normally.
 
 ## Version policy
 

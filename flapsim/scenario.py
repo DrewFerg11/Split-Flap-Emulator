@@ -503,11 +503,18 @@ class ScenarioExecutor:
                 result["flap_errors"] = [m["flap_error"] for m in state["modules"]]
                 matches = display_matches(value["text"], state["text"])
                 aligned = display_aligned(state, value["text"])
-                result["alignment_failed"] = matches and not aligned
+                result["alignment_failed"] = result.get("alignment_failed", False) or (
+                    matches and not aligned
+                )
                 if matches and aligned:
                     self.display_cursor = state["sequence"]
                     self.command_baseline = None
-                    result.update(actual=state["text"], state=state, unchanged=unchanged)
+                    result.update(
+                        actual=state["text"],
+                        state=state,
+                        unchanged=unchanged,
+                        alignment_failed=False,
+                    )
                     return
             context.pause()
 

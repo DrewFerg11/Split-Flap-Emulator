@@ -25,6 +25,7 @@ from flapsim.scenario import (
     parse_variables,
     substitute,
 )
+from flapsim.state import validate_state
 from tools.verify_boot import GOLDEN
 
 GOLDEN_SHA256 = GOLDEN["sha256"]
@@ -326,6 +327,43 @@ def test_lost_command_baseline_cannot_accept_a_matching_but_misaligned_display(c
     with pytest.raises(TimeoutError):
         engine.execute(context)
     assert engine.results[0]["status"] == "failed"
+    assert engine.known_failure is None
+
+
+@pytest.mark.parametrize("eventually_aligned", [False, True])
+def test_partial_landing_evidence_survives_later_wrong_text_until_success(
+    context, monkeypatch, eventually_aligned
+):
+    partial = copy.deepcopy(FIXTURE["states"][1])
+    partial["modules"][0]["angle"] = 1356
+    later = copy.deepcopy(FIXTURE["states"][1])
+    for key in ["sequence", "movement_id", "settlement_id"]:
+        later[key] += 1
+    if not eventually_aligned:
+        later["modules"][0].update(angle=1384, char="Y")
+        later.update(text="YXXXXXXX", rows=["YXXXXXXX", ""])
+    states = iter(
+        [
+            validate_state(partial, context.hardware),
+            validate_state(later, context.hardware),
+        ]
+    )
+    monkeypatch.setattr(RunContext, "settlement", lambda self: next(states, later))
+    engine = executor(
+        [{"wait_display": {"text": "XXXXXXXX"}, "timeout": 0.2}],
+        firmware_sha256=GOLDEN_SHA256,
+        known_issues=baseline(),
+    )
+    if eventually_aligned:
+        engine.execute(context)
+        assert engine.results[0]["status"] == "passed"
+        assert engine.results[0]["alignment_failed"] is False
+    else:
+        with pytest.raises(TimeoutError):
+            engine.execute(context)
+        assert engine.results[0]["status"] == "failed"
+        assert engine.results[0]["alignment_failed"] is True
+        assert engine.results[0]["actual"] == "YXXXXXXX"
     assert engine.known_failure is None
 
 
