@@ -332,7 +332,7 @@ def build(args):
     return out
 
 
-def main(argv=None):
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "--firmware-src",
@@ -349,7 +349,11 @@ def main(argv=None):
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     parser.add_argument("--sanitize", action="store_true", help="address/undefined sanitizers")
     parser.add_argument("--test", action="store_true", help="also build and run the shim tests")
-    args = parser.parse_args(argv)
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
     try:
         build(args)
     except (ValueError, subprocess.CalledProcessError, OSError) as error:

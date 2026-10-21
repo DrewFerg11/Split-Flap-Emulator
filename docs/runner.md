@@ -55,6 +55,28 @@ applies on assertion failure, early QEMU exit, Ctrl-C and SIGTERM. The CLI recor
 signals as cancellation so a second signal cannot interrupt cleanup or create
 an ownership gap around process launch.
 
+## Native mode
+
+`--mode native` runs firmware **source** built by `native/build.py` instead of a factory image
+(see [native.md](native.md)); QEMU mode stays the default and the release gate.
+
+```sh
+python native/build.py --out build/native/golden
+flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
+  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.1 --out runs/native-8
+```
+
+`--firmware-src golden|git:<ref>|<checkout>` builds first instead (from a source checkout).
+`--speed` (0.25–50, default 5) sets the virtual clock rate. Each mode accepts only its own
+inputs: `--firmware`/`--timing` are QEMU-only and `--native-build`/`--firmware-src`/`--speed`
+native-only, so a run never silently ignores an option. Scenarios, hardware, reports, replay,
+deadlines and cleanup are shared. The runner binds the device's port 80 on `127.0.0.1` itself
+and the native process inherits the listening socket, so the endpoint never races another
+process and survives emulated resets. The manifest records `"mode": "native"`, the firmware
+source/ref/commit/dirty state/version with the executable's path, size and SHA-256 (which must
+be unchanged afterwards), the native build provenance and speed, and `native_returncode`.
+QEMU-mode manifests now record `"mode": "qemu"`.
+
 ## Isolation and lifecycle
 
 The runner rejects empty or larger-than-4-MiB firmware, unsupported hardware,

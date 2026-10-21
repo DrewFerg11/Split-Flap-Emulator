@@ -16,12 +16,14 @@ def main():
             {
                 k: value.get(k)
                 for k in [
+                    "mode",
                     "passed",
                     "error",
                     "exit_code",
                     "wall_seconds",
                     "source_unchanged",
                     "qemu_returncode",
+                    "native_returncode",
                     "status",
                     "known_issues",
                 ]

@@ -90,6 +90,21 @@ jobs:
             python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
               --case improv-reboot --timeout ${{ matrix.timeout }} --out "runs/native/improv-$hardware"
           done
+      - name: Run the golden smoke scenarios natively under the native known-issues baseline
+        if: matrix.name != 'sanitizers'
+        run: |
+          set -e
+          for layout in "8 esp32-8-single" "16 esp32-16-dual"; do
+            set -- $layout
+            flapsim run --mode native --native-build build/native/golden --hardware "$2" \
+              --scenario "scenarios/release-smoke-$1.yaml" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
+              --known-issues baselines/v1.4.1-native.yaml --out "runs/native/smoke-$1"
+          done
+      - name: Log native scenario outcomes
+        if: always() && matrix.name != 'sanitizers'
+        run: |
+          python -m tools.summarize_run runs/native/smoke-8/run.json
+          python -m tools.summarize_run runs/native/smoke-16/run.json
       - name: Upload native evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -103,6 +118,9 @@ jobs:
             runs/native/**/*.json
             runs/native/**/*.jsonl
             runs/native/**/*.log
+            runs/native/**/*.md
+            runs/native/**/*.xml
+            runs/native/**/*.html
 
   qemu-boot:
     name: Golden scenario (${{ matrix.name }})

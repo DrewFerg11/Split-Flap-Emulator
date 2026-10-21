@@ -20,6 +20,8 @@ struct WiFiConfig {
 struct Config {
     std::string model_config, serial_log, serial_input, nvs, littlefs;
     double speed = 1.0;
+    /* Listening socket for the device's port 80, inherited from the runner; -1 for none. */
+    int http_fd = -1;
     uint32_t random_seed = 1;
     WiFiConfig wifi;
 };

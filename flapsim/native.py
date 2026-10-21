@@ -1,0 +1,117 @@
+"""Native mode: run firmware source built by native/build.py against the host shims."""
+
+import hashlib
+import json
+import os
+import re
+import shutil
+import socket
+import sys
+from pathlib import Path
+
+from flapsim.hardware import ROOT, write_model_config
+
+SPEED_RANGE = (0.25, 50.0)
+DEFAULT_SPEED = 5.0
+
+
+def check_speed(value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("--speed must be a number")
+    if not SPEED_RANGE[0] <= value <= SPEED_RANGE[1]:
+        raise ValueError(f"--speed must be in [{SPEED_RANGE[0]}, {SPEED_RANGE[1]}]")
+    return float(value)
+
+
+def build_from_source(spec, *, jobs=None):
+    """Build `golden`, `git:<ref>` or a local checkout with native/build.py (source tree only)."""
+    script = ROOT / "native/build.py"
+    if not script.is_file():
+        raise ValueError("--firmware-src needs a source checkout; pass a prebuilt --native-build")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from native import build
+
+    arguments = ["--firmware-src", spec]
+    if jobs:
+        arguments += ["--jobs", str(jobs)]
+    parser_args = build.parse_args(arguments)
+    try:
+        return build.build(parser_args)
+    except Exception as error:
+        raise ValueError(f"native build failed: {error}") from error
+
+
+def load_build(path):
+    """A native/build.py output directory: executable, LittleFS image and recorded provenance."""
+    path = Path(path).resolve(strict=True)
+    binary = path / "bin/flapsim-native"
+    if not binary.is_file() or not os.access(binary, os.X_OK):
+        raise ValueError(f"missing native executable: {binary}")
+    if not (path / "littlefs").is_dir():
+        raise ValueError(f"missing native LittleFS directory: {path / 'littlefs'}")
+    try:
+        info = json.loads((path / "build-info.json").read_text())
+    except (OSError, ValueError) as error:
+        raise ValueError(f"cannot read native build provenance: {error}") from error
+    firmware = info.get("firmware") if isinstance(info, dict) else None
+    if (
+        info.get("schema_version") != 1
+        or not isinstance(firmware, dict)
+        or not isinstance(firmware.get("version"), str)
+        or not (firmware.get("commit") is None or re.fullmatch(r"[0-9a-f]{40}", firmware["commit"]))
+        or not re.fullmatch(r"[0-9a-f]{64}", str(info.get("shim_sha256", "")))
+    ):
+        raise ValueError("invalid native build provenance")
+    data = binary.read_bytes()
+    return {
+        "path": path,
+        "binary": binary,
+        "info": info,
+        "binary_sha256": hashlib.sha256(data).hexdigest(),
+        "binary_size": len(data),
+    }
+
+
+def listener():
+    """The device's port 80: bound here and inherited, so reboots never lose the endpoint."""
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(("127.0.0.1", 0))
+    server.listen(16)
+    server.set_inheritable(True)
+    return server
+
+
+def prepare(out, build, hardware, *, trace, speed, http_fd, seed):
+    """Write a fresh native run directory: model config, LittleFS copy and native config."""
+    for name in [
+        "state.json",
+        "activity.json",
+        "timeline.jsonl",
+        "serial.log",
+        "i2c.log",
+        "nvs.json",
+    ]:
+        (out / name).unlink(missing_ok=True)
+    littlefs = out / "littlefs"
+    if littlefs.exists():
+        shutil.rmtree(littlefs)
+    shutil.copytree(build["path"] / "littlefs", littlefs)
+    config = {
+        "schema_version": 1,
+        "model_config": str(write_model_config(hardware, out, trace=trace)),
+        "serial_log": str(out / "serial.log"),
+        "nvs": str(out / "nvs.json"),
+        "littlefs": str(littlefs),
+        "speed": speed,
+        "random_seed": seed if seed is not None else 1,
+        "http_fd": http_fd,
+    }
+    path = out / "native-config.json"
+    path.write_text(json.dumps(config, indent=2) + "\n")
+    return path
+
+
+def ready(out):
+    """The model has initialized (or resumed) and written its first activity record."""
+    return (out / "activity.json").is_file() and (out / "serial.log").is_file()

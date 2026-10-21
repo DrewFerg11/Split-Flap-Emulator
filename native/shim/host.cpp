@@ -82,9 +82,9 @@ void load_config(const char *file) {
     json_object *root = json_object_from_file(file);
     if (!root || !json_object_is_type(root, json_type_object))
         fail(std::string("cannot read native config JSON: ") + file);
-    static const char *known[] = {"schema_version", "model_config", "serial_log",
-                                  "serial_input",   "nvs",          "littlefs",
-                                  "speed",          "random_seed",  "wifi"};
+    static const char *known[] = {
+        "schema_version", "model_config", "serial_log",  "serial_input", "nvs",
+        "littlefs",       "speed",        "random_seed", "wifi",         "http_fd"};
     json_object_object_foreach(root, key, unused) {
         (void)unused;
         if (std::none_of(std::begin(known), std::end(known),
@@ -105,6 +105,12 @@ void load_config(const char *file) {
         if (value < 0 || value > 0xffffffffLL)
             fail("native config: random_seed must be a 32-bit unsigned integer");
         settings.random_seed = uint32_t(value);
+    }
+    if (json_object *http = member(root, "http_fd", json_type_int, false)) {
+        int64_t fd = json_object_get_int64(http);
+        if (fd < 3 || fd > 1023 || fcntl(int(fd), F_GETFD) < 0)
+            fail("native config: http_fd must be an open inherited descriptor");
+        settings.http_fd = int(fd);
     }
     if (json_object *wifi = member(root, "wifi", json_type_object, false)) {
         json_object_object_foreach(wifi, key, unused) {

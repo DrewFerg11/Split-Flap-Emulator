@@ -230,8 +230,3 @@ void AsyncWebServer::dispatch(AsyncWebServerRequest &request) {
     if (!request.responded())
         request.send(404);
 }
-
-/* This phase has no host listener yet; the network transport arrives with --mode native. */
-void AsyncWebServer::begin() { started = true; }
-
-void AsyncWebServer::end() { started = false; }

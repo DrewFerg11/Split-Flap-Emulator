@@ -2,20 +2,45 @@
 #pragma once
 #include "Client.h"
 
-/* TCP client. This phase has no host network path yet, so connections are refused. */
+#include <cstdint>
+#include <memory>
+
+namespace flapsim::net {
+/* Resolves a host name to an IPv4 address in network byte order; returns false on failure. */
+using Resolver = bool (*)(const char *host, uint32_t *address);
+/* Tests replace the host resolver; nullptr restores getaddrinfo. */
+void set_resolver(Resolver resolver);
+} // namespace flapsim::net
+
+/* TCP client on a host socket. Copies share one connection, as arduino-esp32's do. Connect uses
+ * its timeout and write the device's retry rule, both in virtual time; reads never block. */
 class WiFiClient : public Client {
   public:
-    int connect(IPAddress, uint16_t) override { return 0; }
-    int connect(const char *, uint16_t) override { return 0; }
+    WiFiClient();
+    ~WiFiClient() override;
+    WiFiClient(const WiFiClient &) = default;
+    WiFiClient &operator=(const WiFiClient &) = default;
+
+    int connect(IPAddress ip, uint16_t port) override;
+    int connect(IPAddress ip, uint16_t port, int32_t timeout_ms);
+    int connect(const char *host, uint16_t port) override;
+    int connect(const char *host, uint16_t port, int32_t timeout_ms);
     using Print::write;
-    size_t write(uint8_t) override { return 0; }
-    size_t write(const uint8_t *, size_t) override { return 0; }
-    int available() override { return 0; }
-    int read() override { return -1; }
-    int read(uint8_t *, size_t) override { return -1; }
-    int peek() override { return -1; }
+    size_t write(uint8_t value) override { return write(&value, 1); }
+    size_t write(const uint8_t *buffer, size_t size) override;
+    int available() override;
+    int read() override;
+    int read(uint8_t *buffer, size_t size) override;
+    int peek() override;
     void flush() override {}
-    void stop() override {}
-    uint8_t connected() override { return 0; }
-    operator bool() override { return false; }
+    void stop() override;
+    uint8_t connected() override;
+    operator bool() override { return connected(); }
+    void setNoDelay(bool) {}
+    int fd() const;
+
+  private:
+    struct Socket;
+    std::shared_ptr<Socket> socket;
+    int connect_timeout_ms = 3000;
 };
