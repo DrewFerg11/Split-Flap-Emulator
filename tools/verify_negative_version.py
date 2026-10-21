@@ -1,4 +1,4 @@
-"""Assert real CLI failures for the known golden mismatch and a deliberately wrong version."""
+"""Assert real CLI failures for a prerelease of the golden tag and a deliberately wrong version."""
 
 import argparse
 import json
@@ -18,7 +18,9 @@ def verify(args):
         raise ValueError("negative evidence directory must be fresh")
     out.mkdir(parents=True, exist_ok=True)
     cases = []
-    for name, version in [("strict-tag", "v1.4.0"), ("wrong-version", "v9.9.9")]:
+    # The rc case is the v1.4.0 failure mode: a stable build must not satisfy its own prerelease.
+    reported = f"Firmware: {GOLDEN['tag']} ("
+    for name, version in [("rc-tag", f"{GOLDEN['tag']}-rc.1"), ("wrong-version", "v9.9.9")]:
         case = out / name
         command = [
             sys.executable,
@@ -46,7 +48,7 @@ def verify(args):
             or manifest["source_unchanged"] is not True
             or manifest["steps"][0]["status"] != "passed"
             or manifest["steps"][1]["status"] != "failed"
-            or "Firmware: v1.4.0-rc.1 (" not in manifest["steps"][1].get("actual", "")
+            or reported not in manifest["steps"][1].get("actual", "")
             or manifest.get("version_exception") is not None
         ):
             raise RuntimeError(
@@ -76,7 +78,7 @@ def verify(args):
     (out / "verification.json").write_text(
         json.dumps({"passed": True, "cases": cases}, indent=2) + "\n"
     )
-    print("PASS: strict golden tag mismatch and deliberately wrong version both fail with evidence")
+    print("PASS: golden prerelease tag and deliberately wrong version both fail with evidence")
 
 
 def main():

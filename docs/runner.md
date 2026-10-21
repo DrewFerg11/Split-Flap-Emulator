@@ -4,7 +4,7 @@ Install and build using [development.md](development.md), then run:
 
 ```sh
 python -m tools.verify_model --fetch-only
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.0-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
   --hardware esp32-8-single --scenario scenarios/boot-esp32-8-single.yaml \
   --out runs/boot-8
 python -m tools.verify_model --hardware esp32-8-single --out runs/boot-8

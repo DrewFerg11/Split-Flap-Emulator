@@ -1,14 +1,15 @@
-# Known-issue baseline for the checksum-pinned v1.4.0 golden image (esp32_n4 factory).
+# Known-issue baseline for the checksum-pinned v1.4.1 golden image (esp32_n4 factory).
 # Policy and exit criteria: https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15
 #
 # Used only by the emulator's own golden CI runs (--known-issues). Release gating of new firmware
 # never passes a baseline, so everything below fails there. Remove entries as their issues are fixed;
 # delete this file when it is empty.
 version: 1
-firmware_sha256: a087801e2ba5e08154af28a636c310b988b43417f28c7ddb7bae4f3df9f6221e
+firmware_sha256: 5a71579b127ee87f0716cb1df938c9f98d3519a9283f72c003dfb857db32e6f4
 description: >-
-  Published v1.4.0 esp32_n4 factory image. Its settings store has an unsynchronized-access race and
-  logs every never-written key as an error (SFD#54); see issue #15 for the full policy.
+  Published v1.4.1 esp32_n4 factory image. Since v1.4.0 only MQTT recovery and the version string
+  changed, so the v1.4.0 entries carry over unchanged. Its settings store has an unsynchronized-access
+  race and logs every never-written key as an error (SFD#54); see issue #15 for the full policy.
 
 serial:
   - issue: DrewFerg11/Split-Flap-Display#54

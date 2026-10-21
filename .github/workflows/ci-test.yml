@@ -103,13 +103,13 @@ jobs:
       - name: Run real-firmware golden scenario
         if: matrix.name != 'negative-versions'
         run: |
-          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.0-factory.bin \
+          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
             --hardware "${{ matrix.hardware }}" --scenario "scenarios/${{ matrix.scenario }}.yaml" \
-            --seed "${{ matrix.seed }}" --var FIRMWARE_VERSION=v1.4.0 \
-            --golden-version-exception --known-issues baselines/v1.4.0-golden.yaml \
+            --seed "${{ matrix.seed }}" --var FIRMWARE_VERSION=v1.4.1 \
+            --known-issues baselines/v1.4.1-golden.yaml \
             --out runs/scenario
           python -c 'import json; m=json.load(open("runs/scenario/run.json")); print("Scenario wall seconds:", m["wall_seconds"])'
-      - name: Prove strict and deliberately wrong versions fail
+      - name: Prove prerelease and deliberately wrong versions fail
         if: matrix.name == 'negative-versions'
         run: python -m tools.verify_negative_version --out runs/negative-versions
       - name: Log available scenario outcome
@@ -118,7 +118,7 @@ jobs:
       - name: Log available negative-version outcomes
         if: always() && matrix.name == 'negative-versions'
         run: |
-          python -m tools.summarize_run runs/negative-versions/strict-tag/run.json
+          python -m tools.summarize_run runs/negative-versions/rc-tag/run.json
           python -m tools.summarize_run runs/negative-versions/wrong-version/run.json
       - name: Upload available diagnostics
         if: always()

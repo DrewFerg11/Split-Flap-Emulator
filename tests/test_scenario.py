@@ -20,12 +20,14 @@ from flapsim.hardware import load_hardware
 from flapsim.report import write_reports
 from flapsim.runner import run
 from flapsim.scenario import (
-    GOLDEN_SHA256,
     ScenarioExecutor,
     json_subset,
     parse_variables,
     substitute,
 )
+from tools.verify_boot import GOLDEN
+
+GOLDEN_SHA256 = GOLDEN["sha256"]
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures/golden-8-evidence.json").read_text())
 
@@ -206,26 +208,10 @@ def test_invalid_steps_fail_before_execution(step):
         executor([step])
 
 
-def test_version_exception_requires_exact_pin_and_explicit_opt_in():
+def test_version_expectation_is_always_the_requested_tag():
     step = {"expect_serial": "Firmware: ${FIRMWARE_VERSION} ("}
-    strict = executor([step], variables=["FIRMWARE_VERSION=v1.4.0"], firmware_sha256=GOLDEN_SHA256)
-    assert strict.version_exception is None
-    assert strict.document["steps"][0]["expect_serial"]["contains"] == "Firmware: v1.4.0 ("
-    allowed = executor(
-        [step],
-        variables=["FIRMWARE_VERSION=v1.4.0"],
-        firmware_sha256=GOLDEN_SHA256,
-        golden_exception=True,
-    )
-    assert allowed.version_exception["effective"] == "v1.4.0-rc.1"
-    for digest, version in [("f" * 64, "v1.4.0"), (GOLDEN_SHA256, "v9.0.0")]:
-        with pytest.raises(ValueError, match="golden version exception"):
-            executor(
-                [step],
-                variables=[f"FIRMWARE_VERSION={version}"],
-                firmware_sha256=digest,
-                golden_exception=True,
-            )
+    strict = executor([step], variables=["FIRMWARE_VERSION=v1.4.1"], firmware_sha256=GOLDEN_SHA256)
+    assert strict.document["steps"][0]["expect_serial"]["contains"] == "Firmware: v1.4.1 ("
 
 
 def test_wait_serial_consumes_new_matches_while_expect_uses_history(context):
@@ -437,18 +423,18 @@ def test_reports_escape_html_xml_and_keep_missing_partial_evidence_honest(tmp_pa
         "error": "exit\x00",
         "scenario": {"name": "<test>"},
     }
-    write_reports(tmp_path, manifest, [], None)
+    write_reports(tmp_path, manifest, [])
     root = ET.parse(tmp_path / "junit.xml").getroot()
     assert root.get("failures") == "1"
     assert "Timeline unavailable" in (tmp_path / "report.md").read_text()
     attack = copy.deepcopy(FIXTURE["states"][0])
     attack["modules"][0]["char"] = '</script><script>alert("injection")</script>'
     (tmp_path / "timeline.jsonl").write_text(json.dumps(attack) + "\n{")
-    write_reports(tmp_path, manifest, [], {"reason": "explicit golden exception"})
+    write_reports(tmp_path, manifest, [])
     replay = (tmp_path / "replay.html").read_text()
     assert "</script><script>alert" not in replay and "\\u003c/script>" in replay
     assert "Incomplete trailing" in (tmp_path / "report.md").read_text()
-    assert "EXPLICIT GOLDEN VERSION EXCEPTION" in summary.read_text()
+    assert "# Firmware scenario: FAIL" in summary.read_text()
     assert ET.parse(tmp_path / "junit.xml").getroot().get("failures") == "1"
 
 
@@ -549,9 +535,8 @@ def test_checked_in_scenarios_load_with_the_required_version_variable():
         load_executor(
             root / f"scenarios/{name}.yaml",
             load_hardware(board),
-            variables=["FIRMWARE_VERSION=v1.4.0"],
+            variables=["FIRMWARE_VERSION=v1.4.1"],
             firmware_sha256=GOLDEN_SHA256,
-            golden_exception=True,
         )
 
 
@@ -584,7 +569,7 @@ def baseline(**overrides):
 
 
 def test_checked_in_baseline_is_valid_and_bound_to_the_golden_checksum():
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.0-golden.yaml")
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     known.check_firmware(GOLDEN_SHA256)
     with pytest.raises(ValueError, match="applies only to firmware"):
         known.check_firmware("0" * 64)
@@ -661,7 +646,7 @@ def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context
     step = {"assert_no_errors": {"fresh_nvs": True}}
     with pytest.raises(ExecutionFailed, match=r"\d\]\[E\]\[Preferences\.cpp:50\]"):
         executor([step]).execute(context)
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.0-golden.yaml")
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     engine = executor([step], firmware_sha256=GOLDEN_SHA256, known_issues=known)
     result = engine.execute(context)
     engine.verify_final(context.out, context.hardware)
@@ -674,7 +659,7 @@ def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context
 
 def test_unspliced_diagnostic_stays_governed_by_the_fresh_nvs_policy(context):
     line = "[ 38162][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.0-golden.yaml")
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     assert known.tolerated_serial(line) is None
     (context.out / "serial.log").write_text(line + "\n")
     with pytest.raises(ExecutionFailed):
@@ -701,7 +686,7 @@ def test_unspliced_diagnostic_stays_governed_by_the_fresh_nvs_policy(context):
 )
 def test_golden_fragment_baseline_does_not_accept_other_broken_errors(context, line):
     (context.out / "serial.log").write_text(line + "\n")
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.0-golden.yaml")
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     with pytest.raises(ExecutionFailed):
         executor(
             [{"assert_no_errors": {"fresh_nvs": True}}],
@@ -764,7 +749,7 @@ def test_reports_mark_known_issue_runs_prominently(tmp_path, monkeypatch):
         "expected_failures_not_observed": [],
         "tolerated_serial": [{"regex": "^x$", "issue": "o/r#2", "count": 3, "first": "x"}],
     }
-    write_reports(tmp_path, manifest, steps, None, known_issues=known)
+    write_reports(tmp_path, manifest, steps, known_issues=known)
     report = (tmp_path / "report.md").read_text()
     assert "PASSED WITH KNOWN ISSUES" in report and "o/r#1" in report and "o/r#2" in report
     assert "PASSED WITH KNOWN ISSUES" in summary.read_text()

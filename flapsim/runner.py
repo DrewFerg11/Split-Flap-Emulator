@@ -172,7 +172,6 @@ def run(args, *, executor=None, interrupt=None):
         hardware,
         variables=getattr(args, "variables", ()),
         firmware_sha256=digest,
-        golden_exception=getattr(args, "golden_version_exception", False),
         known_issues=known_issues,
     )
     timeout = positive_timeout(args.timeout if args.timeout is not None else executor.timeout)
@@ -327,7 +326,7 @@ def run(args, *, executor=None, interrupt=None):
             else:
                 from flapsim.report import write_reports
 
-                write_reports(out, manifest, [], None)
+                write_reports(out, manifest, [])
         except Exception as error:
             manifest.update(
                 passed=False, status="failed", exit_code=EXIT_RUNTIME, report_error=str(error)

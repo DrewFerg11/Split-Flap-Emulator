@@ -13,7 +13,6 @@ from flapsim.executor import ExecutionFailed, RunContext, positive_timeout
 from flapsim.state import read_settlement, validate_identity, validate_state
 
 VARIABLE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
-GOLDEN_SHA256 = "a087801e2ba5e08154af28a636c310b988b43417f28c7ddb7bae4f3df9f6221e"
 STEPS = {"wait_serial", "expect_serial", "wait_display", "http", "assert_no_errors", "sleep_guest"}
 
 
@@ -268,7 +267,6 @@ class ScenarioExecutor:
         variables,
         *,
         firmware_sha256=None,
-        golden_exception=False,
         known_issues=None,
     ):
         if known_issues is not None:
@@ -277,22 +275,7 @@ class ScenarioExecutor:
         self.known_serial = {}
         self.known_failure = None
         requested = parse_variables(variables)
-        effective = copy.deepcopy(requested)
-        self.version_exception = None
-        if golden_exception:
-            if firmware_sha256 != GOLDEN_SHA256 or requested.get("FIRMWARE_VERSION") != "v1.4.0":
-                raise ValueError(
-                    "golden version exception requires the pinned v1.4.0 image "
-                    "and FIRMWARE_VERSION=v1.4.0"
-                )
-            effective["FIRMWARE_VERSION"] = "v1.4.0-rc.1"
-            self.version_exception = {
-                "reason": "published v1.4.0 golden image reports v1.4.0-rc.1",
-                "firmware_sha256": firmware_sha256,
-                "requested": "v1.4.0",
-                "effective": "v1.4.0-rc.1",
-            }
-        self.document = substitute(document, effective)
+        self.document = substitute(document, copy.deepcopy(requested))
         fields(self.document, {"version", "name", "timeout", "steps"})
         if type(self.document["version"]) is not int or self.document["version"] != 1:
             raise ValueError("scenario version must be 1")
@@ -363,7 +346,6 @@ class ScenarioExecutor:
                 )
         return {
             "steps": self.results,
-            "version_exception": self.version_exception,
             "known_issues": self.known_issue_summary(),
         }
 
@@ -581,6 +563,5 @@ class ScenarioExecutor:
             out,
             manifest,
             self.results,
-            self.version_exception,
             known_issues=self.known_issue_summary(),
         )

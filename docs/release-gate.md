@@ -27,8 +27,8 @@ The helper pulls that immutable Linux amd64 image, mounts the factory image
 read-only and the output directory writable, and disables container networking.
 It runs installed `release-smoke-8` and `release-smoke-16` resources in parallel
 with `--timing ci`, a 300-second CLI deadline, and `FIRMWARE_VERSION` equal to the
-authorized tag. Neither `--golden-version-exception` nor `--known-issues` is used.
-The accepted v1.4.0 regression baseline (#15) applies to emulator golden CI only;
+authorized tag. `--known-issues` is not used.
+The accepted golden regression baseline (#15) applies to emulator golden CI only;
 it cannot authorize publication of a new firmware release.
 
 ## Publication and diagnostics

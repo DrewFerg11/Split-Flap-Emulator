@@ -11,7 +11,6 @@ import pytest
 from flapsim.executor import load_executor
 from flapsim.hardware import load_hardware
 from flapsim.resources import resolve_resource
-from flapsim.scenario import GOLDEN_SHA256
 from tools.publish_image import (
     REQUIRED_CASES,
     Registry,
@@ -19,6 +18,7 @@ from tools.publish_image import (
     release_version,
     validate_checkout,
 )
+from tools.verify_boot import GOLDEN
 from tools.verify_container import ImageVerifier
 from tools.verify_publication_gate import validate_workflows
 
@@ -32,7 +32,7 @@ def test_container_golden_baseline_is_explicit_and_rejection_stays_strict():
     golden = verifier.command("esp32-8-single", "release-smoke-8", known_issues=True)
     assert golden[golden.index("--known-issues") + 1] == "/known-issues.yaml"
     wrong = verifier.command("esp32-8-single", "version-check", wrong_version=True)
-    assert "--known-issues" not in wrong and "--golden-version-exception" not in wrong
+    assert "--known-issues" not in wrong
     assert "--known-issues" not in verifier.command("esp32-8-single", "boot", timeout=3)
     with pytest.raises(ValueError):
         verifier.command("esp32-8-single", "version-check", wrong_version=True, known_issues=True)
@@ -92,9 +92,8 @@ def test_builtins_resolve_outside_checkout_and_explicit_bad_paths_do_not_fall_ba
     executor = load_executor(
         "release-smoke-8",
         load_hardware("esp32-8-single"),
-        variables=["FIRMWARE_VERSION=v1.4.0"],
-        firmware_sha256=GOLDEN_SHA256,
-        golden_exception=True,
+        variables=["FIRMWARE_VERSION=v1.4.1"],
+        firmware_sha256=GOLDEN["sha256"],
     )
     assert executor.document["name"] == "release-smoke-8"
     with pytest.raises(FileNotFoundError):

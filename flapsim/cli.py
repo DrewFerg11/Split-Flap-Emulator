@@ -23,11 +23,6 @@ def main() -> int:
     runner.add_argument("--scenario", required=True, help="boot or a scenario YAML file")
     runner.add_argument("--var", dest="variables", action="append", default=[], metavar="KEY=value")
     runner.add_argument(
-        "--golden-version-exception",
-        action="store_true",
-        help="explicitly accept v1.4.0-rc.1 only for the checksum-pinned v1.4.0 golden image",
-    )
-    runner.add_argument(
         "--known-issues",
         type=Path,
         help="checksum-bound baseline of linked known firmware issues (golden runs only)",
