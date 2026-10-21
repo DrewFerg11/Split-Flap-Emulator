@@ -859,6 +859,28 @@ def test_golden_fragment_baseline_does_not_accept_other_broken_errors(context, l
         ).execute(context)
 
 
+def test_smoke16_final_check_expects_only_the_plain_fresh_nvs_diagnostic():
+    # CI39654380205: the step-8 race did not occur and step 11 failed on this exact line.
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    plain = "unexpected serial error: " + DIAGNOSTIC.replace("38055", "38037")
+    entry = known.expected_failure(
+        "release-smoke-16", 11, "assert_no_errors", plain, step_timed_out=False
+    )
+    assert entry["issue"] == "DrewFerg11/Split-Flap-Display#54"
+    for other in [
+        "unexpected serial error: [ 7][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263",
+        plain.replace("NOT_FOUND", "INVALID_HANDLE"),
+        plain + " panic",
+    ]:
+        assert not known.expected_failure(
+            "release-smoke-16", 11, "assert_no_errors", other, step_timed_out=False
+        )
+    for scenario, step in [("release-smoke-8", 11), ("release-smoke-16", 6)]:
+        assert not known.expected_failure(
+            scenario, step, "assert_no_errors", plain, step_timed_out=False
+        )
+
+
 def test_expected_failure_stops_the_scenario_as_xfail_and_only_when_it_matches(context):
     steps = [
         {"wait_display": {"text": "HELLOXXX"}, "timeout": 0.1},

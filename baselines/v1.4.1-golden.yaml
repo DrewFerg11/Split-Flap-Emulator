@@ -77,3 +77,13 @@ expected_failures:
     step: 8
     action: wait_display
     error: timeout
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 4: when the step-8 race does not occur, the scenario reaches its strict final check, and
+      v1.4.1 is still logging the fresh-NVS begin/NOT_FOUND diagnostic because nothing has created the
+      config namespace. Only that exact unspliced line is expected here; any other error still fails.
+    scenario: release-smoke-16
+    step: 11
+    action: assert_no_errors
+    error:
+      regex: '^unexpected serial error: \[\s*\d+\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
