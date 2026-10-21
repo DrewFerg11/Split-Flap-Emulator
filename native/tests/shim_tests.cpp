@@ -15,6 +15,7 @@ extern "C" {
 }
 
 #include <arpa/inet.h>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -377,18 +378,30 @@ void sockets() {
     CHECK(client.connect("localhost", port));
     int peer = ::accept(listener, nullptr, nullptr);
     {
-        /* An unanswered lookup gives up after 15 s of virtual time, as hostByName() does. */
+        /* An unanswered lookup gives up after 15 s of virtual time, as hostByName() does, and
+         * logs as the device does. While it is still running, a second lookup waits up to 16 s
+         * for it and then fails without starting another resolver thread. */
+        static std::atomic<int> lookups{0};
         flapsim::net::set_resolver([](const char *, uint32_t *) {
+            lookups++;
             std::this_thread::sleep_for(std::chrono::seconds(2));
             return false;
         });
         flapsim::vclock::set_speed(50.0);
-        auto before = std::chrono::steady_clock::now();
-        WiFiClient stalled;
-        CHECK(!stalled.connect("slow.example", port, 100));
-        auto waited = std::chrono::steady_clock::now() - before;
-        CHECK(waited >= std::chrono::milliseconds(250) && waited < std::chrono::milliseconds(1500));
+        for (int attempt = 0; attempt < 2; attempt++) {
+            auto before = std::chrono::steady_clock::now();
+            WiFiClient stalled;
+            CHECK(!stalled.connect("slow.example", port, 100));
+            auto waited = std::chrono::steady_clock::now() - before;
+            CHECK(waited >= std::chrono::milliseconds(250) &&
+                  waited < std::chrono::milliseconds(1500));
+        }
+        CHECK(lookups == 1);
+        CHECK(read_file(flapsim::host::config().serial_log)
+                  .find("][E][WiFiGeneric.cpp:1583] hostByName(): DNS Failed for "
+                        "slow.example") != std::string::npos);
         flapsim::vclock::set_speed(1.0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2100)); /* the lookup returns */
         flapsim::net::set_resolver(nullptr);
         WiFiClient numeric; /* dotted addresses never reach the resolver */
         CHECK(numeric.connect("127.0.0.1", port));

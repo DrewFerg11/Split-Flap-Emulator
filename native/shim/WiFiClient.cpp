@@ -2,14 +2,17 @@
 #include "WiFiClient.h"
 
 #include "WiFi.h"
+#include "esp32-hal-log.h"
 #include "vclock.h"
 
 #include <arpa/inet.h>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <fcntl.h>
 #include <future>
+#include <mutex>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -70,23 +73,59 @@ bool host_resolver(const char *host, uint32_t *address) {
 
 std::atomic<flapsim::net::Resolver> resolver{host_resolver};
 
-/* As arduino-esp32 2.0.17's hostByName(): a lookup waits at most 15 s, independently of the
- * connect timeout. A lookup still running then is abandoned on its own thread. */
-constexpr int64_t kDnsTimeoutNs = 15'000'000'000;
+/* As arduino-esp32 2.0.17's hostByName(): one lookup at a time, waiting up to 16 s for an
+ * earlier one to finish and then up to 15 s for its own answer, independently of the connect
+ * timeout. A lookup still running at its deadline keeps its thread until it returns; where the
+ * device would then start another lookup anyway, the shim fails it, so a hung resolver holds at
+ * most one thread. */
+constexpr int64_t kDnsIdleTimeoutNs = 16'000'000'000, kDnsTimeoutNs = 15'000'000'000;
+
+struct Lookups {
+    std::mutex mutex;
+    std::condition_variable idle;
+    bool busy = false;
+};
+
+/* Never destroyed: an abandoned lookup thread may still finish during process exit. */
+Lookups &lookups() {
+    static Lookups *state = new Lookups;
+    return *state;
+}
+
+std::optional<uint32_t> lookup(const char *host) {
+    Lookups &state = lookups();
+    {
+        std::unique_lock lock(state.mutex);
+        if (!state.idle.wait_for(lock, flapsim::vclock::host_duration(kDnsIdleTimeoutNs),
+                                 [&] { return !state.busy; }))
+            return std::nullopt;
+        state.busy = true;
+    }
+    auto answer = std::make_shared<std::promise<std::optional<uint32_t>>>();
+    auto result = answer->get_future();
+    std::thread([answer, &state, name = std::string(host), find = resolver.load()] {
+        uint32_t address = 0;
+        bool found = find(name.c_str(), &address);
+        {
+            std::lock_guard lock(state.mutex);
+            state.busy = false;
+        }
+        state.idle.notify_all();
+        answer->set_value(found ? std::optional(address) : std::nullopt);
+    }).detach();
+    if (result.wait_for(flapsim::vclock::host_duration(kDnsTimeoutNs)) != std::future_status::ready)
+        return std::nullopt;
+    return result.get();
+}
 
 std::optional<uint32_t> resolve(const char *host) {
     in_addr numeric{};
     if (::inet_pton(AF_INET, host, &numeric) == 1)
         return numeric.s_addr;
-    auto answer = std::make_shared<std::promise<std::optional<uint32_t>>>();
-    auto result = answer->get_future();
-    std::thread([answer, name = std::string(host), lookup = resolver.load()] {
-        uint32_t address = 0;
-        answer->set_value(lookup(name.c_str(), &address) ? std::optional(address) : std::nullopt);
-    }).detach();
-    if (result.wait_for(flapsim::vclock::host_duration(kDnsTimeoutNs)) != std::future_status::ready)
-        return std::nullopt;
-    return result.get();
+    std::optional<uint32_t> address = lookup(host);
+    if (!address)
+        flapsim_log('E', "WiFiGeneric.cpp", 1583, "hostByName", "DNS Failed for %s", host);
+    return address;
 }
 
 } // namespace
