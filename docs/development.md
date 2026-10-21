@@ -39,10 +39,10 @@ mkdir -p runs
 set -o pipefail
 qemu/build.sh --jobs 4 2>&1 | tee runs/qemu-build.log
 python -m tools.verify_model --fetch-only
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.0-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
   --hardware esp32-8-single --scenario scenarios/boot-esp32-8-single.yaml --out runs/model-8
 python -m tools.verify_model --hardware esp32-8-single --out runs/model-8
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.0-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
   --hardware esp32-16-dual --scenario scenarios/boot-esp32-16-dual.yaml --out runs/model-16
 python -m tools.verify_model --hardware esp32-16-dual --out runs/model-16
 ```
@@ -81,8 +81,8 @@ it preserves the source fetch. For a fully cold build, remove `build/qemu/`.
 `--build-root`. Stop users of an installation before replacing that runtime.
 
 The fetch command downloads the exact published factory artifact named in
-`tools/golden_firmware.json` (v1.4.0, esp32_n4). Its 4,128,768-byte input must hash
-to `a087801e2ba5e08154af28a636c310b988b43417f28c7ddb7bae4f3df9f6221e`.
+`tools/golden_firmware.json` (v1.4.1, esp32_n4). Its 4,128,768-byte input must hash
+to `5a71579b127ee87f0716cb1df938c9f98d3519a9283f72c003dfb857db32e6f4`.
 The checksum was measured from the published release download; it is a regression
 pin, not a separate upstream signature. Existing corrupt inputs fail instead of
 being silently replaced. A separate working copy is padded with `0xff` to
@@ -100,9 +100,8 @@ directory must be empty. Inspect `serial.log`, `qemu-attempt-N.log`, `run.json`,
 and `timeline.jsonl` in each output directory. Repeat with a new
 output directory, or deliberately remove the old generated run.
 
-The golden image reports `v1.4.0-rc.1` despite its release tag. This phase does not
-assert versions or disable a version gate. Phase 4 adds strict serial/HTTP version
-assertions plus the explicit golden-only exception required by issue #5.
+Boot verification does not assert versions; the Phase 4 scenarios add strict
+serial/HTTP version assertions.
 
 CI runs independent `Fast checks` and a `Pinned QEMU build and boot` matrix
 (explicit suffixes `esp32-8-single` / `esp32-16-dual`) on PRs, main pushes and

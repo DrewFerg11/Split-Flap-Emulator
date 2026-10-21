@@ -104,7 +104,7 @@ play.addEventListener('click',()=>{
     (out / "replay.html").write_text(document)
 
 
-def write_reports(out: Path, manifest, steps, version_exception, known_issues=None):
+def write_reports(out: Path, manifest, steps, known_issues=None):
     frames, warning = replay_data(out)
     write_replay(out, frames, warning)
     try:
@@ -114,7 +114,6 @@ def write_reports(out: Path, manifest, steps, version_exception, known_issues=No
     actual = frames[-1] if frames else {}
     manifest.update(
         steps=steps,
-        version_exception=version_exception,
         known_issues=known_issues,
         replay={"snapshots": len(frames), "warning": warning},
     )
@@ -130,8 +129,6 @@ def write_reports(out: Path, manifest, steps, version_exception, known_issues=No
         f"{actual.get('guest_ns', 0) / 1e9 if frames else 'unavailable'}",
         "",
     ]
-    if version_exception:
-        lines += ["**EXPLICIT GOLDEN VERSION EXCEPTION APPLIED**", fenced(version_exception), ""]
     if known_issues:
         lines += [f"**KNOWN-ISSUE BASELINE IN USE:** `{known_issues['baseline']}`", ""]
         if known_issues["expected_failure"]:

@@ -8,7 +8,7 @@ Installed wheels include the hardware and scenario YAML, so commands work from
 
 **No verified image or digest is published yet.** Current candidate image
 verification is pending. Golden image checks explicitly mount the checksum-bound
-[known-issues baseline](../baselines/v1.4.0-golden.yaml), following the accepted
+[known-issues baseline](../baselines/v1.4.1-golden.yaml), following the accepted
 [#15 policy](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15).
 Matched diagnostics and expected failures remain visible as
 `passed_with_known_issues`/`xfail`, including the separate unresolved
@@ -63,20 +63,17 @@ the [runner](runner.md) and [scenario](scenarios.md) contracts. `docker stop`
 delivers TERM to the CLI, which stops/reaps QEMU and finalizes failure evidence;
 the verified stop case expects CLI 143 and native QEMU 0.
 
-Only the checksum-pinned published golden image may use this explicit version
-exception:
+Only the checksum-pinned published golden image may use the known-issues baseline:
 
 ```sh
 # Add these arguments to a golden smoke command, not a firmware release gate:
---var FIRMWARE_VERSION=v1.4.0 --golden-version-exception \
---known-issues /known-issues.yaml
+--var FIRMWARE_VERSION=v1.4.1 --known-issues /known-issues.yaml
 ```
 
-Its reported version is `v1.4.0-rc.1`. Add a read-only mount from the checked-out
-`baselines/v1.4.0-golden.yaml` to `/known-issues.yaml` for this golden example.
-The version exception changes only the recorded banner mismatch; the separate
-known-issues baseline records exactly which diagnostics/expected failures were
-observed. Omit both exceptions when testing a new firmware release.
+Add a read-only mount from the checked-out `baselines/v1.4.1-golden.yaml` to
+`/known-issues.yaml` for this golden example. The baseline records exactly which
+diagnostics/expected failures were observed. Omit it when testing a new firmware
+release.
 
 ## Build and verify locally
 

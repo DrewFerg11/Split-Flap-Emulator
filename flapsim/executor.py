@@ -102,7 +102,6 @@ def load_executor(
     *,
     variables=(),
     firmware_sha256=None,
-    golden_exception=False,
     known_issues=None,
 ):
     if str(path) == "boot":
@@ -124,13 +123,10 @@ def load_executor(
             hardware,
             variables,
             firmware_sha256=firmware_sha256,
-            golden_exception=golden_exception,
             known_issues=known_issues,
         )
-    if variables or golden_exception or known_issues is not None:
-        raise ValueError(
-            "variables, version exceptions and known issues require a step-based scenario"
-        )
+    if variables or known_issues is not None:
+        raise ValueError("variables and known issues require a step-based scenario")
     mapping(
         {k: v for k, v in document.items() if k != "expect_text"},
         "boot scenario",

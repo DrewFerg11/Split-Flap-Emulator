@@ -1,14 +1,16 @@
-# Known-issue baseline for the checksum-pinned v1.4.0 golden image (esp32_n4 factory).
+# Known-issue baseline for the checksum-pinned v1.4.1 golden image (esp32_n4 factory).
 # Policy and exit criteria: https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15
 #
 # Used only by the emulator's own golden CI runs (--known-issues). Release gating of new firmware
 # never passes a baseline, so everything below fails there. Remove entries as their issues are fixed;
 # delete this file when it is empty.
 version: 1
-firmware_sha256: a087801e2ba5e08154af28a636c310b988b43417f28c7ddb7bae4f3df9f6221e
+firmware_sha256: 5a71579b127ee87f0716cb1df938c9f98d3519a9283f72c003dfb857db32e6f4
 description: >-
-  Published v1.4.0 esp32_n4 factory image. Its settings store has an unsynchronized-access race and
-  logs every never-written key as an error (SFD#54); see issue #15 for the full policy.
+  Published v1.4.1 esp32_n4 factory image. Since v1.4.0 only MQTT recovery and the version string
+  changed, so every v1.4.0 entry is kept as it was; the #14 write-timeout entry is new. Its settings
+  store has an unsynchronized-access race and logs every never-written key as an error (SFD#54); see
+  issue #15 for the full policy.
 
 serial:
   - issue: DrewFerg11/Split-Flap-Display#54
@@ -26,6 +28,12 @@ serial:
       Intermittent I2C read timeout in 16-module dual-bus runs; cause (firmware, QEMU scheduling or
       model) not yet established.
     regex: '^\[\s*\d+\]\[E\]\[Wire\.cpp:\d+\] requestFrom\(\): i2cRead returned Error 263$'
+  - issue: DrewFerg11/Split-Flap-Emulator#14
+    reason: >-
+      The write-side form of the same intermittent 16-module dual-bus I2C timeout: the firmware reports
+      Wire endTransmission code 5 (timeout). Seen once in the container smoke-16 run for PR #26 at the
+      same step 6 as the read timeout. Other write codes (e.g. 2, missing module) are not covered.
+    regex: '^Error writing data to module \d+, error code: 5$'
   - issue: DrewFerg11/Split-Flap-Display#86
     reason: >-
       Two firmware tasks print to the UART without a shared lock, so request logging gets spliced into

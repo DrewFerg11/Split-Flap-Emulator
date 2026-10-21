@@ -69,7 +69,7 @@ def evidence(out, *, code=0, probe="none", checksum=CHECKSUM):
 @pytest.mark.parametrize("layout", LAYOUTS)
 def test_strict_release_commands(layout):
     command = strict_command(layout, "v1.5.0-rc.1", "none")
-    assert "--known-issues" not in command and "--golden-version-exception" not in command
+    assert "--known-issues" not in command
     assert "FIRMWARE_VERSION=v1.5.0-rc.1" in command
     assert LAYOUTS[layout][0] in command and LAYOUTS[layout][1] in command
     assert "300" in command and command[command.index("--timing") + 1] == "ci"

@@ -44,16 +44,19 @@ help before invoking destructive clean options. Do not edit or erase `poc/`.
 ## Golden firmware updates and version exception retirement
 
 `tools/golden_firmware.json` pins the public release, asset name, byte count and
-SHA-256. The current asset is `splitflap-esp32_n4-v1.4.0-factory.bin`, 4,128,768
+SHA-256. The current asset is `splitflap-esp32_n4-v1.4.1-factory.bin`, 4,128,768
 bytes, SHA-256
-`a087801e2ba5e08154af28a636c310b988b43417f28c7ddb7bae4f3df9f6221e`.
+`5a71579b127ee87f0716cb1df938c9f98d3519a9283f72c003dfb857db32e6f4`.
 Never replace a failed golden input opportunistically. A deliberate baseline
 update is separate reviewed work: establish release provenance/checksum, explain
 the behavior change, inspect the unmodified input, and run the full matrix and
-negative cases. Golden version exceptions must match the exact checksum and
-expected version. Retire the `v1.4.0`/`v1.4.0-rc.1` exception when the reviewed
-baseline reports its release tag correctly. Firmware release gating never uses
-this exception and tests the actual same-workflow factory artifact.
+negative cases. Rebind the known-issues baseline to the new checksum and review
+each entry: keep it while its linked issue is open and the firmware code behind it
+is unchanged (many are intermittent, so one clean run is not proof of a fix), and
+drop it when the linked fix ships.
+The v1.4.0 `v1.4.0-rc.1` version exception was retired with the move to v1.4.1,
+which reports its release tag. Firmware release gating tests the actual
+same-workflow factory artifact.
 
 Do not overwrite a fixture with whatever a failing run produced. Explain model
 or firmware behavior changes and test stale/incomplete state and controlled

@@ -1,9 +1,9 @@
 {
   "repository": "DrewFerg11/Split-Flap-Display",
-  "tag": "v1.4.0",
-  "asset": "splitflap-esp32_n4-v1.4.0-factory.bin",
-  "url": "https://github.com/DrewFerg11/Split-Flap-Display/releases/download/v1.4.0/splitflap-esp32_n4-v1.4.0-factory.bin",
+  "tag": "v1.4.1",
+  "asset": "splitflap-esp32_n4-v1.4.1-factory.bin",
+  "url": "https://github.com/DrewFerg11/Split-Flap-Display/releases/download/v1.4.1/splitflap-esp32_n4-v1.4.1-factory.bin",
   "size": 4128768,
-  "sha256": "a087801e2ba5e08154af28a636c310b988b43417f28c7ddb7bae4f3df9f6221e",
-  "source_commit": "c0ff3dd3af683c187f936548cf941a004e780227"
+  "sha256": "5a71579b127ee87f0716cb1df938c9f98d3519a9283f72c003dfb857db32e6f4",
+  "source_commit": "062f5f4eab842326883dbb919587dbcd76f22862"
 }

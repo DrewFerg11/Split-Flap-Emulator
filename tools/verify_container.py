@@ -157,10 +157,8 @@ class ImageVerifier:
         if scenario != "boot":
             command += [
                 "--var",
-                "FIRMWARE_VERSION=v9.9.9" if wrong_version else "FIRMWARE_VERSION=v1.4.0",
+                "FIRMWARE_VERSION=v9.9.9" if wrong_version else f"FIRMWARE_VERSION={GOLDEN['tag']}",
             ]
-            if not wrong_version:
-                command += ["--golden-version-exception"]
         if known_issues:
             if wrong_version or scenario == "boot":
                 raise ValueError("known issues are only for golden smoke verification")
@@ -212,7 +210,7 @@ class ImageVerifier:
         extra_mounts = []
         known_issues = name in {"smoke-8", "smoke-16"} and not wrong_version
         if known_issues:
-            extra_mounts.append((ROOT / "baselines/v1.4.0-golden.yaml", "/known-issues.yaml"))
+            extra_mounts.append((ROOT / "baselines/v1.4.1-golden.yaml", "/known-issues.yaml"))
         scale = self.args.timeout_scale
         if scale != 1 and scenario in self.resources["scenarios"]:
             document = yaml.safe_load(self.resources["scenarios"][scenario])

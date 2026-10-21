@@ -5,9 +5,10 @@ and run a smoke scenario:
 
 ```sh
 python -m tools.verify_model --fetch-only
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.0-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
   --hardware esp32-8-single --scenario scenarios/release-smoke-8.yaml \
-  --var FIRMWARE_VERSION=v1.4.0 --golden-version-exception --out runs/smoke-8
+  --var FIRMWARE_VERSION=v1.4.1 --known-issues baselines/v1.4.1-golden.yaml \
+  --out runs/smoke-8
 ```
 
 For sixteen modules use `esp32-16-dual` / `release-smoke-16.yaml`. Three homing
@@ -21,25 +22,23 @@ Version matching is strict by default. Supply the intended tag with
 `--var FIRMWARE_VERSION=<tag>`; both smoke scenarios assert serial and HTTP
 versions. Do not edit expectations to follow whatever the device reports.
 
-The published v1.4.0 factory image reports **v1.4.0-rc.1**. The explicit
-`--golden-version-exception` is accepted only when the source SHA-256 is
-`a087801e2ba5e08154af28a636c310b988b43417f28c7ddb7bae4f3df9f6221e`
-and the requested `FIRMWARE_VERSION` is `v1.4.0`. It changes that variable's
-effective expectation to `v1.4.0-rc.1`; other checks stay enabled. The manifest,
-Markdown report and Actions summary prominently record the exception, original
-tag, effective version and checksum. Arbitrary releases or other expected
-versions cannot use this exception. A matching checksum alone never enables it.
+There is no version exception. The previous v1.4.0 golden image reported
+`v1.4.0-rc.1` (fixed in firmware by
+[SFD #87](https://github.com/DrewFerg11/Split-Flap-Display/pull/87)); the v1.4.1
+golden image reports its own tag, so the exception was retired.
 
 `python -m tools.verify_negative_version --out runs/negative-versions` proves
-that strict `v1.4.0` and deliberately wrong `v9.9.9` expectations both fail with
-exit 5 against the pinned image, produce failing JUnit evidence, and reap QEMU.
+that exact-match expectations of the golden tag's prerelease (`v1.4.1-rc.1`, the
+v1.4.0 failure mode in reverse) and a deliberately wrong `v9.9.9` both fail with
+exit 5 against the pinned image,
+produce failing JUnit evidence, and reap QEMU.
 An unexpected pass, timeout or different failure makes this verifier fail.
 
 ## Known-issue baselines (golden runs only)
 
 The golden image has known firmware defects that the strict smoke scenarios
 correctly detect. To keep the emulator's own CI meaningful without hiding them,
-golden runs pass `--known-issues baselines/v1.4.0-golden.yaml`. The policy is
+golden runs pass `--known-issues baselines/v1.4.1-golden.yaml`. The policy is
 tracked in [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15).
 
 - A baseline names one firmware SHA-256. Any other firmware is rejected before
@@ -210,16 +209,15 @@ local-host timing for CI measurements.
 
 ## Golden acceptance blockers
 
-The checksum-pinned published v1.4.0 image does not pass both complete smokes.
+The checksum-pinned published v1.4.1 image (like v1.4.0) does not pass both complete smokes.
 [Firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54)
 records settings GET readback returning defaults despite confirmed persistence,
 and dual-row text POST returning HTTP 200 without subsequent motion. Readback
 sometimes passes, while rebooted Preferences missing-key errors still fail the
 strict error gate. The maintainer owns the firmware fix. The accepted #15 golden baseline now
-records these failures explicitly so they do not block emulator PRs. The golden version exception permits only the recorded version
-mismatch; it does not relax these assertions or serial-error policies.
+records these failures explicitly so they do not block emulator PRs.
 
-The intermittent I2C read Error 263 in
+The intermittent I2C read Error 263 (and its write-side form, `error code: 5`) in
 [emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14)
 is a separate unresolved investigation. A later run without that error is not
 proof of a fix; its checksum-bound golden allowance is tracked by #15. Issue #5
