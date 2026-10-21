@@ -5,6 +5,9 @@ The emulator runs release builds on an emulated ESP32, with virtual I²C modules
 hall sensors in place of the real display. Release builds can then be tested automatically in CI or watched on a
 virtual display.
 
+The Docker image is `ghcr.io/drewferg11/split-flap-emulator`; the command inside it (and the Python package) is
+`flapsim`.
+
 ![Real v1.4.0 firmware homing 8 virtual modules](docs/images/poc-homing.gif)
 
 ## Status
@@ -27,6 +30,7 @@ See [runner usage](docs/runner.md) and [scenario usage](docs/scenarios.md).
 - POC code (reference only): [`poc/`](poc)
 - Build, installation, checks and boot reproduction: [`docs/development.md`](docs/development.md)
 - Physical hardware, configuration and state/timeline schemas: [`docs/hardware-model.md`](docs/hardware-model.md)
+- Per-module physical calibration and firmware verification: [`docs/calibration.md`](docs/calibration.md)
 - Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md) (publication verification pending)
 - Ordered branch/PR workflow: [`docs/implementation-queue.md`](docs/implementation-queue.md)
 - QEMU integration decision and lifecycle: [`docs/adr/0001-qemu-integration.md`](docs/adr/0001-qemu-integration.md)

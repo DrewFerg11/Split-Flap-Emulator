@@ -91,6 +91,15 @@ def test_builtins_resolve_outside_checkout_and_explicit_bad_paths_do_not_fall_ba
     assert len(load_hardware("esp32-16-dual.yaml")["modules"]) == 16
     assert len(load_hardware("esp32-8-single-realistic")["modules"]) == 8
     assert len(load_hardware("esp32-16-dual-realistic.yaml")["modules"]) == 16
+    assert len(load_hardware("esp32-8-single-perfect")["modules"]) == 8
+    assert len(load_hardware("esp32-16-dual-perfect")["modules"]) == 16
+    calibration = load_hardware("esp32-8-single-calibration")
+    assert (
+        load_executor("calibration-8", calibration, variables=["FIRMWARE_VERSION=v1.4.1"]).document[
+            "name"
+        ]
+        == "calibration-8"
+    )
     executor = load_executor(
         "release-smoke-8",
         load_hardware("esp32-8-single"),

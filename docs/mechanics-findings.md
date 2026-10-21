@@ -3,6 +3,9 @@
 Measured on 2026-10-20 (America/Indianapolis) for issue
 [#16](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/16).
 These are emulator findings, pending comparison with a physical display.
+The measurements below describe the #16 presets. Issue #18 subsequently adds
+sensor width and polarity variation to the realistic presets; see
+[calibration.md](calibration.md) for that configuration and its verification.
 
 ## Validation after rebasing onto #26
 

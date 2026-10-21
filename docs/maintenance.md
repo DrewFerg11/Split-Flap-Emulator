@@ -158,7 +158,7 @@ Firmware licensing is separate; firmware is never distributed in this image.
 To extract corresponding sources without starting a firmware run:
 
 ```sh
-image_ref=ghcr.io/drewferg11/flapsim:<version>
+image_ref=ghcr.io/drewferg11/split-flap-emulator:<version>
 container_id=$(docker create "$image_ref" --help)
 docker cp "$container_id:/usr/share/doc/flapsim" ./flapsim-sources
 docker rm "$container_id"

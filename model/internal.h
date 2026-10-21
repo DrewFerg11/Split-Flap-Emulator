@@ -12,8 +12,8 @@ typedef struct {
     uint64_t forward, backward, stalls, writes, reads, anomalies;
 } FsCounters;
 typedef struct {
-    int bus, addr, angle, phase, steps, magnet, flap_offset;
-    bool energized;
+    int bus, addr, angle, phase, steps, magnet, flap_offset, window;
+    bool energized, active_low;
     uint16_t latch;
     FsCounters counters;
 } FsModule;

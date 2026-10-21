@@ -1,0 +1,36 @@
+version: 1
+name: calibration-8
+timeout: 900
+steps:
+  - wait_serial: "=== Split Flap Display ==="
+    timeout: 120
+  - wait_serial: "AP IP Address: http://192.168.4.1"
+    timeout: 60
+  - expect_serial: "Firmware: ${FIRMWARE_VERSION} ("
+  # Settings reads in display.init are finished; loop()'s competing Preferences
+  # reads have not started. Isolate calibration from the known SFD #54 race.
+  - wait_serial: "Homing"
+    timeout: 120
+  - assert_no_errors: {fresh_nvs: true, default_missing_bus1: true}
+  - http:
+      method: POST
+      path: /settings
+      body:
+        wireOffsets: "-210,-160,-110,-60,10,60,110,160"
+      status: 200
+      json: {type: success}
+    timeout: 60
+  - http:
+      path: /settings
+      status: 200
+      json:
+        wireOffsets: "-210,-160,-110,-60,10,60,110,160"
+      wait_ready: true
+    timeout: 60
+  - wait_serial: "Reset reason: software reset"
+    timeout: 120
+  - wait_serial: "AP IP Address: http://192.168.4.1"
+    timeout: 60
+  - wait_display: {text: "XXXXXXXX"}
+    timeout: 240
+  - assert_no_errors: {fresh_nvs: true, default_missing_bus1: true}

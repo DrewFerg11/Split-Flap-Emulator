@@ -32,6 +32,12 @@ turn the landing error into a known-issue pass.
 That evidence persists through later nonmatching settlements in the same wait;
 an actual matching, aligned settlement can still satisfy the wait normally.
 
+The [calibration scenario](calibration.md) pairs `calibration-8` with
+`esp32-8-single-calibration`: independently configured module sensors and flap
+zeros, actual offset writes through `POST /settings`, real reboot and persistence
+checks, and every drum's fractional alignment. Its fixed fixture isolates
+calibration from gearbox-ratio drift; the realistic presets exercise both.
+
 ## Version policy
 
 Version matching is strict by default. Supply the intended tag with

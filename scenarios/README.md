@@ -9,6 +9,9 @@
   then X startup; CI runs seeds 7, 19 and 42 independently.
 - `version-check.yaml`: strict serial version expectation, also used by the
   asserted negative integration checks.
+- `calibration-8.yaml`: save eight different offsets through `POST /settings`,
+  observe the real reboot, and assert all eight physical drums land centered.
+  Pair with `esp32-8-single-calibration`; see [calibration.md](../docs/calibration.md).
 
 See [scenario schema, freshness and reports](../docs/scenarios.md). Step-based
 scenarios that assert a version require `--var FIRMWARE_VERSION=<release-tag>`.

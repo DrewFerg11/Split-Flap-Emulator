@@ -58,6 +58,25 @@ static int optional_number(struct json_object *obj, const char *key, int lower, 
     return number(obj, key, lower, upper);
 }
 
+static bool polarity(struct json_object *obj, bool fallback) {
+    struct json_object *value;
+    if (obj && json_object_is_type(obj, json_type_object) &&
+        !json_object_object_get_ex(obj, "sensor_polarity", &value))
+        return fallback;
+    value = field(obj, "sensor_polarity", json_type_string);
+    if (value) {
+        const char *text = json_object_get_string(value);
+        if (strlen(text) == (size_t)json_object_get_string_len(value)) {
+            if (!strcmp(text, "active-high"))
+                return false;
+            if (!strcmp(text, "active-low"))
+                return true;
+        }
+    }
+    fs_fail("normalized sensor_polarity must be active-high or active-low");
+    return fallback;
+}
+
 static char *output_path(struct json_object *outputs, const char *key) {
     struct json_object *value = field(outputs, key, json_type_string);
     if (!value)
@@ -92,6 +111,7 @@ static char *load(const char *config_path, const char *mode) {
     fs.magnet = number(drum, "magnet_position", 0, fs.steps - 1);
     fs.window = number(drum, "sensor_window", 1, fs.steps);
     int flap_offset = optional_number(drum, "flap_offset", 0, fs.steps - 1, 0);
+    bool active_low = polarity(drum, false);
     struct json_object *flaps = field(drum, "flaps", json_type_string);
     if (flaps) {
         fs.nflaps = json_object_get_string_len(flaps);
@@ -122,11 +142,13 @@ static char *load(const char *config_path, const char *mode) {
                 optional_number(entry, "magnet_position", 0, module->steps - 1, fs.magnet);
             module->flap_offset =
                 optional_number(entry, "flap_offset", 0, module->steps - 1, flap_offset);
+            module->window = optional_number(entry, "sensor_window", 1, module->steps, fs.window);
+            module->active_low = polarity(entry, active_low);
             if (module->flap_offset >= module->steps)
                 fs_fail("flap_offset exceeds module steps_per_rotation");
             if (module->magnet >= module->steps)
                 fs_fail("magnet_position exceeds module steps_per_rotation");
-            if (fs.window > module->steps)
+            if (module->window > module->steps)
                 fs_fail("sensor_window exceeds module steps_per_rotation");
             module->angle = number(entry, "angle", 0, module->steps - 1);
             module->phase = -1;

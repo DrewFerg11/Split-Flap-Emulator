@@ -116,6 +116,7 @@ jobs:
           - {name: homing-19, hardware: esp32-8-single, scenario: homing-random, seed: 19}
           - {name: homing-42, hardware: esp32-8-single, scenario: homing-random, seed: 42}
           - {name: negative-versions, hardware: esp32-8-single, scenario: version-check, seed: 7}
+          - {name: calibration-8, hardware: esp32-8-single-calibration, scenario: calibration-8, seed: 7}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
