@@ -41,7 +41,8 @@ target_include_directories(flapsim_platform INTERFACE "${CMAKE_CURRENT_SOURCE_DI
 target_include_directories(flapsim_platform SYSTEM INTERFACE ${LIBRARY_INCLUDES})
 
 add_library(flapsim_model STATIC
-    "${ROOT}/model/bus.c" "${ROOT}/model/config.c" "${ROOT}/model/drum.c" "${ROOT}/model/io.c"
+    "${ROOT}/model/bus.c" "${ROOT}/model/config.c" "${ROOT}/model/control.c"
+    "${ROOT}/model/drum.c" "${ROOT}/model/io.c"
     "${ROOT}/model/pcf8575.c" "${ROOT}/model/resume.c" "${ROOT}/model/stepper.c")
 target_include_directories(flapsim_model PUBLIC "${ROOT}/model")
 target_compile_options(flapsim_model PRIVATE -Wall -Wextra -Werror)

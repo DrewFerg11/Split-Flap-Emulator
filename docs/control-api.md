@@ -64,8 +64,9 @@ the mutation and streaming work.
 QEMU registers its read callback with the pinned `qemu_set_fd_handler`, confirms
 the BQL is held and reads guest time from `QEMU_CLOCK_VIRTUAL`. The callback runs
 even while paused. No QEMU source patch or background model reader is used.
-The C serializer/transport are backend-independent. The still-open native stack
-(#27/#30/#31/#32 at implementation time) must call them while holding its existing
+The C serializer/transport are backend-independent and compile into the native
+model library introduced by merged #27. The still-open native runner stack
+(#30/#31/#32 at implementation time) must call them while holding its existing
 `host::model_lock()`, preserve its inherited descriptor over re-exec, and restore
 boot-generation accounting. This PR does not claim native HTTP integration;
 that follows on the reconciled native runner rather than duplicating it here.
@@ -89,9 +90,14 @@ verifies normal input-integrity/process cleanup through the runner. It does not
 validate all serial diagnostics or claim the firmware's known bugs are repaired;
 the existing golden scenarios keep their independent serial/version assertions.
 
-Local verification against the checksum-pinned v1.4.1 image passed on both
+Initial local verification against the checksum-pinned v1.4.1 image passed on both
 layouts: 100.971 seconds for eight modules and 127.450 seconds for sixteen.
 Both preserved external state across the private reset and ended centered with
-zero stalls/anomalies. All 373 native/Python regression tests passed, together
+zero stalls/anomalies. After rebasing onto merged native #27 (`7fbe3b6`), all
+391 native/Python regression tests passed, together
 with Python lint/format, C formatting and diff checks. Exact-image and hosted
 verification run in CI; these local runs do not claim the image was tested here.
+The pinned v1.4.1 native source also builds with the shared serializer/transport
+in its model library, passes shim tests, and passes boot and Improv re-exec
+verification on both layouts. This checks model compatibility; it does not add
+the native HTTP transport that depends on the remaining native runner stack.
