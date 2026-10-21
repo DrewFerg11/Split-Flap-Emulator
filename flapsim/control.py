@@ -41,6 +41,18 @@ class Unavailable(RuntimeError):
     pass
 
 
+def accepts_authority(hosts, origins, port):
+    """Accept equivalent HTTP default-port authorities, never foreign/duplicate headers."""
+    allowed = {f"127.0.0.1:{port}"}
+    if port == 80:
+        allowed.add("127.0.0.1")
+    return (
+        len(hosts) == 1
+        and hosts[0] in allowed
+        and (not origins or (len(origins) == 1 and origins[0] in {"http://" + h for h in allowed}))
+    )
+
+
 class SnapshotClient:
     """One request in flight. A timeout poisons the channel so replies cannot be misattributed."""
 
@@ -157,8 +169,8 @@ class ControlServer:
 
             async def boundary(scope, receive, send):
                 headers = Headers(scope=scope)
-                if headers.getlist("host") != [f"127.0.0.1:{self.port}"] or (
-                    headers.getlist("origin") not in ([], [self.endpoint])
+                if not accepts_authority(
+                    headers.getlist("host"), headers.getlist("origin"), self.port
                 ):
                     response = JSONResponse({"error": "forbidden_origin_or_host"}, status_code=403)
                 elif not hmac.compare_digest(

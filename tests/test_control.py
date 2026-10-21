@@ -11,10 +11,41 @@ from pathlib import Path
 
 import pytest
 
-from flapsim.control import ControlServer, SnapshotClient, Unavailable, check_port
+from flapsim.control import (
+    ControlServer,
+    SnapshotClient,
+    Unavailable,
+    accepts_authority,
+    check_port,
+)
 from flapsim.hardware import load_hardware
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize(
+    "port,hosts,origins,allowed",
+    [
+        (80, ["127.0.0.1"], [], True),
+        (80, ["127.0.0.1:80"], [], True),
+        (80, ["127.0.0.1"], ["http://127.0.0.1"], True),
+        (80, ["127.0.0.1:80"], ["http://127.0.0.1"], True),
+        (80, ["127.0.0.1"], ["http://127.0.0.1:80"], True),
+        (8080, ["127.0.0.1:8080"], ["http://127.0.0.1:8080"], True),
+        (8080, ["127.0.0.1"], [], False),
+        (8080, ["127.0.0.1:80"], [], False),
+        (80, ["127.0.0.1:8080"], [], False),
+        (80, ["untrusted.example"], [], False),
+        (80, ["127.0.0.1"], ["https://127.0.0.1"], False),
+        (80, ["127.0.0.1"], ["http://untrusted.example"], False),
+        (80, ["127.0.0.1"], ["null"], False),
+        (80, [], [], False),
+        (80, ["127.0.0.1", "127.0.0.1"], [], False),
+        (80, ["127.0.0.1"], ["http://127.0.0.1", "http://127.0.0.1"], False),
+    ],
+)
+def test_http_authority_default_port_and_rejection_cases(port, hosts, origins, allowed):
+    assert accepts_authority(hosts, origins, port) is allowed
 
 
 def recorded_snapshot():
