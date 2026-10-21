@@ -307,3 +307,17 @@ routine implementation details. The native stack need not all merge before a
 contract is written, but the runner integration should build on the reconciled
 #27/#30 interfaces rather than introduce a competing native runner. #31/#32 are
 compatibility targets, and final verification must use their eventual merged heads.
+
+
+## Implementation progress
+
+The first slice (#34) shipped the QEMU read API and shared C snapshot/transport,
+based on merged native #27. The next slice adds atomic, settled/idle-only mechanics
+edits, durable model revisions/receipts, runner audit and overlay-aware native
+resume/readers. It uses bounded synchronous application before a 202 `applied`
+response rather than introducing an asynchronous admission queue. Operation lookup
+retains the latest applied receipt, and a durable ID high-water mark prevents
+older edits being repeated. See [the implemented contract](control-api.md) for
+limits and recovery semantics. Native HTTP integration still builds on #30 once
+that runner lands. Lifecycle, faults, speed, streaming and scenario control steps
+remain later work; #20 is not complete.

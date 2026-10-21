@@ -1,4 +1,4 @@
-"""Real-firmware probe: live snapshots during motion, pause and controller reset."""
+"""Real-firmware probe: live state, audited mechanics, pause and controller reset."""
 
 import argparse
 import json
@@ -87,6 +87,36 @@ class ControlProbe:
             context.pause()
             if snapshot() != paused:
                 raise RuntimeError("snapshot reads changed a paused model")
+
+        def change(identifier, revision, patch):
+            request = urllib.request.Request(
+                endpoint + "/api/emu/modules/0/32/mech",
+                headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+                data=json.dumps(
+                    {"id": identifier, "expected_revision": revision, "patch": patch}
+                ).encode(),
+            )
+            with opener.open(request, timeout=2) as response:
+                if response.status != 202:
+                    raise RuntimeError("mechanics edit was not acknowledged")
+                return json.load(response)
+
+        original = paused["state"]["modules"][0]
+        polarity = original["mechanics"]["sensor_polarity"]
+        edited = change(
+            1, 0, {"sensor_polarity": "active-low" if polarity == "active-high" else "active-high"}
+        )
+        record("mechanics_operation", edited)
+        changed = snapshot()
+        record("mechanics_changed", changed)
+        module = changed["state"]["modules"][0]
+        if module["angle"] != original["angle"] or module["hall"] == original["hall"]:
+            raise RuntimeError("mechanics edit moved the drum or did not change electrical hall")
+        if changed["state"]["mechanics_revision"] != 1:
+            raise RuntimeError("mechanics revision did not advance")
+        # A replay has the same receipt and changes neither counters nor timeline sequences.
+        if change(1, 0, edited["operation"]["command"]["patch"]) != edited or snapshot() != changed:
+            raise RuntimeError("replayed command applied more than once")
         # Verify the owner-context channel and reset counter across an actual QMP
         # reset, without making reset a public HTTP capability in this first slice.
         before_reset = snapshot()
@@ -99,6 +129,13 @@ class ControlProbe:
             raise RuntimeError("reset was recorded more than once")
         if after_reset["state"]["modules"] != before_reset["state"]["modules"]:
             raise RuntimeError("controller reset changed external physical state")
+        if after_reset["state"]["last_operation"] != edited["operation"]:
+            raise RuntimeError("reset lost the mechanics operation")
+        restored = change(2, 1, {"sensor_polarity": polarity})
+        record("mechanics_restored", restored)
+        restored_state = snapshot()
+        if restored_state["state"]["modules"] != paused["state"]["modules"]:
+            raise RuntimeError("restoring mechanics did not preserve the external state")
         qmp(qmp_path, "cont")
         while True:
             final = snapshot()

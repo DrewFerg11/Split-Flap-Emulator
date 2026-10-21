@@ -23,14 +23,15 @@ typedef struct {
     uint16_t input;
 } FsBus;
 typedef struct {
-    FsModule modules[FS_MAX_MODULES];
+    FsModule modules[FS_MAX_MODULES], initial_modules[FS_MAX_MODULES];
     int count, steps, magnet, window, nflaps;
     char flaps[96];
     FsBus buses[2];
     FsCounters totals;
     bool initialized, failed, pending_anomaly;
     uint64_t movement_id, settlement_id, sequence;
-    uint64_t guest_resets;
+    uint64_t guest_resets, mechanics_revision;
+    struct json_object *operation;
     int64_t now, last_snapshot;
     char *state_path, *activity_path;
     FILE *timeline, *trace;
@@ -50,6 +51,11 @@ void fs_pcf_finish(FsBus *bus, FsModule *module);
 uint8_t fs_pcf_read(FsBus *bus);
 void fs_emit(const char *event, bool state);
 void fs_write_activity(void);
+struct json_object *fs_mechanics(const FsModule *module);
+struct json_object *fs_initial_mechanics(void);
+bool fs_parse_mechanics(struct json_object *object, FsModule *module, bool partial);
+bool fs_restore_overlay(struct json_object *record);
+char *fs_control_command(const char *request, int64_t guest_ns);
 bool fs_restore(const char *timeline_path, bool *recorded_reset);
 
 #endif

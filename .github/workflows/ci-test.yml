@@ -175,7 +175,7 @@ jobs:
       - name: Prove prerelease and deliberately wrong versions fail
         if: matrix.name == 'negative-versions'
         run: python -m tools.verify_negative_version --out runs/negative-versions
-      - name: Verify live control during motion, pause and reset
+      - name: Verify live state, mechanics, pause and reset
         if: startsWith(matrix.name, 'control-')
         run: |
           python -m tools.verify_control \

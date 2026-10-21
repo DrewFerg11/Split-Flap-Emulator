@@ -22,6 +22,14 @@ static struct json_object *counters(FsCounters count) {
 static struct json_object *identity(int64_t guest_ns) {
     struct json_object *object = json_object_new_object();
     integer(object, "schema_version", 1);
+    if (fs.mechanics_revision) {
+        integer(object, "mechanics_version", 1);
+        json_object_object_add(object, "initial_flaps", json_object_new_string(fs.flaps));
+        integer(object, "mechanics_revision", fs.mechanics_revision);
+        integer(object, "guest_resets", fs.guest_resets);
+        json_object_object_add(object, "initial_mechanics", fs_initial_mechanics());
+        json_object_object_add(object, "last_operation", json_object_get(fs.operation));
+    }
     integer(object, "guest_ns", guest_ns);
     integer(object, "sequence", fs.sequence);
     integer(object, "movement_id", fs.movement_id);
@@ -97,16 +105,8 @@ static struct json_object *snapshot(int64_t guest_ns, bool mechanics) {
         json_object_object_add(entry, "hall", json_object_new_boolean(fs_hall(module)));
         json_object_object_add(entry, "energized", json_object_new_boolean(module->energized));
         json_object_object_add(entry, "counters", counters(module->counters));
-        if (mechanics) {
-            struct json_object *physical = json_object_new_object();
-            integer(physical, "steps_per_rotation", module->steps);
-            integer(physical, "magnet_position", module->magnet);
-            integer(physical, "flap_offset", module->flap_offset);
-            integer(physical, "sensor_window", module->window);
-            json_object_object_add(
-                physical, "sensor_polarity",
-                json_object_new_string(module->active_low ? "active-low" : "active-high"));
-            json_object_object_add(entry, "mechanics", physical);
+        if (mechanics || fs.mechanics_revision) {
+            json_object_object_add(entry, "mechanics", fs_mechanics(module));
             integer(entry, "coils", (module->latch >> 1) & 15);
         }
         json_object_array_add(modules, entry);

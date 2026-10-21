@@ -1,5 +1,6 @@
-"""Runner-owned read-only control service; firmware HTTP remains a separate endpoint."""
+"""Runner-owned control service; firmware HTTP remains a separate endpoint."""
 
+import asyncio
 import hmac
 import json
 import os
@@ -10,11 +11,11 @@ import time
 import uuid
 from contextlib import contextmanager
 
-from flapsim.state import validate_state
+from flapsim.state import MAX_CONTROL_ID, MECHANICS, validate_state
 
 CAPABILITIES = {
     "snapshot": True,
-    "set_mechanics": False,
+    "set_mechanics": True,
     "set_fault": False,
     "reset": False,
     "power": False,
@@ -68,50 +69,123 @@ class SnapshotClient:
             self.closed = True
             self.connection.close()
 
+    def _validate_snapshot(self, state):
+        validate_state(state, self.hardware, require_settled=False)
+        if type(state.get("guest_resets")) is not int or state["guest_resets"] < 0:
+            raise ValueError("invalid model reset count")
+        for actual in state["modules"]:
+            if (
+                type(actual.get("coils")) is not int
+                or actual["coils"] != (actual["latch"] >> 1) & 15
+                or actual["energized"] != bool(actual["coils"])
+            ):
+                raise ValueError("invalid model coils")
+        return state
+
+    def _exchange(self, request):
+        self.connection.sendall(request)
+        data, _, flags, _ = self.connection.recvmsg(MAX_SNAPSHOT)
+        if not data or flags & socket.MSG_TRUNC:
+            raise ValueError("incomplete or oversized model reply")
+        return json.loads(data)
+
     def snapshot(self):
+        return self.dispatch()
+
+    def dispatch(self, command=None, journal=None):
         if not self.lock.acquire(blocking=False):
-            raise Unavailable("snapshot request already in progress")
+            raise Unavailable("model request already in progress")
         try:
             if self.closed:
                 raise Unavailable("model channel is unavailable")
+            stage = "intent_audit"
             try:
-                self.connection.sendall(b"FLAPSIM_STATE/1")
-                data, _, flags, _ = self.connection.recvmsg(MAX_SNAPSHOT)
-                if not data or flags & socket.MSG_TRUNC:
-                    raise ValueError("incomplete or oversized model snapshot")
-                state = json.loads(data)
-                validate_state(state, self.hardware, require_settled=False)
-                if type(state.get("guest_resets")) is not int or state["guest_resets"] < 0:
-                    raise ValueError("invalid model reset count")
-                for actual, expected in zip(
-                    state["modules"], self.hardware["modules"], strict=True
-                ):
+                if command is not None:
+                    journal({"phase": "intent", "command": command})
+                request = (
+                    b"FLAPSIM_STATE/1"
+                    if command is None
+                    else (b"FLAPSIM_MECH/1 " + json.dumps(command, separators=(",", ":")).encode())
+                )
+                stage = "model_exchange"
+                result = self._exchange(request)
+                stage = "reply_validation"
+                if command is not None and isinstance(result, dict) and set(result) == {"error"}:
+                    if result["error"] not in {
+                        "module_not_found",
+                        "invalid_mechanics",
+                        "revision_conflict",
+                        "model_busy",
+                        "stale_or_reused_id",
+                        "revision_exhausted",
+                        "backend_unavailable",
+                    }:
+                        raise ValueError("invalid model rejection")
+                else:
+                    self._validate_snapshot(result)
                     if (
-                        type(actual.get("coils")) is not int
-                        or actual["coils"] != (actual["latch"] >> 1) & 15
+                        command is not None
+                        and result.get("last_operation", {}).get("command") != command
                     ):
-                        raise ValueError("invalid model coils")
-                    if actual["energized"] != bool(actual["coils"]):
-                        raise ValueError("model energized flag does not match coils")
-                    mechanics = {
-                        name: expected.get(name, self.hardware["drum"].get(name, default))
-                        for name, default in [
-                            ("steps_per_rotation", None),
-                            ("magnet_position", None),
-                            ("flap_offset", 0),
-                            ("sensor_window", None),
-                            ("sensor_polarity", "active-high"),
-                        ]
-                    }
-                    if actual.get("mechanics") != mechanics:
-                        raise ValueError("model mechanics do not match configured hardware")
-                return state
-            except (OSError, ValueError, TypeError, KeyError) as error:
+                        raise ValueError("model reply does not identify the command")
+                if command is not None:
+                    stage = "result_audit"
+                    journal({"phase": "result", "command": command, "result": result})
+                return result
+            except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
                 self.closed = True
                 self.connection.close()
-                raise Unavailable("model snapshot unavailable") from error
+                if command is not None:
+                    try:
+                        journal(
+                            {
+                                "phase": "unknown",
+                                "command": command,
+                                "stage": stage,
+                                "error": type(error).__name__,
+                                "channel": "closed",
+                            }
+                        )
+                    except (OSError, ValueError, TypeError, KeyError, RecursionError):
+                        # The audit sink itself may be broken; never invent a durable outcome.
+                        pass
+                # An intent without a result is also unknown, never automatically retried.
+                raise Unavailable("model reply unavailable") from error
         finally:
             self.lock.release()
+
+
+def strict_json(data):
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("duplicate JSON field")
+            result[key] = value
+        return result
+
+    def constant(value):
+        raise ValueError("non-finite JSON value")
+
+    return json.loads(data, object_pairs_hook=pairs, parse_constant=constant)
+
+
+def validate_command(value, bus, addr):
+    if not isinstance(value, dict) or set(value) != {"id", "expected_revision", "patch"}:
+        raise ValueError("expected id, expected_revision and patch")
+    for key, lo, hi in [("id", 1, MAX_CONTROL_ID), ("expected_revision", 0, MAX_CONTROL_ID - 1)]:
+        if type(value[key]) is not int or not lo <= value[key] <= hi:
+            raise ValueError("invalid " + key)
+    patch = value["patch"]
+    if not isinstance(patch, dict) or not patch or set(patch) - MECHANICS:
+        raise ValueError("empty or unknown mechanics fields")
+    for key, part in patch.items():
+        if key == "sensor_polarity":
+            if part not in ("active-high", "active-low"):
+                raise ValueError("invalid sensor polarity")
+        elif type(part) is not int or not 0 <= part <= 1000000:
+            raise ValueError("mechanics require literal integers in range")
+    return {**value, "bus": bus, "addr": addr}
 
 
 class ControlServer:
@@ -142,6 +216,28 @@ class ControlServer:
             with os.fdopen(fd, "w") as secret:
                 secret.write(self.token + "\n")
 
+            def envelope(snapshot):
+                return {
+                    "api_version": 1,
+                    "run_id": self.run_id,
+                    "backend": "qemu",
+                    "boot_generation": snapshot["guest_resets"],
+                    "live": True,
+                    "capabilities": CAPABILITIES,
+                }
+
+            def journal(entry):
+                with (out / "control.jsonl").open("a") as log:
+                    log.write(
+                        json.dumps(
+                            {"api_version": 1, "run_id": self.run_id, **entry},
+                            separators=(",", ":"),
+                        )
+                        + "\n"
+                    )
+                    log.flush()
+                    os.fsync(log.fileno())
+
             async def state(request):
                 # SnapshotClient is blocking, bounded and single-flight. Starlette's
                 # worker pool keeps a paused/busy model from blocking HTTP shutdown.
@@ -154,19 +250,92 @@ class ControlServer:
                     snapshot = await run_in_threadpool(client.snapshot)
                 except Unavailable:
                     return JSONResponse({"error": "backend_unavailable"}, status_code=503)
+                return JSONResponse({**envelope(snapshot), "state": snapshot})
+
+            async def mechanics(request):
+                from starlette.concurrency import run_in_threadpool
+                from starlette.requests import ClientDisconnect
+
+                async def read_body():
+                    data = bytearray()
+                    async for chunk in request.stream():
+                        data.extend(chunk)
+                        if len(data) > 2048:
+                            return None
+                    return bytes(data)
+
+                if request.headers.getlist("content-type") != ["application/json"]:
+                    return JSONResponse({"error": "json_required"}, status_code=415)
+                try:
+                    data = await asyncio.wait_for(read_body(), timeout=1)
+                except (TimeoutError, ClientDisconnect):
+                    return JSONResponse({"error": "body_timeout"}, status_code=408)
+                if data is None:
+                    return JSONResponse({"error": "body_too_large"}, status_code=413)
+                try:
+                    value = strict_json(data.decode("utf-8"))
+                except (ValueError, UnicodeError, RecursionError):
+                    return JSONResponse({"error": "invalid_json"}, status_code=400)
+                bus, addr = request.path_params["bus"], request.path_params["addr"]
+                if (bus, addr) not in {(m["bus"], m["addr"]) for m in hardware["modules"]}:
+                    return JSONResponse({"error": "module_not_found"}, status_code=404)
+                try:
+                    command = validate_command(value, bus, addr)
+                except ValueError:
+                    return JSONResponse({"error": "invalid_command"}, status_code=422)
+                client = self.client
+                if client is None:
+                    return JSONResponse({"error": "backend_unavailable"}, status_code=503)
+                try:
+                    result = await run_in_threadpool(client.dispatch, command, journal)
+                except Unavailable:
+                    return JSONResponse(
+                        {"error": "result_unknown", "id": command["id"]}, status_code=503
+                    )
+                if "error" in result:
+                    code = {
+                        "module_not_found": 404,
+                        "invalid_mechanics": 422,
+                        "backend_unavailable": 503,
+                    }.get(result["error"], 409)
+                    return JSONResponse(result, status_code=code)
                 return JSONResponse(
                     {
-                        "api_version": 1,
-                        "run_id": self.run_id,
-                        "backend": "qemu",
-                        "boot_generation": snapshot.pop("guest_resets"),
-                        "live": True,
-                        "capabilities": CAPABILITIES,
-                        "state": snapshot,
-                    }
+                        **envelope(result),
+                        "status": "applied",
+                        "operation": result["last_operation"],
+                    },
+                    status_code=202,
                 )
 
-            app = Starlette(routes=[Route("/api/emu/state", state, methods=["GET"])])
+            async def operation(request):
+                from starlette.concurrency import run_in_threadpool
+
+                client = self.client
+                if client is None:
+                    return JSONResponse({"error": "backend_unavailable"}, status_code=503)
+                try:
+                    snapshot = await run_in_threadpool(client.snapshot)
+                except Unavailable:
+                    return JSONResponse({"error": "backend_unavailable"}, status_code=503)
+                applied = snapshot.get("last_operation")
+                if applied is None or applied["command"]["id"] != request.path_params["id"]:
+                    return JSONResponse(
+                        {**envelope(snapshot), "status": "unknown"}, status_code=404
+                    )
+                return JSONResponse(
+                    {**envelope(snapshot), "status": "applied", "operation": applied}
+                )
+
+            app = Starlette(
+                routes=[
+                    Route("/api/emu/state", state, methods=["GET"]),
+                    Route(
+                        "/api/emu/modules/{bus:int}/{addr:int}/mech", mechanics, methods=["POST"]
+                    ),
+                    Route("/api/emu/operations/{id:int}", operation, methods=["GET"]),
+                ]
+            )
 
             async def boundary(scope, receive, send):
                 headers = Headers(scope=scope)
