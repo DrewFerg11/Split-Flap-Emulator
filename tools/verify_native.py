@@ -179,7 +179,10 @@ def verify(args):
             def connected_ok():
                 items = records(run.out)
                 reset = [i for i, r in enumerate(items) if r["event"] == "guest_reset"]
-                if len(reset) != 1:
+                if len(reset) > 1:
+                    # e.g. a retried Improv frame provisioning twice: report it, not a timeout.
+                    raise RuntimeError(f"expected one emulated reset, found {len(reset)}")
+                if not reset:
                     return None
                 after = items[reset[0] :]
                 ok = [

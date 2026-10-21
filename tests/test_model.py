@@ -540,6 +540,11 @@ def test_native_resume_keeps_drums_latches_ids_and_appends(make_model):
     reset = resets[0]
     assert reset["modules"][0]["angle"] == 102 and reset["modules"][0]["energized"]
     assert reset["sequence"] == last["sequence"] + 1
+    # Aggregates are re-summed from the restored per-module counters (only anomalies are kept).
+    assert reset["counters"] == {
+        key: sum(m["counters"][key] for m in reset["modules"]) for key in reset["counters"]
+    }
+    assert reset["counters"]["forward"] == 2 and reset["counters"]["writes"] == 3
     assert (reset["movement_id"], reset["settlement_id"]) == (
         last["movement_id"],
         last["settlement_id"],
