@@ -748,6 +748,79 @@ def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context
     assert records[0]["first"] == raw.splitlines()[-1]
 
 
+@pytest.mark.parametrize(
+    "raw, spliced",
+    [
+        # Raw serial tail from CI39648931023, golden smoke-16: the diagnostic's head is followed
+        # by the request body, and its tail resumes on the next line after the timestamp.
+        (
+            "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
+            "Received text update request\n"
+            '[ 38055][E][Preferences.cp{"mode":"dual-single","row1":"HELLO","row2":"WORLD",'
+            '"center":true}\n'
+            "p:50] begin(): nvs_open failed: NOT_FOUND\n",
+            2,
+        ),
+        # Raw serial tail from CI39652106628, golden smoke-16: the whole diagnostic is followed by
+        # the request log with no newline in between.
+        (
+            "[ 38053][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
+            "[ 38053][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
+            "Received text update request\n"
+            '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}\n',
+            1,
+        ),
+    ],
+)
+def test_head_and_late_tail_splices_are_golden_only(context, raw, spliced):
+    (context.out / "serial.log").write_text(raw)
+    step = {"assert_no_errors": {"fresh_nvs": True}}
+    with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+        executor([step]).execute(context)
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    result = executor([step], firmware_sha256=GOLDEN_SHA256, known_issues=known).execute(context)
+    records = result["known_issues"]["tolerated_serial"]
+    assert sum(r["count"] for r in records) == spliced
+    assert {r["issue"] for r in records} == {"DrewFerg11/Split-Flap-Display#86"}
+
+
+DIAGNOSTIC = "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
+
+
+def test_every_split_point_of_the_diagnostic_is_recognised():
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    body = '{"mode":"dual-single","row1":"HELLO"'
+    head_start = DIAGNOSTIC.index("[E][") + 4
+    for cut in range(head_start, len(DIAGNOSTIC) + 1):
+        for other in (body, "Received settings update request"):
+            assert known.tolerated_serial(DIAGNOSTIC[:cut] + other), (cut, other)
+    # Tails resume anywhere from the timestamp through the "0" of ":50".
+    for cut in range(1, DIAGNOSTIC.index("] begin")):
+        assert known.tolerated_serial(DIAGNOSTIC[cut:]), cut
+        assert known.tolerated_serial(body + DIAGNOSTIC[cut:]), cut
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        DIAGNOSTIC,
+        "[ 9][E][Preferences.cpp:50] begin(): nvs_open failed: INVALID_HANDLE",
+        "[ 9][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUNDpanic",
+        '[ 9][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND{"x":"error"}',
+        '[ 9][E][Preferences.cp{"x":[1]}',
+        "[ 9][E][Preferences.cpp:483] putString(): x{}",
+        "[ 9][E][Preferences.cpReceived text update request panic",
+        "[ 9][E][Wire.cpp:1]{}",
+        " begin(): nvs_open failed: NOT_FOUND",
+        "p:51] begin(): nvs_open failed: NOT_FOUND",
+        "Exception p:50] begin(): nvs_open failed: NOT_FOUND",
+    ],
+)
+def test_head_and_late_tail_entries_reject_other_lines(line):
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    assert known.tolerated_serial(line) is None
+
+
 def test_unspliced_diagnostic_stays_governed_by_the_fresh_nvs_policy(context):
     line = "[ 38162][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
     known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
@@ -784,6 +857,28 @@ def test_golden_fragment_baseline_does_not_accept_other_broken_errors(context, l
             firmware_sha256=GOLDEN_SHA256,
             known_issues=known,
         ).execute(context)
+
+
+def test_smoke16_final_check_expects_only_the_plain_fresh_nvs_diagnostic():
+    # CI39654380205: the step-8 race did not occur and step 11 failed on this exact line.
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    plain = "unexpected serial error: " + DIAGNOSTIC.replace("38055", "38037")
+    entry = known.expected_failure(
+        "release-smoke-16", 11, "assert_no_errors", plain, step_timed_out=False
+    )
+    assert entry["issue"] == "DrewFerg11/Split-Flap-Display#54"
+    for other in [
+        "unexpected serial error: [ 7][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263",
+        plain.replace("NOT_FOUND", "INVALID_HANDLE"),
+        plain + " panic",
+    ]:
+        assert not known.expected_failure(
+            "release-smoke-16", 11, "assert_no_errors", other, step_timed_out=False
+        )
+    for scenario, step in [("release-smoke-8", 11), ("release-smoke-16", 6)]:
+        assert not known.expected_failure(
+            scenario, step, "assert_no_errors", plain, step_timed_out=False
+        )
 
 
 def test_expected_failure_stops_the_scenario_as_xfail_and_only_when_it_matches(context):
