@@ -13,7 +13,14 @@ model = json.loads(Path(config["model_config"]).read_text())
 out = Path(config["serial_log"]).parent
 mode = os.environ.get("FLAPSIM_FAKE_MODE", "success")
 boot = int(os.environ.get("FLAPSIM_FAKE_BOOT", "1"))
-(out / f"boot-{boot}.json").write_text(json.dumps({"pid": os.getpid(), "config": config}))
+control_fd = os.environ.get("FLAPSIM_CONTROL_FD")
+control_type = None
+if control_fd is not None:
+    with socket.socket(fileno=os.dup(int(control_fd))) as control_socket:
+        control_type = control_socket.type
+(out / f"boot-{boot}.json").write_text(
+    json.dumps({"pid": os.getpid(), "config": config, "control_type": control_type})
+)
 if mode == "exit":
     sys.exit(17)
 if mode == "hang":

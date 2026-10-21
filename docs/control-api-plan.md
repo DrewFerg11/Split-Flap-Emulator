@@ -312,12 +312,14 @@ compatibility targets, and final verification must use their eventual merged hea
 ## Implementation progress
 
 The first slice (#34) shipped the QEMU read API and shared C snapshot/transport,
-based on merged native #27. The next slice adds atomic, settled/idle-only mechanics
+based on merged native #27. The second slice (#36) added atomic, settled/idle-only mechanics
 edits, durable model revisions/receipts, runner audit and overlay-aware native
 resume/readers. It uses bounded synchronous application before a 202 `applied`
 response rather than introducing an asynchronous admission queue. Operation lookup
 retains the latest applied receipt, and a durable ID high-water mark prevents
 older edits being repeated. See [the implemented contract](control-api.md) for
-limits and recovery semantics. Native HTTP integration still builds on #30 once
-that runner lands. Lifecycle, faults, speed, streaming and scenario control steps
+limits and recovery semantics. The third slice integrates the shared HTTP service
+with the merged #30 native runner, using the model mutex and retaining the private
+channel across firmware re-exec. Reset generations now persist in every model
+record, including before any mechanics edit. Lifecycle, faults, speed, streaming and scenario control steps
 remain later work; #20 is not complete.

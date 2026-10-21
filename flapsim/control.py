@@ -191,7 +191,9 @@ def validate_command(value, bus, addr):
 class ControlServer:
     """Loopback only; auth secret lives in a mode-0600 file, never the manifest."""
 
-    def __init__(self, port, out, hardware):
+    def __init__(self, port, out, hardware, *, backend="qemu"):
+        if backend not in {"qemu", "native"}:
+            raise ValueError("unknown control backend")
         check_port(port)
         import uvicorn
         from starlette.applications import Starlette
@@ -220,7 +222,7 @@ class ControlServer:
                 return {
                     "api_version": 1,
                     "run_id": self.run_id,
-                    "backend": "qemu",
+                    "backend": backend,
                     "boot_generation": snapshot["guest_resets"],
                     "live": True,
                     "capabilities": CAPABILITIES,

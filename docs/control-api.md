@@ -1,7 +1,7 @@
 # Live state and mechanics API (issue #20)
 
 The runner can expose current physical state independently of the firmware's
-web server. The implemented QEMU routes provide authenticated live state, atomic mechanics
+web server. The implemented QEMU and native routes provide authenticated live state, atomic mechanics
 edits and lookup of the latest applied edit. Fault mutation, reset/power, speed,
 I2C history and WebSockets remain unavailable and are explicitly false in `capabilities`. Issue #20 stays
 open. See [the implementation plan](control-api-plan.md) for later slices.
@@ -18,6 +18,22 @@ also allowed. Without this option no service/socket is created and the optional
 HTTP dependencies are not imported. The Docker image includes the extra.
 The listener is inside the container's loopback namespace; external binding and
 live-panel/serve mode are future work, not provided by port publication alone.
+
+Native mode uses the same option and API contract:
+
+```sh
+flapsim run --mode native --native-build build/native/golden \
+  --hardware esp32-8-single --scenario boot --control-port 0 --out runs/native-control
+```
+
+Rebuild native firmware binaries against the current shims before enabling control.
+Native responses identify `backend: native`. A private inherited socket and a
+host thread serve requests under the existing model mutex. The channel, run ID,
+token, mechanics overlay and latest receipt survive firmware software resets
+(re-exec of the same process). Reset generations persist even before the first
+mechanics edit. Requests during reset still have the usual bounded deadline;
+a timeout leaves the result unknown and poisons the channel as described below.
+Public reset/power and live speed controls remain unavailable in both modes.
 
 While the run is executing, read `control.endpoint` from `run.json`. The existing
 `endpoint` still points to the firmware web server. Read the bearer token from
@@ -104,7 +120,7 @@ unknown, and neither an intent nor an `unknown` entry proves application failed.
 
 Channel poisoning makes **all control reads and edits unavailable for the current
 child**, including state and operation lookup. The current runner does not
-reconnect a poisoned channel to a running child. Firmware execution continues;
+reconnect a poisoned channel to a running child, including after native re-exec. Firmware execution continues;
 control recovery requires a new child/run. Reconnection is future integration work.
 
 The latest receipt endpoint is usable only while the backend channel is available
@@ -131,11 +147,15 @@ and operation lookup.
 The immutable `model.json` and manifest hardware remain the initial configuration.
 After the first successful edit, model state, activity and timeline records carry
 an additive `mechanics_version: 1` extension within existing `schema_version: 1`:
-`mechanics_revision`, `initial_mechanics`, `initial_flaps`, `guest_resets` and
+`mechanics_revision`, `initial_mechanics`, `initial_flaps` and
 `last_operation`.
 Complete snapshots also carry effective `mechanics` and `coils` per module.
 Legacy v1 recordings without the extension keep their initial-configuration
-interpretation; output with no edits retains its existing format.
+interpretation. All new model records also carry the additive `guest_resets`
+integer, including when there have been no edits. This preserves reset generation
+across native re-exec without requiring an overlay. Legacy records without that
+field remain resumable; they cannot reconstruct historical reset counts beyond
+the reset event recorded in their last line.
 
 Readers validate each record against its own effective geometry, check initial
 mechanics against immutable hardware, and correlate the last command with its
@@ -165,12 +185,13 @@ telemetry cannot starve command replies.
 QEMU registers its read callback with the pinned `qemu_set_fd_handler`, confirms
 the BQL is held and reads guest time from `QEMU_CLOCK_VIRTUAL`. The callback runs
 even while paused. No QEMU source patch or background model reader is used.
-The C serializer/transport are backend-independent and compile into the native
-model library introduced by merged #27. The still-open native runner stack
-(#30/#31/#32 at implementation time) must call them while holding its existing
-`host::model_lock()`, preserve its inherited descriptor over re-exec, and restore
-boot-generation accounting. This PR does not claim native HTTP integration;
-that follows on the reconciled native runner rather than duplicating it here.
+Native uses the same C serializer/transport, called by a host thread under
+`host::model_lock()`. The thread waits on the private descriptor using host-time
+`poll`, so slow virtual clock settings do not delay dispatch. It starts after
+model initialization/resume and before firmware setup. The runner owns the HTTP
+service and retains its parent socket while the child re-executes. A disconnected
+child descriptor stays reserved until process exit, so a later reset cannot
+mistake a reused descriptor for the control channel.
 
 ## Verification
 
@@ -212,8 +233,8 @@ with Python lint/format, C formatting and diff checks. Exact-image and hosted
 verification run in CI; these local runs do not claim the image was tested here.
 The pinned v1.4.1 native source also builds with the shared serializer/transport
 in its model library, passes shim tests, and passes boot and Improv re-exec
-verification on both layouts. This checks model compatibility; it does not add
-the native HTTP transport that depends on the remaining native runner stack.
+verification on both layouts. Those earlier runs checked model compatibility;
+the native HTTP integration is covered by the additional probe below.
 
 For the mechanics slice, the complete regression suite passes **456 tests**.
 The 165 model/control tests also pass with AddressSanitizer and UndefinedBehaviorSanitizer
@@ -226,3 +247,13 @@ rotation. The extended QEMU probes exercise edits and deduplication while paused
 then verify persistence through a real controller reset before restoring geometry
 and checking strict centered landing. Hosted CI runs these on both layouts along
 with the unchanged golden scenarios and runtime image checks.
+
+
+For native control integration, `tools.verify_native --case control` checks a
+live moving snapshot, settled mechanics mutation without angle changes, firmware
+Improv software reset, overlay and receipt persistence, and idempotent retry on
+both layouts. CI runs this probe with the normal and sanitizer native builds.
+The public native runner is also checked for inherited descriptor isolation,
+optional dependency validation, listener cleanup after success/failure, and no
+control service when disabled. Reset-generation tests cover repeated resets
+before any edit, malformed generations and legacy records without the new field.

@@ -66,7 +66,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build \
             pkg-config libjson-c-dev
-          python -m pip install -e .
+          python -m pip install -e '.[control]'
       - name: Restore pinned firmware and library sources
         uses: actions/cache@v4
         with:
@@ -89,6 +89,12 @@ jobs:
           for hardware in esp32-8-single esp32-16-dual; do
             python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
               --case improv-reboot --timeout ${{ matrix.timeout }} --out "runs/native/improv-$hardware"
+          done
+      - name: Verify native control and mechanics across a firmware reset
+        run: |
+          for hardware in esp32-8-single esp32-16-dual; do
+            python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
+              --case control --timeout ${{ matrix.timeout }} --out "runs/native/control-$hardware"
           done
       - name: Run the golden smoke scenarios natively under the native known-issues baseline
         if: matrix.name != 'sanitizers'

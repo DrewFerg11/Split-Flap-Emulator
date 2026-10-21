@@ -22,7 +22,9 @@ Phase 1 ([#27](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/27)): the 
 for everything the firmware touches without a network and a bounded verifier. Phase 2 adds host
 sockets (`WiFiClient`), the HTTP transport and `flapsim run --mode native`
 ([runner](runner.md#native-mode)); the golden smoke scenarios run natively in CI under
-`baselines/v1.4.1-native.yaml`. MQTT and a controlled clock follow.
+`baselines/v1.4.1-native.yaml`. The runner also supports the shared authenticated
+[state and mechanics API](control-api.md) with `--control-port`. MQTT and a
+controlled clock follow.
 
 ## Build
 

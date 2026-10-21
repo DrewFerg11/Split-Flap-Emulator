@@ -22,11 +22,11 @@ static struct json_object *counters(FsCounters count) {
 static struct json_object *identity(int64_t guest_ns) {
     struct json_object *object = json_object_new_object();
     integer(object, "schema_version", 1);
+    integer(object, "guest_resets", fs.guest_resets);
     if (fs.mechanics_revision) {
         integer(object, "mechanics_version", 1);
         json_object_object_add(object, "initial_flaps", json_object_new_string(fs.flaps));
         integer(object, "mechanics_revision", fs.mechanics_revision);
-        integer(object, "guest_resets", fs.guest_resets);
         json_object_object_add(object, "initial_mechanics", fs_initial_mechanics());
         json_object_object_add(object, "last_operation", json_object_get(fs.operation));
     }
@@ -124,7 +124,6 @@ char *fs_model_snapshot(int64_t guest_ns) {
     if (!fs.initialized || fs.failed || guest_ns < fs.now)
         return NULL;
     struct json_object *object = snapshot(guest_ns, true);
-    integer(object, "guest_resets", fs.guest_resets);
     const char *text = json_object_to_json_string_ext(object, JSON_C_TO_STRING_PLAIN);
     size_t length = strlen(text) + 1;
     char *copy = malloc(length);
