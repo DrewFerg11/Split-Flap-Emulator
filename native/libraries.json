@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "libraries": [
+    {
+      "name": "ArduinoJson",
+      "repository": "https://github.com/bblanchon/ArduinoJson",
+      "version": "7.4.3",
+      "commit": "77771d3c07668e01d8f52acb03910c1110bb373f",
+      "license": "MIT",
+      "include": "src",
+      "sources": []
+    },
+    {
+      "name": "PubSubClient3",
+      "repository": "https://github.com/hmueller01/pubsubclient3",
+      "version": "3.3.0",
+      "commit": "a69cc5c44fffda7e07963863dcffdeb4384f0579",
+      "license": "MIT",
+      "include": "src",
+      "sources": ["src/PubSubClient.cpp"]
+    },
+    {
+      "name": "Improv WiFi Library",
+      "repository": "https://github.com/jnthas/Improv-WiFi-Library",
+      "version": "0.0.4",
+      "commit": "e37c244e0080349e191252acf4bce146eca118e0",
+      "license": "MIT",
+      "include": "src",
+      "sources": ["src/ImprovWiFiLibrary.cpp"]
+    }
+  ]
+}

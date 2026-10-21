@@ -38,11 +38,69 @@ jobs:
           ruff check .
           ruff format --check .
       - name: Format C integration sources
-        run: clang-format --dry-run --Werror model/*.c model/*.h qemu/*.c qemu/*.h tests/fixtures/*.c
+        run: |
+          clang-format --dry-run --Werror model/*.c model/*.h qemu/*.c qemu/*.h tests/fixtures/*.c \
+            native/*.cpp native/shim/*.cpp native/shim/*.h native/shim/freertos/*.h native/tests/*.cpp
       - name: Verify editable install, CLI, and failure boundaries
         run: |
           flapsim --help
           python -m pytest
+
+  native:
+    name: Native firmware (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: golden source, build_flags: '', timeout: 120}
+          - {name: sanitizers, build_flags: --sanitize, timeout: 300}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build \
+            pkg-config libjson-c-dev
+          python -m pip install -e .
+      - name: Restore pinned firmware and library sources
+        uses: actions/cache@v4
+        with:
+          path: build/native/cache
+          key: native-sources-${{ hashFiles('native/libraries.json', 'tools/golden_firmware.json') }}
+      - name: Build the pinned golden source against the shims and run the shim tests
+        run: |
+          set -o pipefail
+          python native/build.py --jobs 4 --test ${{ matrix.build_flags }} --out build/native/golden \
+            2>&1 | tee runs-native-build.log
+      - name: Boot every layout and reboot through Improv provisioning
+        run: |
+          set -e
+          for hardware in esp32-8-single esp32-16-dual esp32-8-single-realistic esp32-16-dual-realistic; do
+            python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
+              --case boot --timeout ${{ matrix.timeout }} --out "runs/native/boot-$hardware"
+          done
+          for hardware in esp32-8-single esp32-16-dual; do
+            python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
+              --case improv-reboot --timeout ${{ matrix.timeout }} --out "runs/native/improv-$hardware"
+          done
+      - name: Upload native evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-evidence-${{ matrix.name == 'sanitizers' && 'sanitizers' || 'golden' }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            runs-native-build.log
+            build/native/golden/build-info.json
+            runs/native/**/*.json
+            runs/native/**/*.jsonl
+            runs/native/**/*.log
 
   qemu-boot:
     name: Golden scenario (${{ matrix.name }})
