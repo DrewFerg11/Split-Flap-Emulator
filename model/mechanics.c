@@ -126,7 +126,8 @@ bool fs_restore_overlay(struct json_object *record) {
         struct json_object *entry = json_object_array_get_idx(modules, i), *physical;
         /* Restore geometry before the dynamic angle, which can exceed the initial rotation. */
         fs.modules[i].angle = 0;
-        valid = json_object_object_get_ex(entry, "mechanics", &physical) &&
+        valid = json_object_is_type(entry, json_type_object) &&
+                json_object_object_get_ex(entry, "mechanics", &physical) &&
                 fs_parse_mechanics(physical, &fs.modules[i], false);
     }
     FsModule copy = fs.modules[index];

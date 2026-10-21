@@ -193,8 +193,8 @@ in its model library, passes shim tests, and passes boot and Improv re-exec
 verification on both layouts. This checks model compatibility; it does not add
 the native HTTP transport that depends on the remaining native runner stack.
 
-For the mechanics slice, the complete regression suite passes **452 tests**.
-The 161 model/control tests also pass with AddressSanitizer and UndefinedBehaviorSanitizer
+For the mechanics slice, the complete regression suite passes **453 tests**.
+The 162 model/control tests also pass with AddressSanitizer and UndefinedBehaviorSanitizer
 instrumentation. The native golden source builds and passes shim tests; boot and
 Improv reboot verification pass on both layouts, including a fresh reboot check
 with the final model. Direct C/HTTP tests cover atomic rejection, open transactions,

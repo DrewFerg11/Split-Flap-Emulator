@@ -844,7 +844,7 @@ def test_rotation_change_rejects_inherited_geometry_and_never_wraps_angle(make_m
 
 
 @pytest.mark.parametrize(
-    "problem", ["initial", "flaps", "geometry", "angle", "receipt", "version", "missing"]
+    "problem", ["initial", "flaps", "geometry", "angle", "receipt", "version", "missing", "entry"]
 )
 def test_native_resume_rejects_invalid_mechanics_overlay(make_model, problem):
     model = make_model(angles=(730,))
@@ -855,6 +855,8 @@ def test_native_resume_rejects_invalid_mechanics_overlay(make_model, problem):
     last = json.loads(lines[-1])
     if problem == "initial":
         last["initial_mechanics"][0]["sensor_window"] += 1
+    elif problem == "entry":
+        last["modules"][0] = 1
     elif problem == "flaps":
         last["initial_flaps"] = last["initial_flaps"][::-1]
     elif problem == "geometry":
