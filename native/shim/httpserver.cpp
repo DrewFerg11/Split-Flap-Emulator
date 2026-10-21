@@ -157,7 +157,8 @@ void send_all(int fd, const std::string &bytes) {
     }
 }
 
-std::string serialize(const AsyncWebServerRequest::Response &response) {
+/* A HEAD response carries the GET headers, Content-Length included, but no body. */
+std::string serialize(const AsyncWebServerRequest::Response &response, bool head) {
     std::string out =
         "HTTP/1.1 " + std::to_string(response.code) + " " + reason(response.code) + "\r\n";
     if (!response.content_type.isEmpty())
@@ -166,7 +167,7 @@ std::string serialize(const AsyncWebServerRequest::Response &response) {
         out += std::string(name.c_str()) + ": " + value.c_str() + "\r\n";
     out +=
         "Content-Length: " + std::to_string(response.body.size()) + "\r\nConnection: close\r\n\r\n";
-    return out + response.body;
+    return head ? out : out + response.body;
 }
 
 std::atomic<bool> serving{false};
@@ -216,7 +217,7 @@ void serve(AsyncWebServer *server, int listener) {
                         server->dispatch(call);
                         response = call.result();
                     }
-                    send_all(connection.fd, serialize(response));
+                    send_all(connection.fd, serialize(response, request.method == HTTP_HEAD));
                     close = true;
                 } else if (now - connection.last > kIdle) {
                     close = true;

@@ -328,7 +328,7 @@ uint16_t http_port;
 
 void http_transport() {
     static AsyncWebServer server(80);
-    server.on("/echo", HTTP_POST | HTTP_GET, [](AsyncWebServerRequest *r) {
+    server.on("/echo", HTTP_POST | HTTP_GET | HTTP_HEAD, [](AsyncWebServerRequest *r) {
         r->send(200, "text/plain", r->url() + "|" + r->contentType() + "|" + r->body());
     });
     server.begin();
@@ -352,6 +352,10 @@ void http_transport() {
     CHECK(exchange(http_port, {"POST /echo HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n"
                                "5\r\nhello\r\n0\r\n\r\n"})
               .find("HTTP/1.1 501") == 0);
+    std::string head = exchange(http_port, {"HEAD /echo HTTP/1.1\r\n\r\n"});
+    CHECK(head.find("HTTP/1.1 200 OK\r\n") == 0);
+    CHECK(head.find("Content-Length: 7\r\n") != std::string::npos);
+    CHECK(head.size() >= 4 && head.compare(head.size() - 4, 4, "\r\n\r\n") == 0);
     CHECK(exchange(http_port, {"garbage\r\n\r\n"}).find("HTTP/1.1 400") == 0);
     CHECK(exchange(http_port, {"BREW /echo HTTP/1.1\r\n\r\n"}).find("HTTP/1.1 501") == 0);
 }
