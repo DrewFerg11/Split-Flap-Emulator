@@ -4,15 +4,21 @@
 #include "WiFi.h"
 #include "vclock.h"
 
+#include <arpa/inet.h>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <fcntl.h>
+#include <future>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <optional>
 #include <poll.h>
+#include <string>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 
 struct WiFiClient::Socket {
@@ -39,7 +45,42 @@ bool wait_for(int fd, short events, int timeout_ms) {
 /* The device only reaches other hosts once it has joined a network as a station. */
 bool station_online() { return WiFi.status() == WL_CONNECTED; }
 
+bool host_resolver(const char *host, uint32_t *address) {
+    addrinfo hints{}, *result = nullptr;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    bool found = ::getaddrinfo(host, nullptr, &hints, &result) == 0 && result;
+    if (found)
+        *address = reinterpret_cast<sockaddr_in *>(result->ai_addr)->sin_addr.s_addr;
+    if (result)
+        ::freeaddrinfo(result);
+    return found;
+}
+
+std::atomic<flapsim::net::Resolver> resolver{host_resolver};
+
+/* As arduino-esp32 2.0.17's hostByName(): a lookup waits at most 15 s, independently of the
+ * connect timeout. A lookup still running then is abandoned on its own thread. */
+constexpr int64_t kDnsTimeoutNs = 15'000'000'000;
+
+std::optional<uint32_t> resolve(const char *host) {
+    in_addr numeric{};
+    if (::inet_pton(AF_INET, host, &numeric) == 1)
+        return numeric.s_addr;
+    auto answer = std::make_shared<std::promise<std::optional<uint32_t>>>();
+    auto result = answer->get_future();
+    std::thread([answer, name = std::string(host), lookup = resolver.load()] {
+        uint32_t address = 0;
+        answer->set_value(lookup(name.c_str(), &address) ? std::optional(address) : std::nullopt);
+    }).detach();
+    if (result.wait_for(flapsim::vclock::host_duration(kDnsTimeoutNs)) != std::future_status::ready)
+        return std::nullopt;
+    return result.get();
+}
+
 } // namespace
+
+void flapsim::net::set_resolver(Resolver lookup) { resolver = lookup ? lookup : host_resolver; }
 
 WiFiClient::WiFiClient() = default;
 WiFiClient::~WiFiClient() = default;
@@ -83,14 +124,8 @@ int WiFiClient::connect(const char *host, uint16_t port) {
 int WiFiClient::connect(const char *host, uint16_t port, int32_t timeout_ms) {
     if (!host || !station_online())
         return 0;
-    addrinfo hints{}, *result = nullptr;
-    hints.ai_family = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    if (::getaddrinfo(host, nullptr, &hints, &result) != 0 || !result)
-        return 0;
-    IPAddress ip(uint32_t(reinterpret_cast<sockaddr_in *>(result->ai_addr)->sin_addr.s_addr));
-    ::freeaddrinfo(result);
-    return connect(ip, port, timeout_ms);
+    std::optional<uint32_t> address = resolve(host);
+    return address ? connect(IPAddress(*address), port, timeout_ms) : 0;
 }
 
 size_t WiFiClient::write(const uint8_t *buffer, size_t size) {

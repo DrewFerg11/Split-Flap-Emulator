@@ -2,7 +2,15 @@
 #pragma once
 #include "Client.h"
 
+#include <cstdint>
 #include <memory>
+
+namespace flapsim::net {
+/* Resolves a host name to an IPv4 address in network byte order; returns false on failure. */
+using Resolver = bool (*)(const char *host, uint32_t *address);
+/* Tests replace the host resolver; nullptr restores getaddrinfo. */
+void set_resolver(Resolver resolver);
+} // namespace flapsim::net
 
 /* TCP client on a host socket. Copies share one connection, as arduino-esp32's do. Connect and
  * write use the client's timeout in virtual milliseconds; reads never block. */

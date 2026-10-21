@@ -5,6 +5,7 @@
 #include "LittleFS.h"
 #include "Preferences.h"
 #include "WiFi.h"
+#include "WiFiClient.h"
 #include "Wire.h"
 #include "host.h"
 #include "vclock.h"
@@ -14,6 +15,7 @@ extern "C" {
 }
 
 #include <arpa/inet.h>
+#include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <functional>
@@ -374,6 +376,24 @@ void sockets() {
     CHECK(WiFi.status() == WL_CONNECTED && WiFi.localIP().toString() == "127.0.0.1");
     CHECK(client.connect("localhost", port));
     int peer = ::accept(listener, nullptr, nullptr);
+    {
+        /* An unanswered lookup gives up after 15 s of virtual time, as hostByName() does. */
+        flapsim::net::set_resolver([](const char *, uint32_t *) {
+            std::this_thread::sleep_for(std::chrono::seconds(2));
+            return false;
+        });
+        flapsim::vclock::set_speed(50.0);
+        auto before = std::chrono::steady_clock::now();
+        WiFiClient stalled;
+        CHECK(!stalled.connect("slow.example", port, 100));
+        auto waited = std::chrono::steady_clock::now() - before;
+        CHECK(waited >= std::chrono::milliseconds(250) && waited < std::chrono::milliseconds(1500));
+        flapsim::vclock::set_speed(1.0);
+        flapsim::net::set_resolver(nullptr);
+        WiFiClient numeric; /* dotted addresses never reach the resolver */
+        CHECK(numeric.connect("127.0.0.1", port));
+        ::close(::accept(listener, nullptr, nullptr));
+    }
     CHECK(client.write(reinterpret_cast<const uint8_t *>("ping"), 4) == 4);
     char buffer[8] = {};
     CHECK(::recv(peer, buffer, sizeof(buffer), 0) == 4 && std::string(buffer) == "ping");
