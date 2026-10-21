@@ -574,6 +574,14 @@ def test_checked_in_baseline_is_valid_and_bound_to_the_golden_checksum():
     with pytest.raises(ValueError, match="applies only to firmware"):
         known.check_firmware("0" * 64)
     assert all(e["issue"].count("#") == 1 for e in known.serial + known.failures)
+    timeout = known.tolerated_serial("Error writing data to module 34, error code: 5")
+    assert timeout["issue"] == "DrewFerg11/Split-Flap-Emulator#14"
+    for line in [
+        "Error writing data to module 34, error code: 4",
+        "Error writing data to module 34, error code: 2",
+        "x Error writing data to module 34, error code: 5",
+    ]:
+        assert known.tolerated_serial(line) is None
 
 
 @pytest.mark.parametrize(

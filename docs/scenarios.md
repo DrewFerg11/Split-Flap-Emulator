@@ -208,16 +208,15 @@ local-host timing for CI measurements.
 
 ## Golden acceptance blockers
 
-The checksum-pinned published v1.4.0 image does not pass both complete smokes.
+The checksum-pinned published v1.4.1 image (like v1.4.0) does not pass both complete smokes.
 [Firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54)
 records settings GET readback returning defaults despite confirmed persistence,
 and dual-row text POST returning HTTP 200 without subsequent motion. Readback
 sometimes passes, while rebooted Preferences missing-key errors still fail the
 strict error gate. The maintainer owns the firmware fix. The accepted #15 golden baseline now
-records these failures explicitly so they do not block emulator PRs. The golden version exception permits only the recorded version
-mismatch; it does not relax these assertions or serial-error policies.
+records these failures explicitly so they do not block emulator PRs.
 
-The intermittent I2C read Error 263 in
+The intermittent I2C read Error 263 (and its write-side form, `error code: 5`) in
 [emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14)
 is a separate unresolved investigation. A later run without that error is not
 proof of a fix; its checksum-bound golden allowance is tracked by #15. Issue #5

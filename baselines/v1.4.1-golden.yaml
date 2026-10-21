@@ -27,6 +27,12 @@ serial:
       Intermittent I2C read timeout in 16-module dual-bus runs; cause (firmware, QEMU scheduling or
       model) not yet established.
     regex: '^\[\s*\d+\]\[E\]\[Wire\.cpp:\d+\] requestFrom\(\): i2cRead returned Error 263$'
+  - issue: DrewFerg11/Split-Flap-Emulator#14
+    reason: >-
+      The write-side form of the same intermittent 16-module dual-bus I2C timeout: the firmware reports
+      Wire endTransmission code 5 (timeout). Seen once in the container smoke-16 run for PR #26 at the
+      same step 6 as the read timeout. Other write codes (e.g. 2, missing module) are not covered.
+    regex: '^Error writing data to module \d+, error code: 5$'
   - issue: DrewFerg11/Split-Flap-Display#86
     reason: >-
       Two firmware tasks print to the UART without a shared lock, so request logging gets spliced into
