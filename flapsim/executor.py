@@ -74,16 +74,33 @@ class Executor(Protocol):
     def execute(self, context: RunContext) -> dict: ...
 
 
+def excused(counters, known_issues, serial):
+    """Whether a baseline explains every model fault: only drum stalls, each matched by a logged
+    known I2C timeout (#14). Returns the tolerated-stall record, or None."""
+    stalls = counters["stalls"]
+    if counters["anomalies"] or not stalls or known_issues is None:
+        return None
+    allowance, issues = known_issues.excused_stalls(serial)
+    if stalls > allowance:
+        return None
+    return {"stalls": stalls, "allowance": allowance, "issues": issues}
+
+
 @dataclass
 class BootExecutor:
     timeout: float
     document: dict
+    known_issues: object = None
+    tolerated_stalls: dict | None = None
 
     def execute(self, context):
         while True:
             state = context.settlement()
             if state and (state["counters"]["stalls"] or state["counters"]["anomalies"]):
-                raise ExecutionFailed(f"model faults: {state['counters']}")
+                record = excused(state["counters"], self.known_issues, context.serial())
+                if record is None:
+                    raise ExecutionFailed(f"model faults: {state['counters']}")
+                self.tolerated_stalls = record
             if (
                 state
                 and state["movement_id"] > 0

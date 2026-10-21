@@ -1,6 +1,7 @@
 """Real-firmware probe: live state, audited mechanics, pause and controller reset."""
 
 import argparse
+import hashlib
 import json
 import signal
 import socket
@@ -8,7 +9,8 @@ import time
 import urllib.request
 from pathlib import Path
 
-from flapsim.executor import BootExecutor
+from flapsim.baseline import load_known_issues
+from flapsim.executor import BootExecutor, excused
 from flapsim.hardware import ROOT
 from flapsim.runner import run
 from flapsim.state import display_aligned
@@ -41,6 +43,9 @@ class ControlProbe:
     timeout = 300
     document = {"version": 1, "mode": "boot", "timeout": 300}
 
+    def __init__(self, known_issues=None):
+        self.known_issues = known_issues
+
     def execute(self, context):
         manifest = json.loads((context.out / "run.json").read_text())
         endpoint = manifest["control"]["endpoint"]
@@ -71,10 +76,13 @@ class ControlProbe:
         while (moving := snapshot())["state"]["settled"]:
             context.pause()
         record("moving", moving)
-        settled = BootExecutor(
-            240, {"expect_text": "X" * len(context.hardware["modules"])}
-        ).execute(context)
+        boot = BootExecutor(
+            240, {"expect_text": "X" * len(context.hardware["modules"])}, self.known_issues
+        )
+        settled = boot.execute(context)
         record("first_settlement", settled["state"])
+        if boot.tolerated_stalls:
+            record("tolerated_stalls", boot.tolerated_stalls)
 
         # The public API only reads. Test servicing a paused guest after the
         # display settles; arbitrary mid-motion QMP pause fidelity is separate.
@@ -141,7 +149,10 @@ class ControlProbe:
             final = snapshot()
             state = final["state"]
             if state["counters"]["stalls"] or state["counters"]["anomalies"]:
-                raise RuntimeError("model faults after reset")
+                tolerated = excused(state["counters"], self.known_issues, context.serial())
+                if tolerated is None:
+                    raise RuntimeError("model faults after reset")
+                record("tolerated_stalls", tolerated)
             if (
                 state["settled"]
                 and state["settlement_id"] > before_reset["state"]["settlement_id"]
@@ -161,7 +172,14 @@ def main():
     parser.add_argument("--hardware", default="esp32-8-single")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--qemu-prefix", type=Path, default=ROOT / "build/qemu/install")
+    parser.add_argument(
+        "--known-issues", type=Path, help="golden baseline whose #14 entries may excuse stalls"
+    )
     args = parser.parse_args()
+    known_issues = None
+    if args.known_issues:
+        known_issues = load_known_issues(args.known_issues)
+        known_issues.check_firmware(hashlib.sha256(args.firmware.read_bytes()).hexdigest())
     args.scenario, args.timing, args.seed = "boot", "ci", 7
     args.timeout, args.trace, args.control_port = 300, False, 0
     started = time.monotonic()
@@ -174,7 +192,9 @@ def main():
     previous = {s: signal.signal(s, interrupted) for s in [signal.SIGINT, signal.SIGTERM]}
     try:
         code = run(
-            args, executor=ControlProbe(), interrupt=lambda: received[0] if received else None
+            args,
+            executor=ControlProbe(known_issues),
+            interrupt=lambda: received[0] if received else None,
         )
     finally:
         for signum, handler in previous.items():

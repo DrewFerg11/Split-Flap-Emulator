@@ -10,7 +10,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from flapsim.executor import ExecutionFailed, RunContext, positive_timeout
+from flapsim.executor import ExecutionFailed, RunContext, excused, positive_timeout
 from flapsim.state import display_aligned, read_settlement, validate_identity, validate_state
 
 VARIABLE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -367,6 +367,7 @@ class ScenarioExecutor:
         self.known_issues = known_issues
         self.known_serial = {}
         self.known_failure = None
+        self.known_stalls = None
         requested = parse_variables(variables)
         implicit = implicit_variables or {}
         if reserved := sorted(implicit.keys() & requested.keys()):
@@ -497,7 +498,7 @@ class ScenarioExecutor:
             "baseline": self.known_issues.source,
             "firmware_sha256": self.known_issues.firmware_sha256,
             "firmware_source_commit": self.known_issues.firmware_source_commit,
-            "applied": bool(self.known_failure or self.known_serial),
+            "applied": bool(self.known_failure or self.known_serial or self.known_stalls),
             "expected_failure": self.known_failure,
             "expected_failures_not_observed": [
                 e
@@ -507,6 +508,7 @@ class ScenarioExecutor:
             "tolerated_serial": [
                 {"regex": regex, **record} for regex, record in self.known_serial.items()
             ],
+            "tolerated_stalls": self.known_stalls,
         }
 
     @staticmethod
@@ -557,8 +559,7 @@ class ScenarioExecutor:
             if activity is None:
                 raise ExecutionFailed("model diagnostics are not available")
             result["actual"] = activity["counters"]
-            if activity["counters"]["stalls"] or activity["counters"]["anomalies"]:
-                raise ExecutionFailed(f"model faults: {activity['counters']}")
+            self.check_model(activity["counters"], serial[:end], "model faults")
         elif kind == "mqtt_publish":
             observer = self.observer(context)
             observer.publish(value["topic"], value["payload"], value.get("retain", False))
@@ -728,8 +729,18 @@ class ScenarioExecutor:
             self.known_serial,
         )
         state = read_settlement(out, hardware)
-        if state and (state["counters"]["stalls"] or state["counters"]["anomalies"]):
-            raise ExecutionFailed(f"model faults after execution: {state['counters']}")
+        if state:
+            self.check_model(state["counters"], serial, "model faults after execution")
+
+    def check_model(self, counters, serial, message):
+        """Model faults fail the run, except drum stalls the baseline explains: each tolerated
+        serial line with explains_stalls (an I2C timeout that lost a coil write, #14) excuses
+        at most that many stalls. Anomalies are never excused."""
+        if counters["stalls"] or counters["anomalies"]:
+            record = excused(counters, self.known_issues, serial)
+            if record is None:
+                raise ExecutionFailed(f"{message}: {counters}")
+            self.known_stalls = record
 
     def finalize(self, out, manifest):
         from flapsim.report import write_reports
