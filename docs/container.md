@@ -117,7 +117,7 @@ builds are not claimed to be bit-for-bit reproducible.
 
 ## Trusted publication
 
-`publish.yml` accepts trusted `v*` tags whose commit belongs to `origin/main`
+`release.yml` accepts trusted `v*` tags whose commit belongs to `origin/main`
 and whose SemVer version matches `pyproject.toml` (PEP 440 prerelease equivalence
 is checked). A manual dispatch verifies only; it cannot push. No PR publishes.
 
@@ -140,3 +140,27 @@ issue #6; the implementation PR alone does not close it.
 
 See [maintenance](maintenance.md) for source licensing, cache recovery, evidence
 retention, required checks and the firmware-release integration prerequisites.
+
+## Verification history
+
+The phase5 implementation merged as `dd6a432`. Its candidate passed installed
+resources/source/license/provenance checks and all five image cases: smoke8
+173.056s (all steps,24 visible known serial lines), smoke16 218.878s (visible
+expected step8 failure), timeout exit4/3.023s, stop exit143/0.198s and wrong-version
+exit5/6.163s. The overall job then failed at the host publication verifier's
+missing `packaging` import. PR #17 fixes that dependency, verified in a clean
+environment. These baseline results establish neither a firmware fix nor
+publication authorization.
+
+A subsequent candidate passed the corrected host setup, but the final serial
+sweep caught the raw interleaving recorded in
+[SFD #86](https://github.com/DrewFerg11/Split-Flap-Display/issues/86). Its narrow
+checksum-bound baseline entry and regression/negative controls are documented in
+[scenario usage](scenarios.md). Strict policy and release commands are unchanged.
+The failed run skipped later lifecycle/rejection checks and published nothing.
+
+[Issue #7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) tracks exact
+source/image identities, run links and temporary artifact pointers (14-day
+retention), alongside the acceptance evidence still required. Fresh current-source
+image/rejection verification and actual immutable publication are necessary;
+old partial proof cannot authorize publication or establish an active release gate.
