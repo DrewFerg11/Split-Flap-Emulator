@@ -29,7 +29,7 @@ authorize publication; later source heads require matching image verification.
 
 After a verified version is published, substitute its recorded version for
 `<version>` and the actual firmware release for `vX.Y.Z`. Prefer the immutable
-`ghcr.io/drewferg11/flapsim@sha256:...` reference recorded by publication when
+`ghcr.io/drewferg11/split-flap-emulator@sha256:...` reference recorded by publication when
 integrating a release gate.
 
 ```sh
@@ -38,7 +38,7 @@ mkdir -p out/smoke-8 out/smoke-16
 docker run --rm --network none --user "$(id -u):$(id -g)" \
   --mount "type=bind,source=$firmware_path,target=/firmware.bin,readonly" \
   --mount "type=bind,source=$(realpath out/smoke-8),target=/out" \
-  ghcr.io/drewferg11/flapsim:<version> run \
+  ghcr.io/drewferg11/split-flap-emulator:<version> run \
   --firmware /firmware.bin --hardware esp32-8-single \
   --scenario release-smoke-8 --timing ci --var FIRMWARE_VERSION=vX.Y.Z \
   --out /out/run

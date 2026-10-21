@@ -19,7 +19,7 @@ from tools.verify_release_gate import (
     verify,
 )
 
-IMAGE = "ghcr.io/drewferg11/flapsim@sha256:" + "a" * 64
+IMAGE = "ghcr.io/drewferg11/split-flap-emulator@sha256:" + "a" * 64
 CHECKSUM = "b" * 64
 
 
@@ -75,7 +75,16 @@ def test_strict_release_commands(layout):
     assert "300" in command and command[command.index("--timing") + 1] == "ci"
 
 
-@pytest.mark.parametrize("image", ["", "flapsim:latest", IMAGE.upper(), IMAGE + ":tag"])
+@pytest.mark.parametrize(
+    "image",
+    [
+        "",
+        "flapsim:latest",
+        IMAGE.upper(),
+        IMAGE + ":tag",
+        "ghcr.io/drewferg11/flapsim@sha256:" + "a" * 64,
+    ],
+)
 def test_only_immutable_expected_registry_is_accepted(image):
     with pytest.raises(GateFailure, match="digest"):
         validate_inputs(image, "v1.5.0")

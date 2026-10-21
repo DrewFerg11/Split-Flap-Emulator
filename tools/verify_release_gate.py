@@ -19,7 +19,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-IMAGE_PATTERN = r"ghcr\.io/drewferg11/flapsim@sha256:[0-9a-f]{64}"
+IMAGE_PATTERN = r"ghcr\.io/drewferg11/split-flap-emulator@sha256:[0-9a-f]{64}"
 TAG_PATTERN = r"v\d+\.\d+\.\d+(?:-rc\.\d+)?"
 LAYOUTS = {"8": ("esp32-8-single", "release-smoke-8"), "16": ("esp32-16-dual", "release-smoke-16")}
 PROBES = ("none", "wrong-version", "missing", "corrupt", "timeout")
