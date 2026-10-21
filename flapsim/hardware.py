@@ -9,6 +9,13 @@ import yaml
 from flapsim.resources import resolve_resource
 
 ROOT = Path(__file__).resolve().parents[1]
+MECHANICAL_SALTS = {
+    "steps_per_rotation": 0xA341316C,
+    "magnet_position": 0xC8013EA4,
+    "flap_offset": 0xAD90777D,
+    "sensor_window": 0x7E95761E,
+    "sensor_polarity": 0x9E3779B9,
+}
 
 
 class HardwareLoader(yaml.SafeLoader):
@@ -28,10 +35,10 @@ class HardwareLoader(yaml.SafeLoader):
         return result
 
 
-def mapping(value, name, keys):
+def mapping(value, name, keys, optional=()):
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be a mapping")
-    unknown = value.keys() - keys
+    unknown = value.keys() - keys - set(optional)
     missing = keys - value.keys()
     if unknown or missing:
         raise ValueError(
@@ -69,13 +76,35 @@ def mechanical_range(value, name, lower, upper):
     return integer(value, name, lower, upper), 0
 
 
+def mechanical_spec(drum):
+    ranges = {
+        "steps_per_rotation": mechanical_range(
+            drum["steps_per_rotation"], "drum.steps_per_rotation", 4, 1_000_000
+        )
+    }
+    steps, spread = ranges["steps_per_rotation"]
+    minimum = steps - spread
+    for name, lower, upper in [
+        ("magnet_position", 0, minimum - 1),
+        ("flap_offset", 0, minimum - 1),
+        ("sensor_window", 1, minimum),
+    ]:
+        ranges[name] = mechanical_range(drum[name], f"drum.{name}", lower, upper)
+    polarity = drum["sensor_polarity"]
+    if not isinstance(polarity, str) or polarity not in {"active-high", "active-low", "random"}:
+        raise ValueError("sensor_polarity must be active-high, active-low, or random")
+    return ranges, polarity
+
+
 def normalize_hardware(document, *, seed=None):
     document = mapping(document, "hardware", {"chip", "buses", "drum", "start_angles"})
     if document["chip"] != "esp32":
         raise ValueError("chip must be esp32 (ESP32-C3/S3 are outside the MVP)")
     raw_drum = document["drum"]
     drum = mapping(
-        {"flap_offset": 0, **raw_drum} if isinstance(raw_drum, dict) else raw_drum,
+        {"flap_offset": 0, "sensor_polarity": "active-high", **raw_drum}
+        if isinstance(raw_drum, dict)
+        else raw_drum,
         "drum",
         {
             "steps_per_rotation",
@@ -83,11 +112,11 @@ def normalize_hardware(document, *, seed=None):
             "magnet_position",
             "sensor_window",
             "flap_offset",
+            "sensor_polarity",
         },
     )
-    steps, steps_spread = mechanical_range(
-        drum["steps_per_rotation"], "drum.steps_per_rotation", 4, 1_000_000
-    )
+    defaults, default_polarity = mechanical_spec(drum)
+    steps, steps_spread = defaults["steps_per_rotation"]
     min_steps = steps - steps_spread
     flaps = drum["flaps"]
     if (
@@ -99,13 +128,6 @@ def normalize_hardware(document, *, seed=None):
         raise ValueError(
             "drum.flaps must contain 2–95 unique printable ASCII characters, at most one per step"
         )
-    magnet, magnet_spread = mechanical_range(
-        drum["magnet_position"], "drum.magnet_position", 0, min_steps - 1
-    )
-    offset, offset_spread = mechanical_range(
-        drum["flap_offset"], "drum.flap_offset", 0, min_steps - 1
-    )
-    integer(drum["sensor_window"], "drum.sensor_window", 1, min_steps)
     buses = document["buses"]
     if not isinstance(buses, list) or not buses:
         raise ValueError("buses must be a nonempty list")
@@ -118,9 +140,15 @@ def normalize_hardware(document, *, seed=None):
         seen.add(bus_id)
         addresses = bus["modules"]
         if not isinstance(addresses, list):
-            raise ValueError(f"bus {bus_id}.modules must be a list of integer I2C addresses")
+            raise ValueError(f"bus {bus_id}.modules must be a list of addresses or module mappings")
         present = set()
-        for address in addresses:
+        for entry in addresses:
+            overrides = {}
+            address = entry
+            if isinstance(entry, dict):
+                mapping(entry, "module", {"addr"}, MECHANICAL_SALTS)
+                address = entry["addr"]
+                overrides = {k: v for k, v in entry.items() if k != "addr"}
             integer(address, f"bus {bus_id} module address", 0x08, 0x77)
             if bus_id == 0 and address == 0x48:
                 raise ValueError(
@@ -131,15 +159,15 @@ def normalize_hardware(document, *, seed=None):
             if address in present:
                 raise ValueError(f"duplicate module address 0x{address:02x} on bus {bus_id}")
             present.add(address)
-            identities.append((bus_id, address))
-    identities.sort()
+            identities.append((bus_id, address, overrides))
+    identities.sort(key=lambda m: (m[0], m[1]))
     if not identities:
         raise ValueError("at least one physical module is required")
     start = document["start_angles"]
     if isinstance(start, list):
         if len(start) != len(identities):
             raise ValueError("start_angles must have one angle per module in bus/address order")
-        angles = [integer(a, "start angle", 0, min_steps - 1) for a in start]
+        angles = [integer(a, "start angle", 0, 999_999) for a in start]
         resolved_seed = None
     elif start == "random" or isinstance(start, dict):
         if isinstance(start, dict):
@@ -153,48 +181,52 @@ def normalize_hardware(document, *, seed=None):
         resolved_seed = integer(seed, "seed override", 0, 0xFFFFFFFF)
     # Separate streams keep starts and each mechanical parameter independent.
     mechanical_seed = resolved_seed if resolved_seed is not None else 0
-    geometry = []
-    for mean, spread, salt in [
-        (steps, steps_spread, 0xA341316C),
-        (magnet, magnet_spread, 0xC8013EA4),
-        (offset, offset_spread, 0xAD90777D),
-    ]:
-        geometry.append(
-            [
-                mean - spread + n
-                for n in positions(mechanical_seed ^ salt, len(identities), 2 * spread + 1)
-            ]
+    draws = {
+        k: positions(mechanical_seed ^ salt, len(identities), 0x100000000)
+        for k, salt in MECHANICAL_SALTS.items()
+    }
+    starts = (
+        positions(resolved_seed, len(identities), 0x100000000)
+        if resolved_seed is not None
+        else None
+    )
+    modules = []
+    for i, (bus_id, address, overrides) in enumerate(identities):
+        try:
+            ranges, polarity = mechanical_spec({**drum, **overrides})
+        except ValueError as error:
+            raise ValueError(f"module bus {bus_id} addr 0x{address:02x}: {error}") from error
+        minimum = ranges["steps_per_rotation"][0] - ranges["steps_per_rotation"][1]
+        if len(flaps) > minimum:
+            raise ValueError("module flap count exceeds its smallest rotation")
+        if isinstance(start, list):
+            integer(angles[i], "start angle", 0, minimum - 1)
+        geometry = {
+            k: mean - spread + draws[k][i] % (2 * spread + 1)
+            for k, (mean, spread) in ranges.items()
+        }
+        if polarity == "random":
+            polarity = "active-low" if draws["sensor_polarity"][i] & 1 else "active-high"
+        angle = starts[i] % geometry["steps_per_rotation"] if starts is not None else angles[i]
+        modules.append(
+            {
+                "bus": bus_id,
+                "addr": address,
+                "angle": angle,
+                **geometry,
+                "sensor_polarity": polarity,
+            }
         )
-    if resolved_seed is not None:
-        angles = [
-            a % module_steps
-            for a, module_steps in zip(
-                positions(resolved_seed, len(identities), 0x100000000), geometry[0], strict=True
-            )
-        ]
     return {
         "schema_version": 1,
         "chip": "esp32",
         "seed": resolved_seed,
         "drum": {
             **drum,
-            "steps_per_rotation": steps,
-            "magnet_position": magnet,
-            "flap_offset": offset,
+            **{k: mean for k, (mean, _) in defaults.items()},
+            "sensor_polarity": "active-high" if default_polarity == "random" else default_polarity,
         },
-        "modules": [
-            {
-                "bus": b,
-                "addr": a,
-                "angle": angle,
-                "steps_per_rotation": rotation,
-                "magnet_position": magnet_at,
-                "flap_offset": flap_at,
-            }
-            for (b, a), angle, rotation, magnet_at, flap_at in zip(
-                identities, angles, *geometry, strict=True
-            )
-        ],
+        "modules": modules,
     }
 
 

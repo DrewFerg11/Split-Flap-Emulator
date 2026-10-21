@@ -116,9 +116,16 @@ if mode != "no-output":
         state["counters"] = {**counters, counter: 1}
     (out / "serial.log").write_text("=== Split Flap Display ===\n")
     (out / "timeline.jsonl").write_text(json.dumps(state) + "\n")
-    (out / "state.json").write_text(json.dumps(state) if mode != "partial" else "{")
     activity = {**state, "settled": mode != "stale"}
-    (out / "activity.json").write_text(json.dumps(activity))
+    # Match the real model's publication contract: readers must never observe
+    # a newly created but empty snapshot. Keep intentional malformed output.
+    for name, payload in [
+        ("state.json", json.dumps(state) if mode != "partial" else "{"),
+        ("activity.json", json.dumps(activity)),
+    ]:
+        temporary = out / (name + ".tmp")
+        temporary.write_text(payload)
+        temporary.replace(out / name)
     if mode == "bad-timeline":
         (out / "timeline.jsonl").write_text("{")
 while True:

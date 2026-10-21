@@ -183,3 +183,94 @@ def test_variance_checks_smallest_possible_rotation(document):
     document["drum"]["magnet_position"] = 90
     with pytest.raises(ValueError, match="magnet_position"):
         normalize_hardware(document)
+
+
+def test_perfect_presets_preserve_original_mechanics():
+    for name in ["esp32-8-single", "esp32-16-dual"]:
+        assert load_hardware(name + "-perfect") == load_hardware(name)
+        assert all(
+            m["sensor_window"] == 40 and m["sensor_polarity"] == "active-high"
+            for m in load_hardware(name + "-perfect")["modules"]
+        )
+
+
+def test_seeded_sensor_variation_and_explicit_module_overrides(document):
+    document["drum"].update(sensor_window={"mean": 40, "spread": 8}, sensor_polarity="random")
+    random = normalize_hardware(document)
+    assert random == normalize_hardware(document)
+    assert {m["sensor_polarity"] for m in random["modules"]} == {"active-high", "active-low"}
+    assert len({m["sensor_window"] for m in random["modules"]}) > 1
+    assert all(32 <= m["sensor_window"] <= 48 for m in random["modules"])
+    document["buses"][0]["modules"][2] = {
+        "addr": 34,
+        "steps_per_rotation": 4096,
+        "magnet_position": 3000,
+        "flap_offset": 3200,
+        "sensor_window": 73,
+        "sensor_polarity": "active-low",
+    }
+    changed = normalize_hardware(document)
+    for i in range(8):
+        if i != 2:
+            assert changed["modules"][i] == random["modules"][i]
+    assert changed["modules"][2] == {
+        **document["buses"][0]["modules"][2],
+        "bus": 0,
+        "angle": positions(7, 8, 4096)[2],
+    }
+    document["buses"][0]["modules"].reverse()
+    assert normalize_hardware(document) == changed
+    assert changed != normalize_hardware(document, seed=19)
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"magnet_position": 730},
+        {"addr": 32, "offsets": 0},
+        {"addr": True},
+        {"addr": 32, "sensor_window": False},
+        {"addr": 32, "sensor_window": {"mean": 40, "spread": 41}},
+        {"addr": 32, "sensor_polarity": False},
+        {"addr": 32, "sensor_polarity": "HIGH"},
+        {"addr": 32, "sensor_polarity": ["active-high"]},
+        {"addr": 32, "steps_per_rotation": 64},
+    ],
+)
+def test_invalid_per_module_mechanics(document, entry):
+    document["buses"][0]["modules"][0] = entry
+    with pytest.raises(ValueError):
+        normalize_hardware(document)
+
+
+def test_mixed_module_entries_reject_duplicates(document):
+    document["buses"][0]["modules"][1] = {"addr": 32}
+    with pytest.raises(ValueError, match="duplicate module"):
+        normalize_hardware(document)
+
+
+def test_explicit_start_angles_use_each_module_limits(document):
+    document["buses"][0]["modules"][0] = {"addr": 32, "steps_per_rotation": 4096}
+    document["start_angles"] = [4095] + [0] * 7
+    assert normalize_hardware(document)["modules"][0]["angle"] == 4095
+    document["buses"][0]["modules"][0]["steps_per_rotation"] = 2048
+    with pytest.raises(ValueError, match="start angle"):
+        normalize_hardware(document, seed=7)
+
+
+def test_calibration_fixture_offsets_match_true_electrical_edges():
+    hardware = load_hardware("esp32-8-single-calibration")
+    scenario = yaml.safe_load((ROOT / "scenarios/calibration-8.yaml").read_text())
+    settings = next(
+        s["http"]["body"]
+        for s in scenario["steps"]
+        if "http" in s and s["http"].get("method") == "POST"
+    )
+    offsets = [int(v) for v in settings["wireOffsets"].split(",")]
+    assert len(set(offsets)) == len(hardware["modules"]) == 8
+    assert min(offsets) < 0 < max(offsets)
+    for module, offset in zip(hardware["modules"], offsets, strict=True):
+        edge = module["magnet_position"]
+        if module["sensor_polarity"] == "active-low":
+            edge += module["sensor_window"]
+        assert (edge - module["flap_offset"]) % module["steps_per_rotation"] == 730 + offset

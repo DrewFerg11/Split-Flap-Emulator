@@ -1,0 +1,24 @@
+# Fixed calibration fixture: true geometry is independent of POST /settings.
+# Rotations stay ideal to isolate calibration from gearbox-ratio error (#16).
+chip: esp32
+buses:
+  - id: 0
+    modules:
+      - {addr: 0x20, magnet_position: 650, sensor_window: 24, sensor_polarity: active-high, flap_offset: 130}
+      - {addr: 0x21, magnet_position: 680, sensor_window: 28, sensor_polarity: active-low, flap_offset: 138}
+      - {addr: 0x22, magnet_position: 710, sensor_window: 32, sensor_polarity: active-high, flap_offset: 90}
+      - {addr: 0x23, magnet_position: 740, sensor_window: 36, sensor_polarity: active-low, flap_offset: 106}
+      - {addr: 0x24, magnet_position: 770, sensor_window: 40, sensor_polarity: active-high, flap_offset: 30}
+      - {addr: 0x25, magnet_position: 800, sensor_window: 44, sensor_polarity: active-low, flap_offset: 54}
+      - {addr: 0x26, magnet_position: 830, sensor_window: 48, sensor_polarity: active-high, flap_offset: 2038}
+      - {addr: 0x27, magnet_position: 860, sensor_window: 52, sensor_polarity: active-low, flap_offset: 22}
+  - id: 1
+    modules: []
+drum:
+  steps_per_rotation: 2048
+  flaps: ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  magnet_position: 730
+  sensor_window: 40
+  sensor_polarity: active-high
+  flap_offset: 0
+start_angles: {seed: 7}

@@ -58,7 +58,8 @@ approximately 63.68:1 gearbox: 2038 full steps per turn, with an inclusive ±2
 full-step variation between modules (not 4076 half-steps). These are plausible
 test parameters, not measurements of a particular display.
 
-`steps_per_rotation` and `magnet_position` also accept `{mean: N, spread: S}`.
+`steps_per_rotation`, `magnet_position` and `sensor_window` also accept
+`{mean: N, spread: S}`.
 An optional `flap_offset` (default 0) accepts the same form and specifies the
 physical step at the center of flap zero. Each module draws an integer uniformly
 from `[mean-spread, mean+spread]`. The realistic presets vary the true magnet
@@ -66,6 +67,41 @@ position by ±2 steps and the flap-zero offset from 0 to 4 steps. No firmware
 settings are changed. Validation checks the entire possible range: flap count,
 sensor window, magnet/offset, and explicit starts must fit the smallest possible
 rotation. Negative spreads, booleans and extra/missing distribution keys fail.
+
+`sensor_polarity` is optional and defaults to `active-high` for compatibility.
+It accepts `active-high`, `active-low`, or seeded `random`. The realistic
+presets draw widths from 32–48 steps and draw polarity independently per module.
+The explicit `esp32-8-single-perfect` / `esp32-16-dual-perfect` presets match
+the original idealized configurations, including 40-step active-high sensors.
+
+A bus's `modules` list accepts integer addresses and mappings with required
+`addr`. A mapping may override any of `steps_per_rotation`, `magnet_position`,
+`sensor_window`, `sensor_polarity`, and `flap_offset`, using the same scalar or
+seeded forms as `drum`. Unspecified values inherit the drum defaults. For example:
+
+```yaml
+modules:
+  - 0x20
+  - addr: 0x21
+    magnet_position: 680
+    sensor_window: 28
+    sensor_polarity: active-low
+    flap_offset: 138
+```
+
+Each module's full range is checked against its own smallest possible rotation.
+Its explicit start angle must fit that range too. Unknown module keys and
+duplicate addresses (including mixed integer/mapping entries) are rejected.
+All actual values live in the host's normalized configuration. Firmware receives
+only the resulting electrical input and motor response; changing firmware
+settings never rewrites these physical parameters.
+
+`flap_offset` remains the absolute physical angle of flap zero. The true forward
+distance from magnet entry to flap zero is
+`(flap_offset - magnet_position) mod steps_per_rotation`. This representation
+supports a zero position on either side of the sensor, including wraparound.
+See [calibration.md](calibration.md) for the electrical-edge distinction and the
+settings scenario that calibrates against these independent values.
 
 Module ordering is always bus ID then ascending address, independent of YAML
 ordering. `start_angles` accepts:
@@ -82,13 +118,17 @@ The built-ins use seed 7; callers can override a valid configuration's starts
 through `load_hardware(..., seed=N)`. All resolved angles and the seed are
 recorded in the normalized JSON, including when the original input was random.
 
-Mechanical variation uses three independent xorshift32 streams, seeded with the
+Mechanical variation uses five independent xorshift32 streams, seeded with the
 resolved start seed XOR `0xa341316c` (rotation), `0xc8013ea4` (magnet), and
-`0xad90777d` (flap offset). Explicit start lists use seed 0 for mechanics unless
+`0xad90777d` (flap offset), `0x7e95761e` (sensor width), and `0x9e3779b9`
+(sensor polarity). Width uses the same inclusive integer range rule; an odd
+polarity draw selects active-low. The original three streams are unchanged.
+Explicit start lists use seed 0 for mechanics unless
 the CLI supplies `--seed`, which overrides starts and mechanics together. Changing
 one distribution does not shift the other streams. Resolved starts are the raw
 start PRNG output modulo each module's own rotation. Modules retain bus/address
-ordering, so reordered YAML produces identical geometry.
+ordering, so reordered YAML produces identical geometry. Overriding one module
+does not consume extra draws or change any other module's parameters.
 
 `write_model_config()` writes `model-config.json` with `schema_version: 1`,
 `chip`, `seed`, `drum`, a sorted `modules` array of `{bus, addr, angle}`, and
@@ -98,10 +138,14 @@ optional `trace` (null when disabled). The POC's older `FLAPSIM_BUS*` and other
 environment variables are not production configuration inputs.
 
 Each normalized module additionally records its resolved `steps_per_rotation`,
-`magnet_position`, and `flap_offset`; `drum` holds the nominal means. The C model
+`magnet_position`, `flap_offset`, `sensor_window`, and literal `sensor_polarity`;
+`drum` holds nominal means (active-high as the nominal fallback for random
+polarity). The C model
 uses each module's own mechanics. Normalized v1 inputs without module geometry
 inherit the global rotation/magnet/flap offset (zero if the global flap offset
-is also absent), consistently in both the C model and Python reader.
+is also absent), consistently in both the C model and Python reader. Missing
+per-module sensor fields inherit global width/polarity; absent global polarity
+means active-high. Existing v1 normalized inputs keep their original behavior.
 
 ## Hardware behavior
 
@@ -119,8 +163,11 @@ phase increments stalls. De-energizing loses phase. An invalid nonzero coil
 pattern increments an anomaly and keeps the module energized until stopped.
 With `a = (angle - flap_offset + steps) mod steps`, displayed flap index is
 `floor((a * N * 2 + steps) / (2 * steps)) mod N`,
-including ties rounding forward and wrap to the blank. Hall detection is
-`(angle - magnet_position + steps) mod steps < sensor_window`.
+including ties rounding forward and wrap to the blank. Physical magnet presence
+is `(angle - magnet_position + steps) mod steps < sensor_window`.
+The PCF8575 bit-15 input and snapshot `hall` field report that presence for
+active-high sensors and its inverse for active-low sensors. `hall` is an
+electrical level, not a polarity-independent presence flag.
 Here steps, magnet position and flap offset are the module's true values.
 
 Counters per module and in aggregate are `forward`, `backward`, `stalls`,
