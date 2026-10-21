@@ -148,15 +148,34 @@ def resolve_firmware(spec, cache):
     return path, {**info, "commit": commit, "dirty": dirty}
 
 
+PIN = ".flapsim-pin"
+
+
 def libraries(cache):
+    """Pinned third-party sources: a verified git checkout, or an exported copy whose pin file
+    records the same commit (how the container ships them for offline builds)."""
     manifest = json.loads((ROOT / "native/libraries.json").read_text())
     resolved = []
     for library in manifest["libraries"]:
         slug = re.sub(r"[^A-Za-z0-9]+", "-", library["name"]).strip("-").lower()
         path = cache / f"{slug}-{library['commit']}"
-        fetch(library["repository"], library["commit"], path, library["commit"])
+        pin = path / PIN
+        if not (pin.is_file() and pin.read_text().strip() == library["commit"]):
+            fetch(library["repository"], library["commit"], path, library["commit"])
         resolved.append({**library, "path": path})
     return resolved
+
+
+def export_libraries(cache, target):
+    """Copy the pinned library trees (without git metadata) for offline builds."""
+    target = Path(target).resolve()
+    for library in libraries(cache):
+        destination = target / library["path"].name
+        if destination.exists():
+            shutil.rmtree(destination)
+        shutil.copytree(library["path"], destination, ignore=shutil.ignore_patterns(".git"))
+        (destination / PIN).write_text(library["commit"] + "\n")
+    print(f"exported pinned libraries to {target}")
 
 
 def shim_digest():
@@ -258,6 +277,9 @@ def compiler_identity():
 def build(args):
     if sys.platform != "linux":
         raise ValueError("native mode currently requires Linux")
+    if args.export_libraries:
+        export_libraries(args.cache.resolve(), args.export_libraries)
+        return None
     for tool in ["git", "cmake", "pkg-config"]:
         if shutil.which(tool) is None:
             raise ValueError(f"missing build dependency: {tool}; see docs/native.md")
@@ -345,7 +367,14 @@ def parse_args(argv=None):
     parser.add_argument(
         "--out", type=Path, help="output directory (default build/native/<commit>-<env>)"
     )
-    parser.add_argument("--cache", type=Path, default=ROOT / "build/native/cache")
+    parser.add_argument(
+        "--cache",
+        type=Path,
+        default=Path(os.environ.get("FLAPSIM_NATIVE_CACHE", ROOT / "build/native/cache")),
+    )
+    parser.add_argument(
+        "--export-libraries", type=Path, help="only copy the pinned libraries to DIR and exit"
+    )
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     parser.add_argument("--sanitize", action="store_true", help="address/undefined sanitizers")
     parser.add_argument("--test", action="store_true", help="also build and run the shim tests")

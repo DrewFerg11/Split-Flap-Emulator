@@ -23,8 +23,11 @@ coverage QEMU mode cannot reach.
 - Phase 2 ([#30](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/30)): host sockets, the
   HTTP transport and `flapsim run --mode native` ([runner](runner.md#native-mode)); the golden
   smoke scenarios run natively in CI under `baselines/v1.4.1-native.yaml`.
-- Phase 3: a supervised Mosquitto broker with MQTT scenario steps, a controlled wall clock and
-  seeded settings ([scenarios](scenarios.md#native-only-setup-and-mqtt-steps)).
+- Phase 3 ([#31](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/31)): a supervised
+  Mosquitto broker with MQTT scenario steps, a controlled wall clock and seeded settings
+  ([scenarios](scenarios.md#native-only-setup-and-mqtt-steps)).
+- Phase 4: native mode in the container image ([container](container.md#native-mode-in-the-image))
+  and a non-gating firmware CI job for Split-Flap Display ([firmware CI](firmware-ci.md)).
 
 ## Build
 
@@ -37,7 +40,13 @@ python native/build.py --firmware-src git:main  # any tag, branch or full commit
 python native/build.py --firmware-src ../Split-Flap-Display  # a local checkout (firmware PRs)
 python native/build.py --test                   # also build and run the shim tests
 python native/build.py --sanitize --test        # address + undefined-behaviour sanitizers
+python native/build.py --export-libraries DIR   # copy the pinned libraries for offline builds
 ```
+
+`FLAPSIM_NATIVE_CACHE` relocates the source cache. An exported library is used offline when
+its `.flapsim-pin` file names the pinned commit. The runner's `--firmware-src` uses
+`FLAPSIM_NATIVE_ROOT` (default: this checkout) and builds into `<out>/native-build`, logging to
+`<out>/native-build.log`.
 
 The output directory (default `build/native/<commit>-<env>`) holds `bin/flapsim-native`,
 `littlefs/` and `build-info.json`. The firmware's compile-time options come from its own
