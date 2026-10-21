@@ -132,6 +132,7 @@ class ControlServer:
         self.listener = socket.socket()
         self.thread = None
         try:
+            self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.listener.bind(("127.0.0.1", port))
             self.listener.listen(16)
             self.port = self.listener.getsockname()[1]

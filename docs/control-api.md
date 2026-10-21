@@ -92,6 +92,6 @@ the existing golden scenarios keep their independent serial/version assertions.
 Local verification against the checksum-pinned v1.4.1 image passed on both
 layouts: 100.971 seconds for eight modules and 127.450 seconds for sixteen.
 Both preserved external state across the private reset and ended centered with
-zero stalls/anomalies. All 372 native/Python regression tests passed, together
+zero stalls/anomalies. All 373 native/Python regression tests passed, together
 with Python lint/format, C formatting and diff checks. Exact-image and hosted
 verification run in CI; these local runs do not claim the image was tested here.

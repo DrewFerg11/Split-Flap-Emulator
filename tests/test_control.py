@@ -1,6 +1,7 @@
 """Real HTTP boundary and private channel failure semantics, without a QEMU build."""
 
 import copy
+import http.client
 import json
 import socket
 import stat
@@ -166,6 +167,35 @@ def test_control_server_startup_failure_does_not_leak_listener(tmp_path):
         ControlServer(port, tmp_path, hardware)
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", port))
+
+
+def test_explicit_port_can_be_reused_after_server_closes_a_keepalive_connection(tmp_path):
+    hardware, _ = recorded_snapshot()
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    server = ControlServer(0, first, hardware)
+    port = server.port
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
+    try:
+        connection.request(
+            "GET", "/api/emu/state", headers={"Authorization": "Bearer " + server.token}
+        )
+        response = connection.getresponse()
+        assert response.status == 503
+        response.read()
+        # The server sends FIN first, while the client keeps its connection open.
+        # Closing the client afterwards leaves the server port in TIME_WAIT.
+        server.close()
+        assert connection.sock.recv(1) == b""
+    finally:
+        connection.close()
+        server.close()
+    replacement = ControlServer(port, second, hardware)
+    try:
+        assert request(replacement)[0] == 503
+    finally:
+        replacement.close()
 
 
 @pytest.mark.parametrize("port", [-1, 65536, True, 1.0])
