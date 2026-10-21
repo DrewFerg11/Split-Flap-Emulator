@@ -32,7 +32,14 @@ hardware = {name: load_hardware(name) for name in ['esp32-8-single','esp32-16-du
 assert len(hardware['esp32-8-single']['modules']) == 8
 assert len(hardware['esp32-16-dual']['modules']) == 16
 scenarios = {name: resolve_resource('scenarios',name).read_text() for name in
-             ['release-smoke-8','release-smoke-16','homing-random','version-check']}
+             ['release-smoke-8','release-smoke-16','homing-random','version-check',
+              'mqtt-native-8']}
+native = pathlib.Path('/opt/flapsim/native')
+assert (native/'src/native/build.py').is_file() and (native/'src/model/resume.c').is_file()
+pins = sorted(p.read_text().strip() for p in native.glob('cache/*/.flapsim-pin'))
+libraries = json.loads((native/'src/native/libraries.json').read_text())['libraries']
+assert pins == sorted(l['commit'] for l in libraries), pins
+assert not list(native.rglob('SplitFlapDisplay.ino')), 'no firmware source may be shipped'
 sources = pathlib.Path('/usr/share/doc/flapsim/sources')
 for name, member in [('qemu.tar.xz','./configure'),('flapsim.tar.xz','./qemu/build.py')]:
     with tarfile.open(sources/name) as archive:
@@ -232,6 +239,63 @@ class ImageVerifier:
             )
             return self.check_result(name, case, completed.returncode, expected)
 
+    def execute_native(self, name, hardware, scenario):
+        """Build the mounted golden source inside the image (no network) and run a scenario."""
+        source = self.args.native_source.resolve(strict=True)
+        command = [
+            "run",
+            "--mode",
+            "native",
+            "--firmware-src",
+            "/firmware-src",
+            "--hardware",
+            hardware,
+            "--scenario",
+            scenario,
+            "--var",
+            f"FIRMWARE_VERSION={GOLDEN['tag']}",
+            "--known-issues",
+            "/known-issues.yaml",
+            "--out",
+            "/out/run",
+        ]
+        mounts = [
+            (source, "/firmware-src"),
+            (ROOT / "baselines/v1.4.1-native.yaml", "/known-issues.yaml"),
+        ]
+        with self.container(name, command, mounts) as (container_id, case):
+            completed = subprocess.run(
+                self.docker + ["start", "--attach", container_id], check=False, timeout=1200
+            )
+            manifest = json.loads((case / "run/run.json").read_text())
+            record = {
+                "case": name,
+                "exit_code": completed.returncode,
+                "expected_exit": 0,
+                "wall_seconds": manifest.get("wall_seconds"),
+                "error": manifest.get("error"),
+                "status": manifest.get("status"),
+                "known_issues": manifest.get("known_issues"),
+            }
+            self.cases.append(record)
+            firmware = manifest.get("firmware", {})
+            if (
+                completed.returncode != 0
+                or manifest.get("mode") != "native"
+                or manifest.get("status") not in {"passed", "passed_with_known_issues"}
+                or manifest.get("source_unchanged") is not True
+                or firmware.get("commit") != GOLDEN["source_commit"]
+                or firmware.get("dirty") is not False
+                or firmware.get("version") != GOLDEN["tag"]
+                or not isinstance(manifest.get("native_returncode"), int)
+                or not all(isinstance(a.get("returncode"), int) for a in manifest["attempts"])
+            ):
+                raise RuntimeError(f"native container {name} failed verification: {record}")
+            for artifact in ["native-build.log", "serial.log", "timeline.jsonl", "report.md"]:
+                if not (case / "run" / artifact).is_file():
+                    raise RuntimeError(f"native container {name} missing {artifact}")
+            return manifest
+
     def stop_case(self):
         with self.container("stop", self.command("esp32-8-single", "boot", timeout=60)) as (
             container_id,
@@ -276,6 +340,11 @@ def verify(args):
         if args.mode in {"all", "lifecycle"}:
             verifier.execute("timeout", "esp32-8-single", "boot", expected=4, timeout=3)
             verifier.stop_case()
+        if args.mode == "native":
+            if args.native_source is None:
+                raise ValueError("--mode native requires --native-source (a golden checkout)")
+            verifier.execute_native("native-smoke-8", "esp32-8-single", "release-smoke-8")
+            verifier.execute_native("native-mqtt-8", "esp32-8-single", "mqtt-native-8")
         if args.mode == "reject":
             verifier.execute("wrong-version", "esp32-8-single", "version-check", wrong_version=True)
         elif args.mode == "all":
@@ -300,7 +369,14 @@ def main():
     parser.add_argument("--firmware", type=Path, default=ROOT / "firmware" / GOLDEN["asset"])
     parser.add_argument("--docker-host")
     parser.add_argument("--expected-source")
-    parser.add_argument("--mode", choices=["all", "smoke", "lifecycle", "reject"], default="all")
+    parser.add_argument(
+        "--mode", choices=["all", "smoke", "lifecycle", "reject", "native"], default="all"
+    )
+    parser.add_argument(
+        "--native-source",
+        type=Path,
+        help="native mode: a clean checkout of the golden firmware tag, mounted read-only",
+    )
     parser.add_argument(
         "--timeout-scale",
         type=float,

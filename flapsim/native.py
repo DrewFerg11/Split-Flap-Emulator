@@ -7,6 +7,7 @@ import re
 import shutil
 import socket
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,23 +25,29 @@ def check_speed(value):
     return float(value)
 
 
-def build_from_source(spec, *, jobs=None):
-    """Build `golden`, `git:<ref>` or a local checkout with native/build.py (source tree only)."""
-    script = ROOT / "native/build.py"
-    if not script.is_file():
-        raise ValueError("--firmware-src needs a source checkout; pass a prebuilt --native-build")
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    from native import build
+def source_root():
+    """native/ and model/ sources: the checkout, or FLAPSIM_NATIVE_ROOT in the container."""
+    return Path(os.environ.get("FLAPSIM_NATIVE_ROOT", ROOT))
 
-    arguments = ["--firmware-src", spec]
+
+def build_from_source(spec, out, log, *, jobs=None, timeout=1800):
+    """Build `golden`, `git:<ref>` or a local checkout into `out` with native/build.py."""
+    script = source_root() / "native/build.py"
+    if not script.is_file():
+        raise ValueError("--firmware-src needs the native sources; pass a prebuilt --native-build")
+    command = [sys.executable, str(script), "--firmware-src", spec, "--out", str(out)]
     if jobs:
-        arguments += ["--jobs", str(jobs)]
-    parser_args = build.parse_args(arguments)
-    try:
-        return build.build(parser_args)
-    except Exception as error:
-        raise ValueError(f"native build failed: {error}") from error
+        command += ["--jobs", str(jobs)]
+    with open(log, "w") as output:
+        try:
+            completed = subprocess.run(
+                command, stdout=output, stderr=subprocess.STDOUT, timeout=timeout, check=False
+            )
+        except subprocess.TimeoutExpired as error:
+            raise ValueError(f"native build exceeded {timeout} s; see {log}") from error
+    if completed.returncode != 0:
+        raise ValueError(f"native build failed ({completed.returncode}); see {log}")
+    return out
 
 
 def load_build(path):

@@ -324,7 +324,12 @@ def run_native(args, *, executor=None, interrupt=None):
     """Native mode: the firmware source build runs as a process against the host shims."""
     started = time.monotonic()
     if args.native_build is None:
-        args.native_build = native.build_from_source(args.firmware_src)
+        # Built inside the fresh output directory, so its log and inputs are part of the evidence.
+        out = claim_output(args.out)
+        args.native_build = native.build_from_source(
+            args.firmware_src, out / "native-build", out / "native-build.log"
+        )
+        started = time.monotonic()
     build = native.load_build(args.native_build)
     firmware = build["info"]["firmware"]
     speed = native.check_speed(args.speed if args.speed is not None else native.DEFAULT_SPEED)
@@ -349,7 +354,8 @@ def run_native(args, *, executor=None, interrupt=None):
     if interrupt and (signum := interrupt()) is not None:
         raise InterruptedRun(signum)
     enable_subreaper()
-    out = claim_output(args.out)
+    if args.firmware_src is None:
+        out = claim_output(args.out)
     manifest = {
         "schema_version": 1,
         "mode": "native",
