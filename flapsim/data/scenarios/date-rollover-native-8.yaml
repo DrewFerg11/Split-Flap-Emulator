@@ -1,0 +1,17 @@
+version: 1
+name: date-rollover-native-8
+timeout: 300
+# Date mode across midnight on New Year's Eve in UTC: day, month and year all roll over.
+modes: [native]
+clock: {start: "2026-12-31T23:58:50Z", sync: boot}
+nvs:
+  config:
+    mode: 2
+    dateFormat: "{dd}{mm}{yy}"
+    wire1Addresses: ""
+    wire1Offsets: ""
+steps:
+  - wait_display: {text: " 311226 "}
+    timeout: 120
+  - wait_display: {text: " 010127 "}
+    timeout: 150

@@ -11,7 +11,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from flapsim import native
+from flapsim import mqtt, native
 from flapsim.baseline import load_known_issues
 from flapsim.control import channel
 from flapsim.executor import (
@@ -333,6 +333,7 @@ def run_native(args, *, executor=None, interrupt=None):
     if getattr(args, "known_issues", None) is not None:
         known_issues = load_known_issues(args.known_issues)
         known_issues.check_source(firmware.get("commit"), firmware.get("dirty"))
+    broker_port = choose_port()
     executor = executor or load_executor(
         args.scenario,
         hardware,
@@ -340,7 +341,9 @@ def run_native(args, *, executor=None, interrupt=None):
         firmware_source=firmware,
         known_issues=known_issues,
         mode="native",
+        implicit_variables={"MQTT_HOST": "127.0.0.1", "MQTT_PORT": broker_port},
     )
+    setup = getattr(executor, "native_setup", None) or {"services": [], "nvs": {}, "clock": None}
     timeout = positive_timeout(args.timeout if args.timeout is not None else executor.timeout)
     emulator = emulator_provenance()
     if interrupt and (signum := interrupt()) is not None:
@@ -362,16 +365,28 @@ def run_native(args, *, executor=None, interrupt=None):
         },
         "hardware": hardware,
         "seed": hardware["seed"],
-        "native": {**build["info"], "build_dir": str(build["path"]), "speed": speed},
+        "native": {
+            **build["info"],
+            "build_dir": str(build["path"]),
+            "speed": speed,
+            "setup": setup,
+        },
         "emulator": emulator,
         "scenario": executor.document,
         "timeout_seconds": timeout,
         "attempts": [],
     }
     process = None
+    broker = observer = None
     exit_code = EXIT_RUNTIME
     try:
         deadline = started + timeout
+        services = {}
+        if "mqtt" in setup["services"]:
+            broker = mqtt.Broker(out, broker_port)
+            manifest["mqtt"] = {"port": broker_port, "command": broker.command}
+            broker.wait_ready(RunContext(out, hardware, "", broker.process, deadline, interrupt))
+            observer = services["mqtt"] = mqtt.Observer(broker_port)
         with native.listener() as server:
             port = server.getsockname()[1]
             config = native.prepare(
@@ -382,6 +397,7 @@ def run_native(args, *, executor=None, interrupt=None):
                 speed=speed,
                 http_fd=server.fileno(),
                 seed=hardware["seed"],
+                setup=setup,
             )
             command = [str(build["binary"]), "--config", str(config)]
             manifest.update(command=command, endpoint=f"http://127.0.0.1:{port}", port=port)
@@ -402,7 +418,7 @@ def run_native(args, *, executor=None, interrupt=None):
                 )
                 attempt["pid"] = process.pid
                 context = RunContext(
-                    out, hardware, manifest["endpoint"], process, deadline, interrupt
+                    out, hardware, manifest["endpoint"], process, deadline, interrupt, services
                 )
                 try:
                     while not native.ready(out):
@@ -425,6 +441,20 @@ def run_native(args, *, executor=None, interrupt=None):
         if process is not None:
             try:
                 stop_group(process)
+            except Exception as error:
+                manifest["cleanup_error"] = str(error)
+                exit_code = EXIT_RUNTIME
+        if observer is not None:
+            observer.close()
+            messages = observer.snapshot()
+            with (out / "mqtt.jsonl").open("w") as evidence:
+                for message in messages:
+                    record = {k: v for k, v in message.items() if k != "monotonic"}
+                    evidence.write(json.dumps(record) + "\n")
+            manifest["mqtt"]["messages"] = len(messages)
+        if broker is not None:
+            try:
+                manifest["mqtt"]["returncode"] = broker.stop()
             except Exception as error:
                 manifest["cleanup_error"] = str(error)
                 exit_code = EXIT_RUNTIME

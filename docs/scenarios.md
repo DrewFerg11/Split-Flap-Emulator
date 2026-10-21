@@ -81,6 +81,30 @@ The manifest (`status`, `known_issues`), `report.md`, JUnit (`skipped` with the
 issue link) and the Actions job summary all show the baseline prominently.
 Remove entries as their issues are fixed, and delete the file when it is empty.
 
+### Native-only setup and MQTT steps
+
+Native scenarios that declare `modes: [native]` may also prepare the device:
+
+```yaml
+modes: [native]
+services: [mqtt]                 # a supervised local Mosquitto and an observer subscribed to '#'
+clock: {start: "2027-03-28T00:57:40Z", sync: boot}   # fixed wall clock (UTC); sync: boot|station
+nvs:                             # seeded settings store: str -> str, int -> i32, float -> blob
+  config:
+    ssid: flapsim-lab
+    password: lab-password
+    mqtt_server: ${MQTT_HOST}    # provided by the runner, as is ${MQTT_PORT}
+    mqtt_port: ${MQTT_PORT}
+```
+
+Seeding NVS starts from a provisioned device without going through `POST /settings`, which
+the golden firmware's SFD#54 race would usually lose. `mqtt_publish: {topic, payload, retain?}`
+publishes a command, and `wait_mqtt: {topic, payload? | json?, retained?}` waits for the next
+matching message after the previous match (`json` is a subset match); every message is kept in
+`mqtt.jsonl`. Bundled examples: `mqtt-native-8` (Home Assistant discovery, availability,
+inbound `set` → drums, state publishing), `clock-dst-native-8` (Central European Time across the
+spring-forward hour) and `date-rollover-native-8` (day, month and year at New Year).
+
 ### Native-mode baseline
 
 `baselines/v1.4.1-native.yaml` is the native-mode counterpart for the emulator's own native

@@ -770,6 +770,15 @@ def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context
             '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}\n',
             1,
         ),
+        # Raw serial tail from CI39680498356, golden smoke-16: the head ends inside "begin", and
+        # the tail resumes at "()" after the request body.
+        (
+            "[ 38100][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
+            "[ 38100][E][Preferences.cpp:50] beginReceived text update request\n"
+            '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}\n'
+            "(): nvs_open failed: NOT_FOUND\n",
+            2,
+        ),
     ],
 )
 def test_head_and_late_tail_splices_are_golden_only(context, raw, spliced):
@@ -794,8 +803,8 @@ def test_every_split_point_of_the_diagnostic_is_recognised():
     for cut in range(head_start, len(DIAGNOSTIC) + 1):
         for other in (body, "Received settings update request"):
             assert known.tolerated_serial(DIAGNOSTIC[:cut] + other), (cut, other)
-    # Tails resume anywhere from the timestamp through the "0" of ":50".
-    for cut in range(1, DIAGNOSTIC.index("] begin")):
+    # Tails resume anywhere up to "nvs_open", which only Preferences.cpp:50 logs.
+    for cut in range(1, DIAGNOSTIC.index("nvs_open") + 1):
         assert known.tolerated_serial(DIAGNOSTIC[cut:]), cut
         assert known.tolerated_serial(body + DIAGNOSTIC[cut:]), cut
 
@@ -811,8 +820,9 @@ def test_every_split_point_of_the_diagnostic_is_recognised():
         "[ 9][E][Preferences.cpp:483] putString(): x{}",
         "[ 9][E][Preferences.cpReceived text update request panic",
         "[ 9][E][Wire.cpp:1]{}",
-        " begin(): nvs_open failed: NOT_FOUND",
-        "p:51] begin(): nvs_open failed: NOT_FOUND",
+        "x failed: nvs_open failed: NOT_FOUND",
+        "Exception (): nvs_open failed: NOT_FOUND",
+        "Wifi failed: NOT_FOUND",
         "Exception p:50] begin(): nvs_open failed: NOT_FOUND",
     ],
 )

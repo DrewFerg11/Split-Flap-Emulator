@@ -1,0 +1,23 @@
+version: 1
+name: clock-dst-native-8
+timeout: 300
+# Time mode under the firmware's own Central European Time entry, across the 2027 spring-forward
+# transition (01:00 UTC on 2027-03-28: local 01:59 is followed by 03:00). Native only.
+modes: [native]
+clock: {start: "2027-03-28T00:57:40Z", sync: boot}
+nvs:
+  config:
+    mode: 3
+    timeFormat: "{HH}{MM}"
+    timezone: Central European Time (GMT+1)
+    wire1Addresses: ""
+    wire1Offsets: ""
+steps:
+  - wait_serial: "POSIX Timezone set to: CET-1CEST,M3.5.0/2,M10.5.0/3"
+    timeout: 30
+  - wait_display: {text: "  0158  "}
+    timeout: 120
+  - wait_display: {text: "  0159  "}
+    timeout: 90
+  - wait_display: {text: "  0300  "}
+    timeout: 90

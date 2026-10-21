@@ -17,6 +17,8 @@ ACTIONS = {
     "http",
     "assert_no_errors",
     "sleep_guest",
+    "mqtt_publish",
+    "wait_mqtt",
 }
 
 

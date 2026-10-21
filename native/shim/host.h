@@ -2,6 +2,7 @@
 #pragma once
 #include "esp_system.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -17,6 +18,15 @@ struct WiFiConfig {
     std::string ip = "127.0.0.1";
 };
 
+/* Wall clock (time()): "host" follows the host's real time once synchronized; "fixed" starts at
+ * `start` epoch seconds when the run begins and advances with guest time. Until synchronized it
+ * counts from power-on, like an ESP32 RTC before SNTP; sync is at station association (after
+ * configTzTime/configTime started SNTP) or immediately at boot. */
+struct ClockConfig {
+    bool fixed = false, sync_at_boot = false;
+    int64_t start = 0;
+};
+
 struct Config {
     std::string model_config, serial_log, serial_input, nvs, littlefs;
     double speed = 1.0;
@@ -24,9 +34,12 @@ struct Config {
     int http_fd = -1;
     uint32_t random_seed = 1;
     WiFiConfig wifi;
+    ClockConfig clock;
 };
 
 const Config &config();
+/* Latched once the wall clock is synchronized; survives emulated software resets. */
+std::atomic<bool> &rtc_clock_set();
 unsigned boot_count();
 esp_reset_reason_t reset_reason();
 

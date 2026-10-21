@@ -18,11 +18,13 @@ coverage QEMU mode cannot reach.
 
 ## Status
 
-Phase 1 ([#27](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/27)): the build, the shims
-for everything the firmware touches without a network and a bounded verifier. Phase 2 adds host
-sockets (`WiFiClient`), the HTTP transport and `flapsim run --mode native`
-([runner](runner.md#native-mode)); the golden smoke scenarios run natively in CI under
-`baselines/v1.4.1-native.yaml`. MQTT and a controlled clock follow.
+- Phase 1 ([#27](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/27)): the build, the
+  shims for everything the firmware touches without a network, and a bounded verifier.
+- Phase 2 ([#30](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/30)): host sockets, the
+  HTTP transport and `flapsim run --mode native` ([runner](runner.md#native-mode)); the golden
+  smoke scenarios run natively in CI under `baselines/v1.4.1-native.yaml`.
+- Phase 3: a supervised Mosquitto broker with MQTT scenario steps, a controlled wall clock and
+  seeded settings ([scenarios](scenarios.md#native-only-setup-and-mqtt-steps)).
 
 ## Build
 
@@ -77,7 +79,8 @@ The binary takes one JSON configuration:
   "speed": 5,
   "random_seed": 1,
   "wifi": {"station": "connect", "connect_delay_ms": 1500, "ip": "127.0.0.1"},
-  "http_fd": 3
+  "http_fd": 3,
+  "clock": {"mode": "fixed", "start": 1806195460, "sync": "boot"}
 }
 ```
 
@@ -143,6 +146,13 @@ connected boot path homing to `OK` before blanking.
   both modes. Station mode associates with any SSID after `connect_delay_ms`, unless `station`
   is `fail`, and then reports `wifi.ip`. Scanning returns one network, `flapsim`. mDNS and OTA
   accept their configuration but do nothing yet.
+- **Wall clock.** The firmware's `time()` is interposed (host code keeps the real clock). Like an
+  ESP32 before SNTP it counts from power-on (1970) until `configTzTime`/`configTime` has started
+  SNTP *and* the station has joined a network, then follows the host's real time
+  (`clock.mode: host`) or a fixed start advancing with guest time (`clock.mode: fixed`, which
+  scenarios use for deterministic midnight/DST tests; `sync: boot` sets it immediately). The
+  synchronized RTC survives emulated software resets. Timezones are applied by the host C library
+  from the firmware's POSIX strings.
 - **Randomness** (`random()`, `esp_random()`) is a deterministic xorshift seeded from
   `random_seed` and the boot number, not a hardware RNG.
 
@@ -157,6 +167,4 @@ connected boot path homing to `OK` before blanking.
   reproduce more or less often than on hardware or in QEMU.
 - `unsigned long` is 64-bit on the host, so `millis()`/`micros()` never wrap; the device's
   32-bit `micros()` wraps after about 71 minutes.
-- Wall time (`time()`, `getLocalTime`) follows the host clock and is not scaled; SNTP and a
-  controlled clock arrive with the date/time phase.
 - The shims must keep up with the firmware's API usage. A missing API fails the build loudly.

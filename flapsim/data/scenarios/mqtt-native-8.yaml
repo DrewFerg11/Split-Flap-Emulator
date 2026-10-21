@@ -1,0 +1,42 @@
+version: 1
+name: mqtt-native-8
+timeout: 240
+# A provisioned eight-module display joins Wi-Fi and a local broker: Home Assistant discovery,
+# availability, inbound set -> drums, and state publishing. Native only (QEMU has no WPA2 client).
+modes: [native]
+services: [mqtt]
+nvs:
+  config:
+    ssid: flapsim-lab
+    password: lab-password
+    mqtt_server: ${MQTT_HOST}
+    mqtt_port: ${MQTT_PORT}
+    wire1Addresses: ""
+    wire1Offsets: ""
+steps:
+  - wait_serial: "Connected to Wi-Fi!"
+    timeout: 60
+  - wait_serial: "[MQTT] Connected to broker"
+    timeout: 30
+  - wait_mqtt: {topic: splitflap/splitflap/availability, payload: online}
+  - wait_mqtt:
+      topic: homeassistant/text/splitflap_text_splitflap/config
+      json:
+        command_topic: splitflap/splitflap/set
+        availability_topic: splitflap/splitflap/availability
+        max: 8
+        device: {identifiers: [splitflap_splitflap], sw_version: "${FIRMWARE_VERSION}"}
+  - wait_mqtt:
+      topic: homeassistant/sensor/splitflap_sensor_splitflap/config
+      json: {state_topic: splitflap/splitflap/state, entity_category: diagnostic}
+  - wait_display: {text: "   OK   ", history: true}
+    timeout: 120
+  - wait_mqtt: {topic: splitflap/splitflap/state, payload: "   OK   "}
+  - wait_mqtt: {topic: splitflap/splitflap/state, payload: "        "}
+    timeout: 60
+  - mqtt_publish: {topic: splitflap/splitflap/set, payload: HELLO}
+  - wait_mqtt: {topic: splitflap/splitflap/state, payload: "HELLO   "}
+    timeout: 60
+  - wait_display: {text: "HELLO   "}
+    timeout: 60
+  - assert_no_errors: {}
