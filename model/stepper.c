@@ -33,10 +33,10 @@ void fs_stepper_write(FsModule *module, uint16_t output) {
     if (module->phase >= 0) {
         int delta = (phase - module->phase + 4) % 4;
         if (delta == 1) {
-            module->angle = (module->angle + 1) % fs.steps;
+            module->angle = (module->angle + 1) % module->steps;
             module->counters.forward++;
         } else if (delta == 3) {
-            module->angle = (module->angle + fs.steps - 1) % fs.steps;
+            module->angle = (module->angle + module->steps - 1) % module->steps;
             module->counters.backward++;
         } else if (delta == 2) {
             module->counters.stalls++;

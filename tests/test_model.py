@@ -66,6 +66,7 @@ class Model:
         magnet=730,
         window=40,
         flaps=" ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+        flap_offset=0,
     ):
         self.lib, self.out, self.now = library, out, 0
         modules = [
@@ -81,6 +82,7 @@ class Model:
                 "magnet_position": magnet,
                 "sensor_window": window,
                 "flaps": flaps,
+                "flap_offset": flap_offset,
             },
             "start_angles": list(angles),
         }
@@ -346,6 +348,7 @@ def test_settlement_reader_rejects_previous_movement(make_model):
         "energized",
         "wrong_bus",
         "bad_char",
+        "wrong_flap",
         "bad_angle",
         "bad_hall",
         "bad_latch",
@@ -370,6 +373,10 @@ def test_settlement_reader_rejects_incomplete_or_invalid_data(make_model, mutati
         module["bus"] = False
     elif mutation == "bad_char":
         module["char"] = "XX"
+    elif mutation == "wrong_flap":
+        module["char"] = "X"
+        state["text"] = "X"
+        state["rows"] = ["X", ""]
     elif mutation == "bad_angle":
         module["angle"] = -1
     elif mutation == "bad_hall":
@@ -406,3 +413,101 @@ def test_activity_race_during_state_read_is_not_accepted(make_model, monkeypatch
 
     monkeypatch.setattr(Path, "read_text", changed_read)
     assert read_settlement(model.out, hardware) is None
+
+
+@pytest.mark.parametrize("angle,position,error", [(0, 3.5, -0.5), (2, 0, 0), (3, 0.25, 0.25)])
+def test_fractional_flaps_include_offset_ties_and_wrap(make_model, angle, position, error):
+    model = make_model(steps=16, magnet=0, window=1, flaps=" ABC", angles=(angle,), flap_offset=2)
+    module = model.state()["modules"][0]
+    assert module["flap_position"] == position
+    assert module["flap_error"] == error
+    assert model.timeline()[0]["modules"][0]["flap_position"] == position
+    assert read_settlement(model.out, json.loads(model.config.read_text()))
+
+
+def test_each_module_uses_its_own_rotation_and_magnet(make_model):
+    model = make_model(
+        steps={"mean": 16, "spread": 2},
+        magnet={"mean": 2, "spread": 2},
+        flaps=" AB",
+        window=1,
+        angles=(0, 0),
+        buses=(0, 1),
+    )
+    config = json.loads(model.config.read_text())
+    assert config["modules"][0]["steps_per_rotation"] != config["modules"][1]["steps_per_rotation"]
+    for i, module in enumerate(config["modules"]):
+        # One true revolution wraps exactly even though the two modules differ.
+        bus, addr = module["bus"], module["addr"]
+        model.write(COILS[0], bus=bus, addr=addr)
+        for step in range(1, module["steps_per_rotation"] + 1):
+            model.write(COILS[step % 4], bus=bus, addr=addr)
+            assert bool(model.read(bus=bus, addr=addr) & 0x8000) == (
+                step % module["steps_per_rotation"] == module["magnet_position"]
+            )
+        model.write(OFF, bus=bus, addr=addr)
+        assert model.state()["modules"][i]["angle"] == 0
+
+
+@pytest.mark.parametrize(
+    "key,value", [("flap_position", 1), ("flap_error", float("nan")), ("flap_error", True)]
+)
+def test_settlement_rejects_forged_fractional_position(make_model, key, value):
+    model = make_model()
+    state = model.state()
+    state["modules"][0][key] = value
+    (model.out / "state.json").write_text(json.dumps(state))
+    with pytest.raises(ValueError, match=key):
+        read_settlement(model.out, json.loads(model.config.read_text()))
+
+
+def test_legacy_v1_normalized_geometry_still_loads(make_model):
+    model = make_model(angles=(730,))
+    config = json.loads(model.config.read_text())
+    for module in config["modules"]:
+        for key in ["steps_per_rotation", "magnet_position", "flap_offset"]:
+            del module[key]
+    model.config.write_text(json.dumps(config))
+    assert model.lib.fs_model_init(str(model.config).encode()) == 0
+    assert model.state()["modules"][0]["hall"] is True
+    assert read_settlement(model.out, config)
+
+
+def test_mixed_v1_config_inherits_global_flap_offset_like_python_reader(make_model):
+    model = make_model(angles=(730,), flap_offset=3)
+    config = json.loads(model.config.read_text())
+    del config["modules"][0]["flap_offset"]
+    model.config.write_text(json.dumps(config))
+    assert model.lib.fs_model_init(str(model.config).encode()) == 0
+    state = read_settlement(model.out, config)
+    assert state["modules"][0]["flap_position"] == pytest.approx((730 - 3) * 37 / 2048)
+
+
+def test_firmware_assumed_rotation_does_not_reset_physical_drum(make_model):
+    model = make_model(steps=2038)
+    model.write(COILS[0])
+    for step in range(1, 2049):
+        model.write(COILS[step % 4])
+    model.write(OFF)
+    module = model.state()["modules"][0]
+    assert module["angle"] == 10
+    assert module["counters"]["forward"] == 2048
+    assert module["flap_error"] == pytest.approx(10 * 37 / 2038)
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("steps_per_rotation", 0),
+        ("magnet_position", 2048),
+        ("flap_offset", -1),
+        ("steps_per_rotation", True),
+    ],
+)
+def test_bad_normalized_module_geometry_fails(make_model, key, value):
+    model = make_model()
+    config = json.loads(model.config.read_text())
+    config["modules"][0][key] = value
+    model.config.write_text(json.dumps(config))
+    assert model.lib.fs_model_init(str(model.config).encode()) != 0
+    assert model.lib.fs_model_error()

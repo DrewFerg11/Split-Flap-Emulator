@@ -125,3 +125,61 @@ def test_seed_override_does_not_hide_invalid_config(document):
     document["start_angles"] = "invalid"
     with pytest.raises(ValueError, match="start_angles"):
         normalize_hardware(document, seed=7)
+
+
+def test_realistic_layouts_have_reproducible_independent_mechanics():
+    for name, count in [("esp32-8-single-realistic", 8), ("esp32-16-dual-realistic", 16)]:
+        hardware = load_hardware(name)
+        assert hardware == load_hardware(name)
+        assert hardware != load_hardware(name, seed=19)
+        assert len(hardware["modules"]) == count
+        for key, lower, upper in [
+            ("steps_per_rotation", 2036, 2040),
+            ("magnet_position", 728, 732),
+            ("flap_offset", 0, 4),
+        ]:
+            values = [m[key] for m in hardware["modules"]]
+            assert all(lower <= v <= upper for v in values)
+            assert len(set(values)) > 1
+        assert all(0 <= m["angle"] < m["steps_per_rotation"] for m in hardware["modules"])
+
+
+def test_mechanics_streams_do_not_change_starts_or_each_other(document):
+    ideal = normalize_hardware(document)
+    document["drum"]["magnet_position"] = {"mean": 730, "spread": 2}
+    varied = normalize_hardware(document)
+    for a, b in zip(ideal["modules"], varied["modules"], strict=True):
+        assert a["angle"] == b["angle"]
+        assert a["steps_per_rotation"] == b["steps_per_rotation"]
+        assert a["flap_offset"] == b["flap_offset"]
+    document["start_angles"] = "random"
+    random = normalize_hardware(document)
+    document["start_angles"] = {"seed": random["seed"]}
+    assert normalize_hardware(document) == random
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("steps_per_rotation", {"mean": 2038, "spread": -1}),
+        ("steps_per_rotation", {"mean": 2038, "spread": True}),
+        ("steps_per_rotation", {"mean": 4, "spread": 1}),
+        ("steps_per_rotation", {"mean": 1_000_000, "spread": 1}),
+        ("steps_per_rotation", {"mean": 2038}),
+        ("magnet_position", {"mean": 0, "spread": 1}),
+        ("magnet_position", {"mean": 2047, "spread": 1}),
+        ("flap_offset", -1),
+        ("flap_offset", {"mean": 2048, "spread": 0}),
+    ],
+)
+def test_invalid_variance_rejected(document, key, value):
+    document["drum"][key] = value
+    with pytest.raises(ValueError):
+        normalize_hardware(document)
+
+
+def test_variance_checks_smallest_possible_rotation(document):
+    document["drum"]["steps_per_rotation"] = {"mean": 100, "spread": 10}
+    document["drum"]["magnet_position"] = 90
+    with pytest.raises(ValueError, match="magnet_position"):
+        normalize_hardware(document)

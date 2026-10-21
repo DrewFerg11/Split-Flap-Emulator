@@ -16,6 +16,22 @@ runs use `homing-random.yaml`, `esp32-8-single`, distinct output directories and
 `--seed 7`, `--seed 19`, `--seed 42`. Every manifest records the seed and actual
 starting angles. Each execution has its own flash, process, port and evidence.
 
+For realistic gearbox and module variance, repeat with
+`esp32-8-single-realistic` or `esp32-16-dual-realistic`. These presets leave the
+firmware's assumed 2048 steps unchanged. `wait_display` additionally requires
+each named flap to land within one quarter pitch of its center; `.` ignores
+that module's character and alignment. Stopped coils alone do not satisfy this
+check. State, timeline and replay expose fractional flap position and signed
+landing error. See [hardware-model.md](hardware-model.md) for units, seed
+resolution, and the model-policy limitation of the acceptance band. Do not
+adjust mechanics or relax the assertion to hide a golden-image landing error;
+retain the report and triage it against the physical model and firmware.
+An observed matching-but-misaligned landing remains a real failure even when
+that step has a golden lost-command timeout allowance; that allowance cannot
+turn the landing error into a known-issue pass.
+That evidence persists through later nonmatching settlements in the same wait;
+an actual matching, aligned settlement can still satisfy the wait normally.
+
 ## Version policy
 
 Version matching is strict by default. Supply the intended tag with

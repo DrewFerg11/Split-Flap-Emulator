@@ -1,6 +1,7 @@
 """Read a complete settlement only when two activity reads confirm its freshness."""
 
 import json
+import math
 from pathlib import Path
 
 COUNTERS = {"forward", "backward", "stalls", "writes", "reads", "anomalies"}
@@ -57,10 +58,24 @@ def validate_state(state, hardware):
             raise ValueError("invalid model rotor phase")
         validate_counters(actual.get("counters"))
         angle, char = actual.get("angle"), actual.get("char")
-        if type(angle) is not int or not 0 <= angle < hardware["drum"]["steps_per_rotation"]:
+        steps = expected.get("steps_per_rotation", hardware["drum"]["steps_per_rotation"])
+        if type(angle) is not int or not 0 <= angle < steps:
             raise ValueError("invalid model physical position")
         if not isinstance(char, str) or len(char) != 1 or char not in hardware["drum"]["flaps"]:
             raise ValueError("invalid model displayed character")
+        position, error = flap_geometry(actual, expected, hardware["drum"])
+        flaps = hardware["drum"]["flaps"]
+        if char != flaps[math.floor(position + 0.5) % len(flaps)]:
+            raise ValueError("model character does not match physical position")
+        for key, calculated in [("flap_position", position), ("flap_error", error)]:
+            if key in actual and (
+                type(actual[key]) not in (int, float)
+                or not math.isfinite(actual[key])
+                or not math.isclose(actual[key], calculated, abs_tol=1e-9)
+            ):
+                raise ValueError(f"invalid model {key}")
+        # Derive fields for older v1 recordings as well as validating new output.
+        actual.update(flap_position=position, flap_error=error)
         text += char
         rows[expected["bus"]] += char
     if state.get("text") != text or state.get("rows") != rows:
@@ -68,6 +83,21 @@ def validate_state(state, hardware):
     if any(sum(m["counters"][k] for m in modules) != state["counters"][k] for k in COUNTERS):
         raise ValueError("model aggregate counters do not match module counters")
     return state
+
+
+def flap_geometry(module, mechanics, drum):
+    steps = mechanics.get("steps_per_rotation", drum["steps_per_rotation"])
+    offset = mechanics.get("flap_offset", drum.get("flap_offset", 0))
+    position = ((module["angle"] - offset) % steps) * len(drum["flaps"]) / steps
+    return position, position - math.floor(position + 0.5)
+
+
+def display_aligned(state, expected, tolerance=0.25):
+    """Wildcards ignore alignment; named flaps must land near their centers."""
+    return all(
+        char == "." or abs(module["flap_error"]) <= tolerance
+        for char, module in zip(expected, state["modules"], strict=True)
+    )
 
 
 def validate_identity(value):

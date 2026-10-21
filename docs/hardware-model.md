@@ -52,6 +52,21 @@ component never falls back. Load errors preserve the caller's original argument.
 and `flaps` (2–95 distinct printable ASCII characters, no more than steps).
 These values describe mechanics, independently of the firmware's own settings.
 
+The existing built-ins retain idealized 2048-step drums for comparison. Use
+`esp32-8-single-realistic` or `esp32-16-dual-realistic` to exercise the 28BYJ-48's
+approximately 63.68:1 gearbox: 2038 full steps per turn, with an inclusive ±2
+full-step variation between modules (not 4076 half-steps). These are plausible
+test parameters, not measurements of a particular display.
+
+`steps_per_rotation` and `magnet_position` also accept `{mean: N, spread: S}`.
+An optional `flap_offset` (default 0) accepts the same form and specifies the
+physical step at the center of flap zero. Each module draws an integer uniformly
+from `[mean-spread, mean+spread]`. The realistic presets vary the true magnet
+position by ±2 steps and the flap-zero offset from 0 to 4 steps. No firmware
+settings are changed. Validation checks the entire possible range: flap count,
+sensor window, magnet/offset, and explicit starts must fit the smallest possible
+rotation. Negative spreads, booleans and extra/missing distribution keys fail.
+
 Module ordering is always bus ID then ascending address, independent of YAML
 ordering. `start_angles` accepts:
 
@@ -67,12 +82,26 @@ The built-ins use seed 7; callers can override a valid configuration's starts
 through `load_hardware(..., seed=N)`. All resolved angles and the seed are
 recorded in the normalized JSON, including when the original input was random.
 
+Mechanical variation uses three independent xorshift32 streams, seeded with the
+resolved start seed XOR `0xa341316c` (rotation), `0xc8013ea4` (magnet), and
+`0xad90777d` (flap offset). Explicit start lists use seed 0 for mechanics unless
+the CLI supplies `--seed`, which overrides starts and mechanics together. Changing
+one distribution does not shift the other streams. Resolved starts are the raw
+start PRNG output modulo each module's own rotation. Modules retain bus/address
+ordering, so reordered YAML produces identical geometry.
+
 `write_model_config()` writes `model-config.json` with `schema_version: 1`,
 `chip`, `seed`, `drum`, a sorted `modules` array of `{bus, addr, angle}`, and
 explicit absolute `outputs` paths. Pass its path in the single environment
 variable `FLAPSIM_CONFIG`. `outputs` names `state`, `activity`, `timeline`, and
 optional `trace` (null when disabled). The POC's older `FLAPSIM_BUS*` and other
 environment variables are not production configuration inputs.
+
+Each normalized module additionally records its resolved `steps_per_rotation`,
+`magnet_position`, and `flap_offset`; `drum` holds the nominal means. The C model
+uses each module's own mechanics. Normalized v1 inputs without module geometry
+inherit the global rotation/magnet/flap offset (zero if the global flap offset
+is also absent), consistently in both the C model and Python reader.
 
 ## Hardware behavior
 
@@ -88,9 +117,11 @@ The first energize establishes phase without a full step. Subsequent phase
 deltas +1 and −1 move forward/backward with rotation wrapping; an opposite
 phase increments stalls. De-energizing loses phase. An invalid nonzero coil
 pattern increments an anomaly and keeps the module energized until stopped.
-Displayed flap index is `floor((angle * N * 2 + steps) / (2 * steps)) mod N`,
+With `a = (angle - flap_offset + steps) mod steps`, displayed flap index is
+`floor((a * N * 2 + steps) / (2 * steps)) mod N`,
 including ties rounding forward and wrap to the blank. Hall detection is
 `(angle - magnet_position + steps) mod steps < sensor_window`.
+Here steps, magnet position and flap offset are the module's true values.
 
 Counters per module and in aggregate are `forward`, `backward`, `stalls`,
 `writes`, `reads`, and `anomalies`. Writes/reads count valid two-byte completed
@@ -141,6 +172,21 @@ State and timeline records contain:
 
 Each module has integer `bus`, `addr`, `angle`, `latch`, `phase` (−1 or 0–3),
 one-character `char`, boolean `energized`/`hall`, and its `counters`.
+It also records `flap_position = a * N / steps` in `[0, N)` and
+`flap_error = flap_position - floor(flap_position + 0.5)` in `[-0.5, 0.5)`.
+The signed error is in flap pitches relative to the nearest flap center, not
+motor steps. These additive v1 fields describe stopped drums as well as motion;
+coils being off does not imply alignment. Readers validate them against physical
+angle and normalized geometry, deriving them for older v1 recordings.
+Replay shows the fractional position and signed error, highlighting errors
+larger than one quarter of a flap pitch. `wait_display` applies that same
+quarter-pitch acceptance band to every named character, including spaces;
+`.` wildcards ignore that module's alignment. Both live and historical waits
+apply it, including idempotent-command waits. A half-turned flap fails even when
+its nearest character matches. This conservative acceptance band is a model
+policy, not a measured mechanical release threshold; real-display calibration
+remains open (Q10/Q11 in the POC findings). Fractional errors remain in reports
+so smaller deviations are visible even when an assertion passes.
 `activity.json` contains the identity/time/settled/aggregate-counter fields;
 its counters can be newer than those in the last physical settlement.
 
@@ -161,6 +207,10 @@ Callers needing continued settlement must recheck activity and apply their
 post-command/quiet policy rather than treating the returned snapshot as a lease.
 
 ## Verification evidence
+
+See [realistic drum findings](mechanics-findings.md) for the issue #16 native
+checks, historical golden-input checksum blocker, and separately labeled exploratory
+landing errors. The historical golden results below predate that change.
 
 Core/configuration/schema and native launcher tests run without QEMU. Real
 golden checks passed locally with eight modules at `XXXXXXXX` and sixteen at

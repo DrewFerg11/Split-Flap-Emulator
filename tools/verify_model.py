@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from flapsim.hardware import load_hardware
-from flapsim.state import read_settlement
+from flapsim.state import display_aligned, read_settlement
 from tools.verify_boot import GOLDEN, checked_firmware, fetch_firmware
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +55,7 @@ def verify_existing(args):
             not state
             or state["movement_id"] <= 0
             or state["text"] != "X" * len(hardware["modules"])
+            or not display_aligned(state, state["text"])
         ):
             raise RuntimeError("missing fresh golden startup settlement")
         serial = (out / "serial.log").read_text(errors="replace")

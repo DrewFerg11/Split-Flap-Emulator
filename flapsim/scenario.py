@@ -10,7 +10,7 @@ import time
 from urllib.parse import urlsplit
 
 from flapsim.executor import ExecutionFailed, RunContext, positive_timeout
-from flapsim.state import read_settlement, validate_identity, validate_state
+from flapsim.state import display_aligned, read_settlement, validate_identity, validate_state
 
 VARIABLE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 STEPS = {"wait_serial", "expect_serial", "wait_display", "http", "assert_no_errors", "sleep_guest"}
@@ -353,6 +353,9 @@ class ScenarioExecutor:
         """Only assertion failures and the step's own timeout can match a baseline entry."""
         if self.known_issues is None or not isinstance(error, (ExecutionFailed, TimeoutError)):
             return None
+        if result.get("alignment_failed"):
+            # A lost-command timeout must not excuse an observed partial landing.
+            return None
         step_timed_out = (
             isinstance(error, TimeoutError)
             and step_deadline < run_deadline
@@ -497,10 +500,21 @@ class ScenarioExecutor:
                     )
                     if not unchanged:
                         continue
-                if display_matches(value["text"], state["text"]):
+                result["flap_errors"] = [m["flap_error"] for m in state["modules"]]
+                matches = display_matches(value["text"], state["text"])
+                aligned = display_aligned(state, value["text"])
+                result["alignment_failed"] = result.get("alignment_failed", False) or (
+                    matches and not aligned
+                )
+                if matches and aligned:
                     self.display_cursor = state["sequence"]
                     self.command_baseline = None
-                    result.update(actual=state["text"], state=state, unchanged=unchanged)
+                    result.update(
+                        actual=state["text"],
+                        state=state,
+                        unchanged=unchanged,
+                        alignment_failed=False,
+                    )
                     return
             context.pause()
 

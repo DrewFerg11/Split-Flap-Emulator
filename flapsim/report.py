@@ -57,6 +57,7 @@ margin:2rem auto;padding:1rem}
 .row{display:flex;gap:.35rem;margin:1rem 0;flex-wrap:wrap}.flap{display:grid;place-items:center;
 font:42px monospace;background:#292d34;min-width:1.4em;height:1.7em;border-radius:.15em;
 border-bottom:3px solid #050607}.moving{outline:2px solid #ffbe58}
+.between{border-bottom-color:#ff6658}.fraction{font:12px system-ui;padding:.2rem}
 input{width:100%}button{padding:.5rem}
 pre{white-space:pre-wrap}#warning{color:#ffbe58}
 </style><h1>Split-flap replay</h1><p id="warning">NOTICE</p>
@@ -82,6 +83,12 @@ function draw(){
       flap.className='flap'+(module.energized?' moving':'');
       flap.textContent=module.char===' '?'\u00a0':module.char;
       flap.title=`Bus ${module.bus}, address ${module.addr}, angle ${module.angle}`;
+      if(Number.isFinite(module.flap_position)&&Number.isFinite(module.flap_error)){
+        if(Math.abs(module.flap_error)>0.25)flap.classList.add('between');
+        const fraction=document.createElement('small');fraction.className='fraction';
+        fraction.textContent=`${module.flap_position.toFixed(3)} (${module.flap_error.toFixed(3)})`;
+        flap.append(fraction);flap.title+=`, flap position ${module.flap_position}`;
+      }
       row.append(flap);
     }
     board.append(row);
@@ -184,6 +191,8 @@ def write_reports(out: Path, manifest, steps, known_issues=None):
         ]
         if step.get("error"):
             lines += ["Failure:", fenced(step["error"])]
+        if "flap_errors" in step:
+            lines += ["Signed landing errors (flap pitches):", fenced(step["flap_errors"])]
         lines.append("")
     lines += [
         "## Final observed model counters",
@@ -211,7 +220,9 @@ def write_reports(out: Path, manifest, steps, known_issues=None):
         )
         if step["status"] == "failed":
             failure = ET.SubElement(case, "failure", message=step.get("error", "step failed"))
-            failure.text = json.dumps({k: step.get(k) for k in ["expected", "actual", "error"]})
+            failure.text = json.dumps(
+                {k: step.get(k) for k in ["expected", "actual", "error", "flap_errors"]}
+            )
         elif step["status"] == "xfail":
             ET.SubElement(
                 case,
