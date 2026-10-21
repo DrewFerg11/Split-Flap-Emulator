@@ -8,7 +8,7 @@ import pytest
 
 from native import build
 from native.sketch import function_definitions, platformio_env, preprocess_sketch
-from tools.verify_native import KnownSerial, improv_packet
+from tools.verify_native import KnownSerial, improv_packet, records
 
 SKETCH = """// leading comment with braces { }
 #include "Thing.h"
@@ -198,3 +198,8 @@ def test_native_verifier_tolerates_only_the_linked_preferences_noise():
     assert known.tolerated_serial(noise)["issue"] == "DrewFerg11/Split-Flap-Display#54"
     assert known.tolerated_serial(noise.replace("NOT_FOUND", "INVALID_HANDLE")) is None
     assert known.tolerated_serial(noise + " extra") is None
+
+
+def test_verifier_ignores_a_timeline_line_still_being_written(tmp_path):
+    (tmp_path / "timeline.jsonl").write_text('{"sequence": 1}\n{"sequence": 2, "mod')
+    assert records(tmp_path) == [{"sequence": 1}]

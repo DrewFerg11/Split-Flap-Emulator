@@ -59,8 +59,9 @@ def improv_packet(ssid, password):
 
 
 def records(out):
+    """Complete timeline records; a final line still being written is left for the next poll."""
     with (out / "timeline.jsonl").open() as timeline:
-        return [json.loads(line) for line in timeline]
+        return [json.loads(line) for line in timeline if line.endswith("\n")]
 
 
 class Run:
