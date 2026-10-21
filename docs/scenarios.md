@@ -28,8 +28,9 @@ There is no version exception. The previous v1.4.0 golden image reported
 golden image reports its own tag, so the exception was retired.
 
 `python -m tools.verify_negative_version --out runs/negative-versions` proves
-that a prerelease of the golden tag (`v1.4.1-rc.1`, the v1.4.0 failure mode) and
-a deliberately wrong `v9.9.9` both fail with exit 5 against the pinned image,
+that exact-match expectations of the golden tag's prerelease (`v1.4.1-rc.1`, the
+v1.4.0 failure mode in reverse) and a deliberately wrong `v9.9.9` both fail with
+exit 5 against the pinned image,
 produce failing JUnit evidence, and reap QEMU.
 An unexpected pass, timeout or different failure makes this verifier fail.
 

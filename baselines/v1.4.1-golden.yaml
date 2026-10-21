@@ -8,8 +8,9 @@ version: 1
 firmware_sha256: 5a71579b127ee87f0716cb1df938c9f98d3519a9283f72c003dfb857db32e6f4
 description: >-
   Published v1.4.1 esp32_n4 factory image. Since v1.4.0 only MQTT recovery and the version string
-  changed, so the v1.4.0 entries carry over unchanged. Its settings store has an unsynchronized-access
-  race and logs every never-written key as an error (SFD#54); see issue #15 for the full policy.
+  changed, so every v1.4.0 entry is kept as it was; the #14 write-timeout entry is new. Its settings
+  store has an unsynchronized-access race and logs every never-written key as an error (SFD#54); see
+  issue #15 for the full policy.
 
 serial:
   - issue: DrewFerg11/Split-Flap-Display#54

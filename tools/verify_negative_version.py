@@ -18,7 +18,8 @@ def verify(args):
         raise ValueError("negative evidence directory must be fresh")
     out.mkdir(parents=True, exist_ok=True)
     cases = []
-    # The rc case is the v1.4.0 failure mode: a stable build must not satisfy its own prerelease.
+    # The rc case is the v1.4.0 failure mode in reverse: the banner is matched as an exact
+    # substring, so an expectation of the tag's prerelease must fail against the stable build.
     reported = f"Firmware: {GOLDEN['tag']} ("
     for name, version in [("rc-tag", f"{GOLDEN['tag']}-rc.1"), ("wrong-version", "v9.9.9")]:
         case = out / name
