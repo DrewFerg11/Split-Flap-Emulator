@@ -15,7 +15,7 @@ sudo apt-get install -y --no-install-recommends build-essential git ninja-build 
   python3-venv flex bison pkg-config libjson-c-dev
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install -e '.[dev]' clang-format==18.1.8
+python -m pip install -e '.[dev,control]' clang-format==18.1.8
 ```
 
 Run the same fast checks as CI:

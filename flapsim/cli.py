@@ -33,6 +33,11 @@ def main() -> int:
     runner.add_argument("--timeout", type=float, help="override the scenario's total wall deadline")
     runner.add_argument("--trace", action="store_true", help="retain per-transaction I2C trace")
     runner.add_argument(
+        "--control-port",
+        type=int,
+        help="enable the authenticated loopback state API (0 chooses a free port)",
+    )
+    runner.add_argument(
         "--qemu-prefix",
         type=Path,
         default=Path(os.environ.get("FLAPSIM_QEMU_PREFIX", ROOT / "build/qemu/install")),

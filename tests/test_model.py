@@ -4,6 +4,7 @@ import ctypes
 import json
 import os
 import shlex
+import socket
 import subprocess
 from pathlib import Path
 
@@ -13,7 +14,7 @@ from flapsim.hardware import normalize_hardware, write_model_config
 from flapsim.state import read_settlement
 
 ROOT = Path(__file__).resolve().parents[1]
-CORE = ["bus", "config", "drum", "io", "pcf8575", "resume", "stepper"]
+CORE = ["bus", "config", "control", "drum", "io", "pcf8575", "resume", "stepper"]
 COILS = [0xFFE7, 0xFFF3, 0xFFF9, 0xFFED]
 OFF = 0xFFE1
 
@@ -53,6 +54,8 @@ def model_library(tmp_path_factory):
     lib.fs_model_resume.restype = ctypes.c_int
     lib.fs_model_tick.argtypes = [ctypes.c_int64]
     lib.fs_model_error.restype = ctypes.c_char_p
+    lib.fs_control_serve.argtypes = [ctypes.c_int, ctypes.c_int64]
+    lib.fs_control_serve.restype = ctypes.c_int
     return lib
 
 
@@ -672,3 +675,52 @@ def test_bad_normalized_sensor_fields_fail(make_model, key, value):
     model.config.write_text(json.dumps(config))
     assert model.lib.fs_model_init(str(model.config).encode()) != 0
     assert model.lib.fs_model_error()
+
+
+def test_live_snapshot_is_current_without_changing_evidence(make_model):
+    model = make_model(angles=(730,), polarity="active-low", window=3)
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    try:
+        model.write(COILS[0])
+        model.write(COILS[1])
+        assert model.state()["modules"][0]["angle"] == 730  # old settlement
+        before = {p.name: p.read_bytes() for p in model.out.iterdir()}
+        for _ in range(3):
+            parent.send(b"FLAPSIM_STATE/1")
+            assert model.lib.fs_control_serve(child.fileno(), model.now + 1000) == 1
+            live = json.loads(parent.recv(65536))
+            assert live["settled"] is False
+            assert live["modules"][0]["angle"] == 731
+            assert live["modules"][0]["coils"] == 9
+            assert live["modules"][0]["hall"] is False
+            assert live["modules"][0]["mechanics"]["sensor_window"] == 3
+        assert {p.name: p.read_bytes() for p in model.out.iterdir()} == before
+        model.lib.fs_model_guest_reset()
+        parent.send(b"FLAPSIM_STATE/1")
+        assert model.lib.fs_control_serve(child.fileno(), model.now + 1000) == 1
+        reset = json.loads(parent.recv(65536))
+        assert reset["guest_resets"] == 1
+        assert reset["modules"] == live["modules"]
+    finally:
+        parent.close()
+        child.close()
+
+
+def test_control_protocol_rejects_bad_and_truncated_requests_without_model_failure(make_model):
+    model = make_model()
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    try:
+        assert model.lib.fs_control_serve(child.fileno(), 0) == 1  # no request, no block
+        for request in [b"bad", b"FLAPSIM_STATE/1\0", b"FLAPSIM_STATE/1" + b"x" * 200]:
+            parent.send(request)
+            assert model.lib.fs_control_serve(child.fileno(), 0) == 1
+            assert "error" in json.loads(parent.recv(65536))
+        parent.send(b"FLAPSIM_STATE/1")
+        assert model.lib.fs_control_serve(child.fileno(), 0) == 1
+        assert json.loads(parent.recv(65536))["settled"] is True
+        parent.close()
+        assert model.lib.fs_control_serve(child.fileno(), 0) == 0
+        assert not model.lib.fs_model_error()
+    finally:
+        parent.close()
+        child.close()

@@ -12,5 +12,8 @@ const char *fs_model_error(void);
 int fs_model_event(uint8_t bus, uint8_t address, uint16_t event, int64_t guest_ns);
 void fs_model_tick(int64_t guest_ns);
 void fs_model_guest_reset(void);
+/* Caller holds the model owner's lock. Allocated JSON; caller frees with free().
+ * A read never advances the model or changes evidence/settlement sequences. */
+char *fs_model_snapshot(int64_t guest_ns);
 
 #endif

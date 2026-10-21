@@ -19,10 +19,10 @@ static struct json_object *counters(FsCounters count) {
     return object;
 }
 
-static struct json_object *identity(void) {
+static struct json_object *identity(int64_t guest_ns) {
     struct json_object *object = json_object_new_object();
     integer(object, "schema_version", 1);
-    integer(object, "guest_ns", fs.now);
+    integer(object, "guest_ns", guest_ns);
     integer(object, "sequence", fs.sequence);
     integer(object, "movement_id", fs.movement_id);
     integer(object, "settlement_id", fs.settlement_id);
@@ -68,17 +68,13 @@ static void atomic_json(const char *path, struct json_object *object) {
 void fs_write_activity(void) {
     if (fs.failed)
         return;
-    struct json_object *object = identity();
+    struct json_object *object = identity(fs.now);
     atomic_json(fs.activity_path, object);
     json_object_put(object);
 }
 
-void fs_emit(const char *event, bool state) {
-    if (fs.failed)
-        return;
-    fs.sequence++;
-    struct json_object *object = identity();
-    json_object_object_add(object, "event", json_object_new_string(event));
+static struct json_object *snapshot(int64_t guest_ns, bool mechanics) {
+    struct json_object *object = identity(guest_ns);
     struct json_object *modules = json_object_new_array();
     char text[FS_MAX_MODULES + 1] = {0}, rows[2][FS_MAX_MODULES + 1] = {{0}};
     int row_count[2] = {0};
@@ -101,6 +97,18 @@ void fs_emit(const char *event, bool state) {
         json_object_object_add(entry, "hall", json_object_new_boolean(fs_hall(module)));
         json_object_object_add(entry, "energized", json_object_new_boolean(module->energized));
         json_object_object_add(entry, "counters", counters(module->counters));
+        if (mechanics) {
+            struct json_object *physical = json_object_new_object();
+            integer(physical, "steps_per_rotation", module->steps);
+            integer(physical, "magnet_position", module->magnet);
+            integer(physical, "flap_offset", module->flap_offset);
+            integer(physical, "sensor_window", module->window);
+            json_object_object_add(
+                physical, "sensor_polarity",
+                json_object_new_string(module->active_low ? "active-low" : "active-high"));
+            json_object_object_add(entry, "mechanics", physical);
+            integer(entry, "coils", (module->latch >> 1) & 15);
+        }
         json_object_array_add(modules, entry);
     }
     json_object_object_add(object, "modules", modules);
@@ -109,6 +117,29 @@ void fs_emit(const char *event, bool state) {
     for (int b = 0; b < 2; b++)
         json_object_array_add(row_array, json_object_new_string(rows[b]));
     json_object_object_add(object, "rows", row_array);
+    return object;
+}
+
+char *fs_model_snapshot(int64_t guest_ns) {
+    if (!fs.initialized || fs.failed || guest_ns < fs.now)
+        return NULL;
+    struct json_object *object = snapshot(guest_ns, true);
+    integer(object, "guest_resets", fs.guest_resets);
+    const char *text = json_object_to_json_string_ext(object, JSON_C_TO_STRING_PLAIN);
+    size_t length = strlen(text) + 1;
+    char *copy = malloc(length);
+    if (copy)
+        memcpy(copy, text, length);
+    json_object_put(object);
+    return copy;
+}
+
+void fs_emit(const char *event, bool state) {
+    if (fs.failed)
+        return;
+    fs.sequence++;
+    struct json_object *object = snapshot(fs.now, false);
+    json_object_object_add(object, "event", json_object_new_string(event));
     if (state)
         atomic_json(fs.state_path, object);
     if (fprintf(fs.timeline, "%s\n",
