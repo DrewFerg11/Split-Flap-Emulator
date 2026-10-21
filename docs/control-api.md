@@ -81,20 +81,30 @@ python -m tools.verify_control \
 ```
 
 Repeat with `esp32-16-dual`. CI runs both probes. The probe requires motion,
-reads repeatedly while QMP-paused without changing state, resumes to centered X,
-hard-resets through private QMP while paused, verifies exactly one reset with
+waits for a centered X settlement, reads repeatedly while QMP-paused without
+changing state, hard-resets through private QMP while paused, verifies exactly one reset with
 unchanged external state, then requires a new centered X settlement with zero
 stalls/anomalies. Private QMP use is verification, not a public reset capability.
-It retains `control-verification.json` alongside standard run evidence and
+It incrementally retains `control-verification.json` alongside standard run evidence
+(including completed stages when a later assertion fails) and
 verifies normal input-integrity/process cleanup through the runner. It does not
 validate all serial diagnostics or claim the firmware's known bugs are repaired;
 the existing golden scenarios keep their independent serial/version assertions.
+
+An earlier diagnostic that paused during motion on the rebased sixteen-module
+layout failed strictly on an I2C write timeout (module 33, code 5) and one model
+stall. Its artifacts remain in `runs/issue20-rebased-control-16`; no allowance
+was added. This does not establish that pausing caused the timeout. The API
+probe separates motion observation from paused-guest service checks, and pauses
+only after the first centered settlement. Any timeout or model fault still
+fails. Arbitrary mid-motion pause/power fidelity needs investigation before
+exposing those controls; the read-only API does not promise it.
 
 Initial local verification against the checksum-pinned v1.4.1 image passed on both
 layouts: 100.971 seconds for eight modules and 127.450 seconds for sixteen.
 Both preserved external state across the private reset and ended centered with
 zero stalls/anomalies. After rebasing onto merged native #27 (`7fbe3b6`), all
-391 native/Python regression tests passed, together
+392 native/Python regression tests passed, together
 with Python lint/format, C formatting and diff checks. Exact-image and hosted
 verification run in CI; these local runs do not claim the image was tested here.
 The pinned v1.4.1 native source also builds with the shared serializer/transport
