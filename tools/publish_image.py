@@ -14,7 +14,8 @@ from pathlib import Path
 
 from packaging.version import Version
 
-IMAGE = "ghcr.io/drewferg11/flapsim"
+REPOSITORY = "drewferg11/split-flap-emulator"
+IMAGE = "ghcr.io/" + REPOSITORY
 REQUIRED_CASES = {"smoke-8": 0, "smoke-16": 0, "timeout": 4, "stop": 143, "wrong-version": 5}
 
 
@@ -87,7 +88,7 @@ class Registry:
         self.base_url = base_url
         self.opener = urllib.request.build_opener(NoRedirect)
         query = urllib.parse.urlencode(
-            {"service": "ghcr.io", "scope": "repository:drewferg11/flapsim:pull,push"}
+            {"service": "ghcr.io", "scope": f"repository:{REPOSITORY}:pull,push"}
         )
         credentials = base64.b64encode(f"{actor}:{token}".encode()).decode()
         request = urllib.request.Request(
@@ -100,7 +101,7 @@ class Registry:
 
     def digest(self, tag):
         request = urllib.request.Request(
-            self.base_url + "/v2/drewferg11/flapsim/manifests/" + urllib.parse.quote(tag, safe=""),
+            f"{self.base_url}/v2/{REPOSITORY}/manifests/" + urllib.parse.quote(tag, safe=""),
             method="HEAD",
             headers={
                 "Authorization": "Bearer " + self.token,
@@ -121,7 +122,7 @@ class Registry:
 
     def tags(self):
         result = []
-        url = self.base_url + "/v2/drewferg11/flapsim/tags/list?n=100"
+        url = f"{self.base_url}/v2/{REPOSITORY}/tags/list?n=100"
         for _ in range(100):
             request = urllib.request.Request(url, headers={"Authorization": "Bearer " + self.token})
             with self.opener.open(request, timeout=30) as response:
@@ -137,7 +138,7 @@ class Registry:
             if not match:
                 raise RuntimeError("unsupported GHCR tag pagination")
             url = urllib.parse.urljoin(url, match[1])
-            if not url.startswith(self.base_url + "/v2/drewferg11/flapsim/tags/list?"):
+            if not url.startswith(f"{self.base_url}/v2/{REPOSITORY}/tags/list?"):
                 raise RuntimeError("GHCR tag pagination left the expected repository")
         raise RuntimeError("GHCR tag pagination exceeded its bound")
 

@@ -18,7 +18,7 @@ container, private flash and fresh output directory on `ubuntu-24.04`.
 The companion checks out this repository's standard-library helper
 `tools/verify_release_gate.py` at a reviewed full commit SHA with persisted Git
 credentials disabled. Its only registry input is the firmware repository variable
-`FLAPSIM_IMAGE`, which must match `ghcr.io/drewferg11/flapsim@sha256:` followed by
+`FLAPSIM_IMAGE`, which must match `ghcr.io/drewferg11/split-flap-emulator@sha256:` followed by
 64 lowercase hex digits. Missing values and mutable tags fail closed. The digest
 must come from phase 5's actual verified publication; setting a syntactically
 valid value does not prove publication or verification.
