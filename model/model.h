@@ -8,6 +8,8 @@ int fs_model_init(const char *config_path);
  * guest_reset that fs_model_guest_reset recorded before the restart) and append to it. */
 int fs_model_resume(const char *config_path, int64_t guest_ns);
 void fs_model_close(void);
+/* Persist an exact moving/idle checkpoint without recording a controller reset. */
+int fs_model_power_checkpoint(int64_t guest_ns);
 const char *fs_model_error(void);
 int fs_model_event(uint8_t bus, uint8_t address, uint16_t event, int64_t guest_ns);
 void fs_model_tick(int64_t guest_ns);

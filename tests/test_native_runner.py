@@ -307,6 +307,7 @@ def test_native_control_listener_cleanup(native_args, monkeypatch, early_exit):
             with pytest.raises(urllib.error.HTTPError) as error:
                 opener.open(request, timeout=2)
             assert error.value.code == 503
+            error.value.close()
             return {}
 
     assert run(native_args, executor=Probe()) == (3 if early_exit else 0)
@@ -388,3 +389,36 @@ def test_source_build_timeout_stops_the_whole_build_tree(monkeypatch, tmp_path):
             return
         time.sleep(0.05)
     pytest.fail("the build's grandchild survived the timeout")
+
+
+def test_control_admission_stops_before_child_but_http_join_follows_child(native_args, monkeypatch):
+    from flapsim import control, runner
+
+    native_args.control_port = 0
+    events, services = [], []
+    attach, close, stop = (
+        control.ControlServer.attach,
+        control.ControlServer.close,
+        runner.stop_group,
+    )
+
+    def attached(self, *args, **kwargs):
+        services.append(self)
+        return attach(self, *args, **kwargs)
+
+    def stopped(process):
+        assert services[0].client is None
+        events.append("child_stop")
+        return stop(process)
+
+    def closed(self):
+        events.append("http_join")
+        return close(self)
+
+    monkeypatch.setattr(control.ControlServer, "attach", attached)
+    monkeypatch.setattr(control.ControlServer, "close", closed)
+    monkeypatch.setattr(runner, "stop_group", stopped)
+    # NativePower owns the actual child with control enabled.
+    monkeypatch.setattr("flapsim.power.stop_group", stopped)
+    assert run(native_args) == 0
+    assert events.index("child_stop") < events.index("http_join")

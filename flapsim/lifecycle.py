@@ -7,15 +7,19 @@ import time
 from flapsim.control import Unavailable
 
 
-def qmp_reset(path):
+def qmp_commands(path, commands):
     """One hard reset, no automatic retry. Ignore events, match replies by ID."""
     deadline = time.monotonic() + 2
+    results = []
     with socket.socket(socket.AF_UNIX) as connection:
         connection.settimeout(2)
         connection.connect(str(path))
         with connection.makefile("rb") as stream:
             total = 0
-            for identifier, name in [("cap", "qmp_capabilities"), ("reset", "system_reset")]:
+            for identifier, name in [
+                ("cap", "qmp_capabilities"),
+                *[(str(i), name) for i, name in enumerate(commands)],
+            ]:
                 connection.sendall(json.dumps({"execute": name, "id": identifier}).encode() + b"\n")
                 while True:
                     remaining = deadline - time.monotonic()
@@ -30,9 +34,16 @@ def qmp_reset(path):
                     if not isinstance(message, dict):
                         raise ValueError("invalid QMP reset response")
                     if message.get("id") == identifier:
-                        if "error" in message or "return" not in message:
+                        if "error" in message or not isinstance(message.get("return"), dict):
                             raise ValueError("QMP reset rejected")
+                        results.append(message["return"])
                         break
+    return results[1:]
+
+
+def qmp_reset(path):
+    """One hard reset, with no automatic retry."""
+    qmp_commands(path, ["system_reset"])
 
 
 class ResetController:
@@ -59,6 +70,8 @@ class ResetController:
                 return {"error": "stale_or_reused_id"}
             if client.closed:
                 return {"error": "backend_unavailable"}
+            if client.power is not None and client.power.state != "on":
+                return {"error": "controller_off"}
             stage = "intent_audit"
             self.receipt = {"command": command, "status": "unknown"}
             try:
