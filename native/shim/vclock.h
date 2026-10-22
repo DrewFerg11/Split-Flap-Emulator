@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #pragma once
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -23,12 +24,22 @@ void set_speed(double speed);
 void sleep_ns(int64_t duration);
 std::chrono::nanoseconds host_duration(int64_t guest_duration);
 
+/* External wait primitives re-evaluate guest deadlines at least every 5 ms of host time.
+ * Clock-owned sleeps are notified immediately on a rate change. */
+std::chrono::nanoseconds wait_slice(int64_t guest_remaining);
+
 /* Wait on a condition variable for at most `guest_timeout` virtual nanoseconds. */
 template <typename Predicate>
 bool wait_for(std::condition_variable &condition, std::unique_lock<std::mutex> &lock,
               int64_t guest_timeout, Predicate ready) {
-    auto deadline = std::chrono::steady_clock::now() + host_duration(guest_timeout);
-    return condition.wait_until(lock, deadline, ready);
+    int64_t target = now_ns() + std::max<int64_t>(0, guest_timeout);
+    while (!ready()) {
+        int64_t remaining = target - now_ns();
+        if (remaining <= 0)
+            return ready();
+        condition.wait_for(lock, wait_slice(remaining));
+    }
+    return true;
 }
 
 } // namespace flapsim::vclock

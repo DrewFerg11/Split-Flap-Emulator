@@ -22,7 +22,7 @@ flapsim = "flapsim.cli:main"
 include = ["flapsim*"]
 
 [tool.setuptools.package-data]
-flapsim = ["data/hardware/*.yaml", "data/scenarios/*.yaml"]
+flapsim = ["data/hardware/*.yaml", "data/scenarios/*.yaml", "data/panel/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -5,6 +5,7 @@
 #include "esp32-hal-log.h"
 #include "vclock.h"
 
+#include <algorithm>
 #include <arpa/inet.h>
 #include <atomic>
 #include <cerrno>
@@ -32,29 +33,28 @@ struct WiFiClient::Socket {
 
 namespace {
 
-/* Wait for a socket event for at most `timeout_ms` of virtual time. */
-bool wait_for(int fd, short events, int timeout_ms) {
+/* Socket waits keep one guest deadline and re-evaluate it on bounded host slices. */
+int socket_event(int fd, short events, int timeout_ms) {
     pollfd entry{fd, events, 0};
-    auto host = flapsim::vclock::host_duration(int64_t(timeout_ms) * 1000000);
-    int milliseconds = int(std::chrono::ceil<std::chrono::milliseconds>(host).count());
-    while (true) {
-        int ready = ::poll(&entry, 1, milliseconds);
-        if (ready < 0 && errno == EINTR)
-            continue;
-        return ready > 0 && !(entry.revents & (POLLERR | POLLNVAL)) && (entry.revents & events);
-    }
+    int64_t target = flapsim::vclock::now_ns() + std::max<int64_t>(0, timeout_ms) * 1000000;
+    do {
+        auto duration = flapsim::vclock::wait_slice(target - flapsim::vclock::now_ns());
+        int milliseconds = int(std::chrono::ceil<std::chrono::milliseconds>(duration).count());
+        int result = ::poll(&entry, 1, milliseconds);
+        if (result > 0)
+            return entry.revents;
+        if (result < 0 && errno != EINTR)
+            return 0;
+    } while (flapsim::vclock::now_ns() < target);
+    return 0;
 }
 
-/* Whether the socket became ready or failed within `timeout_ms` of virtual time. */
-bool ready(int fd, short events, int timeout_ms) {
-    pollfd entry{fd, events, 0};
-    auto host = flapsim::vclock::host_duration(int64_t(timeout_ms) * 1000000);
-    int milliseconds = int(std::chrono::ceil<std::chrono::milliseconds>(host).count());
-    int result;
-    while ((result = ::poll(&entry, 1, milliseconds)) < 0 && errno == EINTR) {
-    }
-    return result > 0;
+bool wait_for(int fd, short events, int timeout_ms) {
+    int event = socket_event(fd, events, timeout_ms);
+    return !(event & (POLLERR | POLLNVAL)) && (event & events);
 }
+
+bool ready(int fd, short events, int timeout_ms) { return socket_event(fd, events, timeout_ms); }
 
 /* The device only reaches other hosts once it has joined a network as a station. */
 bool station_online() { return WiFi.status() == WL_CONNECTED; }
@@ -96,8 +96,8 @@ std::optional<uint32_t> lookup(const char *host) {
     Lookups &state = lookups();
     {
         std::unique_lock lock(state.mutex);
-        if (!state.idle.wait_for(lock, flapsim::vclock::host_duration(kDnsIdleTimeoutNs),
-                                 [&] { return !state.busy; }))
+        if (!flapsim::vclock::wait_for(state.idle, lock, kDnsIdleTimeoutNs,
+                                       [&] { return !state.busy; }))
             return std::nullopt;
         state.busy = true;
     }
@@ -113,8 +113,12 @@ std::optional<uint32_t> lookup(const char *host) {
         state.idle.notify_all();
         answer->set_value(found ? std::optional(address) : std::nullopt);
     }).detach();
-    if (result.wait_for(flapsim::vclock::host_duration(kDnsTimeoutNs)) != std::future_status::ready)
-        return std::nullopt;
+    int64_t target = flapsim::vclock::now_ns() + kDnsTimeoutNs;
+    while (result.wait_for(flapsim::vclock::wait_slice(target - flapsim::vclock::now_ns())) !=
+           std::future_status::ready) {
+        if (flapsim::vclock::now_ns() >= target)
+            return std::nullopt;
+    }
     return result.get();
 }
 

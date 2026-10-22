@@ -337,5 +337,13 @@ The controller-power slice implements QMP stop/reset/cont as an explicit
 approximation and native checkpoint/reap/new-child power-on. Off-state snapshots
 are labeled frozen, mutations are blocked while off, and host deadlines and
 cleanup remain active. Power receipts have a separate audited ID namespace.
-Speed, faults, streaming and scenario controls remain future slices; #20 remains
+Faults, streaming and scenario controls remain future slices; #20 remains
 open. See control-api.md for the exact fidelity and recovery limits.
+
+
+The runtime-speed slice adds audited native rate changes, exact rate preservation
+across reset/power-on, notified sleeps and bounded re-evaluation of timed waits.
+The clock tests race readers against re-anchors and check existing accelerated and
+decelerated deadlines; real public probes measure clock rates and lifecycle
+persistence on both layouts. QEMU reports its startup timing and rejects live-rate
+changes. Faults, streaming and scenario controls remain future slices.

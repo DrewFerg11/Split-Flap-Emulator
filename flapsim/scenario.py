@@ -24,6 +24,7 @@ STEPS = {
     "sleep_guest",
     "mqtt_publish",
     "wait_mqtt",
+    "settings_stress",
 }
 SERVICES = {"mqtt"}
 NVS_NAME = re.compile(r"[A-Za-z0-9_]{1,15}")
@@ -152,6 +153,11 @@ def validate_step(step, hardware, services=()):
             raise ValueError("wait_ready must be boolean")
         if value.get("wait_ready") and value.get("method", "GET") != "GET":
             raise ValueError("only read-only GET readiness checks may retry")
+    elif kind == "settings_stress":
+        fields(value, {"rounds"}, {"readers"})
+        for key, low, high in [("rounds", 1, 500), ("readers", 0, 16)]:
+            if key in value and (type(value[key]) is not int or not low <= value[key] <= high):
+                raise ValueError(f"settings_stress {key} must be an integer in {low}–{high}")
     elif kind == "assert_no_errors":
         fields(value, set(), {"fresh_nvs", "default_missing_bus1", "faulted_modules"})
         if any(type(v) is not bool for k, v in value.items() if k != "faulted_modules"):
@@ -317,6 +323,60 @@ def serial_errors(text, policy, known=None, observed=None):
         raise ExecutionFailed(
             f"expected one default-bus write failure per absent module; got {missing}"
         )
+
+
+def http_batch(context, requests):
+    """Run several HTTP exchanges at once: [(method, path, data)] -> [response or exception]."""
+    address = urlsplit(context.endpoint)
+    results = [None] * len(requests)
+    connections, sockets = [], []
+
+    def exchange(index, connection, method, path, data):
+        try:
+            connection.request(method, path, data, {"Content-Type": "application/json"})
+            with connection.getresponse() as response:
+                body = response.read(1024 * 1024 + 1)
+                if len(body) > 1024 * 1024:
+                    raise ExecutionFailed("HTTP response exceeds 1 MiB")
+                results[index] = {"status": response.status, "body": body.decode(errors="replace")}
+        except Exception as error:
+            results[index] = error
+
+    workers = []
+    try:
+        for index, (method, path, data) in enumerate(requests):
+            context.checkpoint()
+            connection = http.client.HTTPConnection(address.hostname, address.port)
+            transport = socket.create_connection(
+                (address.hostname, address.port),
+                timeout=min(5, max(0.001, context.deadline - time.monotonic())),
+            )
+            transport.settimeout(max(0.001, context.deadline - time.monotonic()))
+            connection.sock = transport
+            connections.append(connection)
+            sockets.append(transport)
+            workers.append(
+                threading.Thread(
+                    target=exchange, args=(index, connection, method, path, data), daemon=True
+                )
+            )
+        for worker in workers:
+            worker.start()
+        while any(worker.is_alive() for worker in workers):
+            context.checkpoint()
+            for worker in workers:
+                worker.join(0.01)
+        context.checkpoint()
+        return results
+    finally:
+        for transport in sockets:
+            try:
+                transport.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            transport.close()
+        for connection in connections:
+            connection.close()
 
 
 def http_request(context, method, path, data):
@@ -567,6 +627,8 @@ class ScenarioExecutor:
             self.wait_display(context, value, result)
         elif kind == "http":
             self.http(context, value, result)
+        elif kind == "settings_stress":
+            self.settings_stress(context, value, result)
         elif kind == "assert_no_errors":
             serial = context.serial()
             end = serial.rfind("\n") + 1
@@ -738,6 +800,57 @@ class ScenarioExecutor:
                 if not value.get("wait_ready"):
                     raise ExecutionFailed(f"HTTP transport failed: {error}") from error
                 context.pause()
+
+    def settings_stress(self, context, value, result):
+        """Race settings writes against concurrent reads (SFD#54): each round POSTs a new `name`
+        while `readers` GETs run, then reads it back. A read must never see anything but the
+        previous or the new name (compiled defaults mean a raced read), and the final read
+        must see the new one (anything else is a lost write)."""
+
+        def settings(response, what):
+            if isinstance(response, Exception):
+                raise ExecutionFailed(f"{what}: HTTP transport failed: {response}")
+            if response["status"] != 200:
+                raise ExecutionFailed(f"{what}: HTTP status {response['status']}")
+            try:
+                return json.loads(response["body"], parse_constant=reject_constant)
+            except (ValueError, UnicodeDecodeError) as error:
+                raise ExecutionFailed(f"{what}: response is not valid JSON") from error
+
+        summary = {"rounds": 0, "reads": 0}
+        result["actual"] = summary
+        previous = settings(
+            http_request(context, "GET", "/settings", None), "initial GET /settings"
+        ).get("name")
+        for round_number in range(1, value["rounds"] + 1):
+            name = f"stress-{round_number}"
+            body = json.dumps({"name": name}).encode()
+            requests = [("POST", "/settings", body)] + [("GET", "/settings", None)] * value.get(
+                "readers", 4
+            )
+            write, *reads = http_batch(context, requests)
+            reply = settings(write, f"round {round_number}: POST /settings")
+            if reply.get("type") != "success":
+                raise ExecutionFailed(f"round {round_number}: POST /settings replied {reply}")
+            for read in reads:
+                seen = settings(read, f"round {round_number}: GET /settings").get("name")
+                if seen not in {previous, name}:
+                    raise ExecutionFailed(
+                        f"round {round_number}: GET /settings returned name {seen!r}, "
+                        f"expected {previous!r} or {name!r} (raced read)"
+                    )
+                summary["reads"] += 1
+            stored = settings(
+                http_request(context, "GET", "/settings", None),
+                f"round {round_number}: GET /settings after the write",
+            ).get("name")
+            if stored != name:
+                raise ExecutionFailed(
+                    f"round {round_number}: name is {stored!r} after POST {name!r} succeeded "
+                    "(lost write)"
+                )
+            previous = name
+            summary["rounds"] = round_number
 
     def verify_final(self, out, hardware):
         serial = (out / "serial.log").read_text(errors="replace")

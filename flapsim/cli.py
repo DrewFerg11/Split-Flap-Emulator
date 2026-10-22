@@ -59,9 +59,29 @@ def main() -> int:
         type=Path,
         default=Path(os.environ.get("FLAPSIM_QEMU_PREFIX", ROOT / "build/qemu/install")),
     )
+    panel = commands.add_parser(
+        "panel", help="serve a read-only live display for a run started with --control-port"
+    )
+    panel.add_argument("--run", type=Path, required=True, help="the running scenario's --out")
+    panel.add_argument("--port", type=int, default=0, help="loopback port (0 chooses one)")
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
+        return 0
+
+    if args.command == "panel":
+        from flapsim.panel import serve
+
+        if not 0 <= args.port <= 65535:
+            print("Invalid panel: --port must be in [0, 65535]", file=sys.stderr)
+            return 2
+        try:
+            serve(args.run, args.port)
+        except KeyboardInterrupt:
+            return 0
+        except OSError as error:
+            print(f"Invalid panel: {error}", file=sys.stderr)
+            return 2
         return 0
 
     if args.command == "run":

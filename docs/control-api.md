@@ -2,7 +2,7 @@
 
 The runner can expose current physical state independently of the firmware's
 web server. The implemented QEMU and native routes provide authenticated live state, atomic mechanics
-edits, controller reset/power transitions and operation receipts. Fault mutation, speed,
+edits, controller reset/power transitions, native runtime speed and operation receipts. Fault mutation,
 I2C history and WebSockets remain unavailable and are explicitly false in `capabilities`. Issue #20 stays
 open. See [the implementation plan](control-api-plan.md) for later slices.
 
@@ -17,7 +17,8 @@ flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
 also allowed. Without this option no service/socket is created and the optional
 HTTP dependencies are not imported. The Docker image includes the extra.
 The listener is inside the container's loopback namespace; external binding and
-live-panel/serve mode are future work, not provided by port publication alone.
+a long-running serve mode is future work, not provided by port publication alone.
+For a read-only live view of a run, see [the panel](panel.md).
 
 Native mode uses the same option and API contract:
 
@@ -33,8 +34,7 @@ token, mechanics overlay and latest receipt survive firmware software resets
 (re-exec of the same process). Reset generations persist even before the first
 mechanics edit. Requests during reset still have the usual bounded deadline;
 a timeout leaves the result unknown and poisons the channel as described below.
-Public controller reset is available in both modes. Controller power uses the approximation described below. Live speed
-controls remain unavailable.
+Public controller reset is available in both modes. Controller power uses the approximation described below. Native supports runtime speed controls; QEMU timing remains fixed at startup.
 
 While the run is executing, read `control.endpoint` from `run.json`. The existing
 `endpoint` still points to the firmware web server. Read the bearer token from
@@ -382,3 +382,39 @@ The public native runner is also checked for inherited descriptor isolation,
 optional dependency validation, listener cleanup after success/failure, and no
 control service when disabled. Reset-generation tests cover repeated resets
 before any edit, malformed generations and legacy records without the new field.
+
+## Runtime speed
+
+Native `POST /api/emu/speed` accepts exactly `{"id":1,"speed":2.5}`, with a finite
+number in 0.25..50 (booleans and strings are invalid). Speed multiplies guest time
+relative to host monotonic time; it is a requested clock rate, not a guarantee that
+a loaded host can execute firmware at that throughput. It does not change firmware
+motor settings, reposition drums or restart the controller.
+
+`GET /api/emu/speed` queries the native owner for `current`, `min`, `max` and
+`runtime`; state responses and `control.speed` in the manifest include the last
+observed rate. While powered off, the query returns the retained rate. New speed
+commands are rejected with `409 controller_off` until powered on. The exact rate
+survives native software re-exec and controller power cycling; it does not overwrite
+the immutable initial `native.speed` or configuration file.
+
+IDs use a separate increasing namespace, with the same latest-only retry rules as
+power. `GET /api/emu/speed/operations/{id}` returns the latest receipt independently
+of the child channel. `202 applied` includes the command, effective `speed`, model
+`guest_ns`, `sequence`, `boot_generation` and `fidelity: native-virtual-clock`.
+Intents and results are fsynced to `control.jsonl` with `kind: speed`. Any uncertain
+post-admission outcome consumes the ID, closes the channel and returns
+`503 result_unknown`; its unknown receipt remains queryable and the command is
+never automatically repeated. A new same-rate command is audited normally.
+
+Clock-owned sleeps wake immediately on rate changes. Timed semaphore/condition
+waits, socket polls and DNS waits retain a guest deadline and re-evaluate it on
+host slices of at most 5 ms (subject to host scheduling). Readers see monotonic
+guest time while a rate is re-anchored. Untimed waits and server housekeeping
+remain event/host driven. Run, operation, cancellation and cleanup deadlines remain
+host-time bounds, including at 0.25x. Speed zero/pause is unsupported.
+
+QEMU `GET /api/emu/speed` reports `runtime: false` and the startup `timing` preset.
+`POST` returns `409 unsupported_capability`: pinned QEMU has no supported live
+icount-rate setter. The API never restarts QEMU or substitutes pause/resume for a
+speed change. Its `capabilities.speed` remains false.

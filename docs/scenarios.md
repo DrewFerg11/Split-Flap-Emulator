@@ -228,13 +228,26 @@ settings, sends HELLO, and verifies exact centered ` HELLO  `.
 rows ` HELLO  ` / ` WORLD  `, followed by the explicit idempotent repeat.
 `homing-random.yaml` asserts the intermediate all-blank settlement and zero
 stalls/anomalies before completing startup X. CI runs three recorded seeds.
+`settings-race-8.yaml` stresses the settings store
+([SFD#54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54), #24) with the
+`settings_stress` step: each of `rounds` (1–500) sends one `POST /settings` with a new
+`name` (`stress-<round>`) while `readers` (0–16, default 4) `GET /settings` run at the same
+time, then reads the name back. A concurrent read that sees anything but the previous or
+the new name is a raced read; a read-back without the new name is a lost write. Either
+fails the step with the round and the values seen. v1.4.1 loses the first write in native
+mode, so golden runs record it as a #54 expected failure; firmware with the fix passes
+all 30 rounds.
+`clock-soak-native-8.yaml` (native only) runs time mode for three guest hours, 180 display
+updates, and then asserts no errors and no model faults. Run it with `--speed 50`: it takes
+about 3.5 wall minutes. CI runs it on the golden source under the native baseline.
 `first-boot-8.yaml` / `first-boot-16.yaml` follow a new user from a blank flash
 ([#22](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/22)): access point and
 no-Wi-Fi display, the compiled defaults in `GET /settings`, one save of layout (8 only),
 a calibration offset, name and MQTT broker through the access-point web UI, the reboot
 with every saved value read back and the new layout in effect, then
-`POST /settings/reset` back to the first-boot display and defaults. After each reboot
-or reset they wait for `Homing` before the display check, so a display that already
+`POST /settings/reset` back to the first-boot display and defaults. After the reboot
+they wait for `Homing` before the display check; after the reset, which does not home,
+they wait for the blank settlement (`history: true`). Either way a display that already
 showed the target can't match early. CI runs both natively against the golden source
 under the native baseline, where v1.4.1 fails them on
 [SFD#54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54)'s lost writes;
