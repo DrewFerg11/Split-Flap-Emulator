@@ -142,8 +142,12 @@ class ControlProbe:
 
         reset_receipt = reset(1)
         record("reset_receipt", reset_receipt)
-        if qmp(qmp_path, "query-status")["status"] != "paused":
-            raise RuntimeError("public reset changed QEMU's paused state")
+        # The pinned QEMU labels a reset stopped VM "prelaunch", not "paused".
+        # It must remain stopped; never execute the guest just to restore a label.
+        reset_status = qmp(qmp_path, "query-status")
+        record("reset_qmp_status", reset_status)
+        if reset_status["running"] or reset_status["status"] not in {"paused", "prelaunch"}:
+            raise RuntimeError("public reset resumed the paused QEMU guest")
         if reset(1) != reset_receipt:
             raise RuntimeError("reset retry did not return the original receipt")
         while (after_reset := snapshot())["boot_generation"] == before_reset["boot_generation"]:

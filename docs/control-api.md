@@ -152,8 +152,10 @@ mechanics IDs. The runner serializes reset with model reads and mechanics edits;
 a concurrent request returns `503 backend_busy` before admission and consumes no ID.
 
 QEMU performs one QMP `system_reset` and reports `fidelity: qmp-hard-reset`.
-It preserves the existing running/paused state; it does not change timing or
-simulate removing controller/module power. Native uses the existing same-PID
+An executing guest remains running; a paused guest remains stopped (the pinned
+QEMU labels it `prelaunch` after reset, rather than `paused`). The API never
+resumes a stopped guest merely to restore its run-state label. It does not change
+timing or simulate removing controller/module power. Native uses the existing same-PID
 software reset/re-exec path and reports `fidelity: native-software-reexec`, with
 `ESP_RST_SW` in firmware. Neither backend resets external drum angle, expander
 latches or model counters; mechanics overlays/receipts and persistent firmware
