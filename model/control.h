@@ -8,4 +8,7 @@
  * Mutations apply only between transactions while all coils are off.
  * Native callers must hold host::model_lock(). */
 int fs_control_serve(int fd, int64_t guest_ns);
+/* Native only: returns 2 after acknowledging a reset request. The caller must
+ * release its model lock before invoking its normal controller reset path. */
+int fs_control_serve_native(int fd, int64_t guest_ns);
 #endif

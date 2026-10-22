@@ -147,7 +147,7 @@ def test_real_http_auth_origin_capabilities_and_shutdown(tmp_path):
         assert document["boot_generation"] == 0
         assert document["state"]["text"] == state["text"]
         assert request(server, method="POST")[0] == 405
-        assert request(server, path="/api/emu/reset", method="POST")[0] == 404
+        assert request(server, path="/api/emu/reset", method="POST")[0] == 503
         server.detach()
         assert request(server)[0] == 503
     finally:
