@@ -115,10 +115,21 @@ jobs:
               --scenario "$scenario" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
               --known-issues baselines/v1.4.1-native.yaml --out "runs/native/$scenario"
           done
+      - name: Run injected-fault scenarios natively
+        if: matrix.name != 'sanitizers'
+        run: |
+          set -e
+          for fault in "stuck-sensor esp32-8-single-stuck-sensor" "module-lost esp32-8-single-module-lost"; do
+            set -- $fault
+            flapsim run --mode native --native-build build/native/golden --hardware "$2" \
+              --scenario "fault-$1-8" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
+              --known-issues baselines/v1.4.1-native.yaml --out "runs/native/fault-$1-8"
+          done
       - name: Log native scenario outcomes
         if: always() && matrix.name != 'sanitizers'
         run: |
-          for run in smoke-8 smoke-16 mqtt-native-8 clock-dst-native-8 date-rollover-native-8; do
+          for run in smoke-8 smoke-16 mqtt-native-8 clock-dst-native-8 date-rollover-native-8 \
+              fault-stuck-sensor-8 fault-module-lost-8; do
             python -m tools.summarize_run "runs/native/$run/run.json"
           done
       - name: Upload native evidence

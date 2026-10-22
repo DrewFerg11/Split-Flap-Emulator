@@ -167,6 +167,20 @@ def write_reports(out: Path, manifest, steps, known_issues=None):
         lines.append("")
     if manifest.get("error"):
         lines += ["Run failure:", fenced(manifest["error"]), ""]
+    # Injected faults (#19): the newest model output wins, so the counts are final.
+    try:
+        faults = json.loads((out / "activity.json").read_text()).get("faults")
+    except (OSError, ValueError, AttributeError):
+        faults = actual.get("faults")
+    if isinstance(faults, list) and faults:
+        lines.append("Injected faults:")
+        for fault in faults:
+            kinds = ", ".join(f"{k} {fault[k]}" for k in ["sensor", "motor", "i2c"] if k in fault)
+            lines.append(
+                f"- bus {fault.get('bus')} 0x{fault.get('addr', 0):02x}: {kinds}; "
+                f"acted {fault.get('events')} time(s)"
+            )
+        lines.append("")
     lines += [
         "Input provenance:",
         fenced(

@@ -11,16 +11,36 @@
 typedef struct {
     uint64_t forward, backward, stalls, writes, reads, anomalies;
 } FsCounters;
+/* Injected faults (#19); all zero for a healthy module. */
+enum {
+    FS_SENSOR_OK,
+    FS_SENSOR_STUCK_ACTIVE,
+    FS_SENSOR_STUCK_INACTIVE,
+    FS_SENSOR_INVERTED,
+    FS_SENSOR_NOISY
+};
+enum { FS_MOTOR_OK, FS_MOTOR_DEAD, FS_MOTOR_SLIP };
+enum { FS_I2C_OK, FS_I2C_MISSING, FS_I2C_DISAPPEAR, FS_I2C_NACK, FS_I2C_CORRUPT };
+typedef struct {
+    bool configured;
+    int sensor, motor, i2c;
+    double sensor_noise, slip, nack, corrupt;
+    int64_t disappear_at_ns;
+    uint32_t rng;
+    uint64_t events;
+} FsFaults;
 typedef struct {
     int bus, addr, angle, phase, steps, magnet, flap_offset, window;
     bool energized, active_low;
     uint16_t latch;
     FsCounters counters;
+    FsFaults faults;
 } FsModule;
 typedef struct {
     int selected, direction, writes, reads;
     uint8_t bytes[2];
     uint16_t input;
+    int hidden; /* address of a present module answering this transaction as absent, or -1 */
 } FsBus;
 typedef struct {
     FsModule modules[FS_MAX_MODULES], initial_modules[FS_MAX_MODULES];
@@ -57,5 +77,11 @@ bool fs_parse_mechanics(struct json_object *object, FsModule *module, bool parti
 bool fs_restore_overlay(struct json_object *record);
 char *fs_control_command(const char *request, int64_t guest_ns);
 bool fs_restore(const char *timeline_path, bool *recorded_reset);
+bool fs_parse_faults(struct json_object *entry, FsModule *module);
+bool fs_fault_absent(FsModule *module, int64_t guest_ns);
+int fs_fault_hall(FsModule *module);
+bool fs_fault_blocks_step(FsModule *module);
+uint8_t fs_fault_read(FsModule *module, uint8_t byte);
+struct json_object *fs_faults_json(const FsModule *module);
 
 #endif

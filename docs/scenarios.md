@@ -155,7 +155,7 @@ are rejected. There is no shell evaluation.
 | `expect_serial` | Same matcher; search all observed serial history immediately without advancing the cursor. Missing evidence is an assertion failure. |
 | `wait_display` | `{text: " HELLO  "}`; exact module-order text, with `.` as a one-module wildcard. Spaces are significant. Requires a fresh all-module settlement. Optional `history` and `allow_unchanged` are described below. |
 | `http` | Required `path` and integer `status`; optional `method` (`GET`/`POST`), JSON `body` for POST, `json` response expectation, and GET-only `wait_ready`. Paths target the run's loopback AP endpoint. Redirects are returned as their own status. Bodies are limited to 1 MiB. |
-| `assert_no_errors` | `{}` rejects new firmware error/panic/abort/exception lines and nonzero cumulative model stalls/anomalies. Two explicit narrow policy flags are described below. |
+| `assert_no_errors` | `{}` rejects new firmware error/panic/abort/exception lines and nonzero cumulative model stalls/anomalies. Its explicit narrow policy options are described below. |
 | `sleep_guest` | Positive seconds of model guest time. Wall time cannot satisfy it; the step/total wall deadline still applies. A backwards guest clock fails. |
 
 HTTP JSON expectations are recursive subsets of objects. Arrays match exact
@@ -202,8 +202,12 @@ check. `fresh_nvs: true` permits only the exact known Preferences.cpp:50
 `nvs_open failed: NOT_FOUND` diagnostic. `default_missing_bus1: true` requires
 exactly one code-2 write failure for each absent default address 32–39, and is
 valid only for the eight physical bus-0 modules. It is used before single-bus
-configuration; later checks reject all such missing-module writes. No policy
-allows unrelated errors. A final check catches complete new errors after the
+configuration; later checks reject all such missing-module writes.
+`faulted_modules: [0x25]` permits any number of code-2 write failures for the
+listed modules. Each must be configured with an injected I2C fault (see
+[hardware-model.md](hardware-model.md#injected-faults)). The firmware numbers
+modules by address on both buses, so this cannot be combined with
+`default_missing_bus1`. No policy allows unrelated errors. A final check catches complete new errors after the
 last explicit assertion and before shutdown.
 When a scenario has no `assert_no_errors` step, that final check scans all
 complete serial lines with no allowances.
