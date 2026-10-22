@@ -819,6 +819,26 @@ def test_every_split_point_of_the_diagnostic_is_recognised():
         assert known.tolerated_serial(body + DIAGNOSTIC[cut:]), cut
 
 
+def test_a_request_log_spliced_inside_the_diagnostic_is_recognised():
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    log = "Received text update request"
+    head_start = DIAGNOSTIC.index("[E][") + 4
+    for cut in range(head_start, len(DIAGNOSTIC)):
+        entry = known.tolerated_serial(DIAGNOSTIC[:cut] + log + DIAGNOSTIC[cut:])
+        assert entry["issue"] == "DrewFerg11/Split-Flap-Display#86", cut
+    # Seen in CI: "...nvs_open failed: Received text update requestNOT_FOUND".
+    observed = DIAGNOSTIC.replace("NOT_FOUND", log + "NOT_FOUND")
+    assert known.tolerated_serial(observed)
+    other = DIAGNOSTIC.replace("NOT_FOUND", "INVALID_HANDLE")
+    for line in [
+        DIAGNOSTIC.replace("begin", log + "end"),
+        other.replace("INVALID", log + "INVALID"),
+        DIAGNOSTIC.replace("NOT_FOUND", "panic NOT_FOUND"),
+        DIAGNOSTIC.replace("NOT_FOUND", log + " panicNOT_FOUND"),
+    ]:
+        assert known.tolerated_serial(line) is None, line
+
+
 @pytest.mark.parametrize(
     "line",
     [
