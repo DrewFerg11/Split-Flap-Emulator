@@ -110,6 +110,14 @@ def test_page_and_live_state_use_the_runs_token(tmp_path, control, panel):
             lambda out, port: write_run(out, port, endpoint="http://example.com:1"),
             "not a loopback",
         ),
+        (
+            lambda out, port: write_run(out, port, endpoint="http://127.0.0.1:99999"),
+            "not a loopback",
+        ),
+        (
+            lambda out, port: write_run(out, port, endpoint="http://127.0.0.1:nope"),
+            "not a loopback",
+        ),
     ],
 )
 def test_unavailable_state_is_reported_not_guessed(tmp_path, control, panel, setup, message):
@@ -119,10 +127,21 @@ def test_unavailable_state_is_reported_not_guessed(tmp_path, control, panel, set
 
 
 @pytest.mark.parametrize(
-    "host, origin", [("evil.example", None), (None, "http://evil.example"), ("localhost", None)]
+    "host, origin",
+    [
+        ("evil.example", None),
+        (None, "http://evil.example"),
+        ("localhost", None),
+        # Compared raw, like the control API: whitespace is never normalized away.
+        ("{authority} ", None),
+        ("{authority} foo", None),
+        ("{authority}\t", None),
+    ],
 )
 def test_foreign_host_or_origin_is_rejected(tmp_path, control, panel, host, origin):
     write_run(tmp_path, control[0])
+    if host:
+        host = host.format(authority=f"127.0.0.1:{panel}")
     response, _ = request(panel, "/state", host=host, origin=origin)
     assert response.status == 403
     assert not control[1]

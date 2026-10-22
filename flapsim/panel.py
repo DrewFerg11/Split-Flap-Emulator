@@ -34,14 +34,18 @@ def control_target(run_dir):
         raise PanelError("the run has no control API; start it with --control-port 0")
     if control.get("status") == "stopped":
         raise PanelError("the run has finished; its control API is stopped")
-    endpoint = urlsplit(control["endpoint"])
-    if endpoint.scheme != "http" or endpoint.hostname != "127.0.0.1" or not endpoint.port:
+    try:
+        endpoint = urlsplit(control["endpoint"])
+        port = endpoint.port  # raises ValueError for a non-numeric or out-of-range port
+    except (TypeError, ValueError, AttributeError) as error:
+        raise PanelError("the control endpoint is not a loopback HTTP address") from error
+    if endpoint.scheme != "http" or endpoint.hostname != "127.0.0.1" or not port:
         raise PanelError("the control endpoint is not a loopback HTTP address")
     try:
         token = Path(control["token_file"]).read_text().strip()
     except (KeyError, TypeError, OSError) as error:
         raise PanelError("the run's control token file is not readable") from error
-    return endpoint.port, token
+    return port, token
 
 
 def fetch_state(run_dir):
