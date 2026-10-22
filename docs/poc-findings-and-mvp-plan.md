@@ -1,6 +1,6 @@
 # Split-Flap-Emulator: POC findings and MVP implementation plan
 
-**Status:** Proof of concept complete (October 2026). MVP implementations 1–5 are merged; phase 5 implementation is merged; phase 6 is next for review.
+**Status:** Proof of concept complete (October 2026). MVP phases 1–5 are merged and the first image (`v0.1.0`) is published; phase 6's emulator side (PR #17) is merged and its companion firmware gate is not active yet.
 **Audience:** whoever builds the MVP. This document is meant to be enough on its own.
 
 ## Contents
@@ -304,7 +304,7 @@ GitHub Actions checks land with each phase, starting in phase 1. The original st
 technical references. Golden regression checks from step 11 are introduced incrementally in phases 1–4;
 maintenance documentation is completed in phase 5.
 
-Implementations 1–5 are **merged** in main as `9663764`, `3eebd00`, `e237b07`, `2004377` and `dd6a432`. Golden CI uses the accepted checksum-bound known-issues baseline (#15); strict new-firmware release checks use no baseline. Phase 5 packaging is merged as `dd6a432`; phase 6 is next for review. Later phases
+Implementations 1–5 are **merged** in main as `9663764`, `3eebd00`, `e237b07`, `2004377` and `dd6a432`. Golden CI uses the accepted checksum-bound known-issues baseline (#15); strict new-firmware release checks use no baseline. Phase 5 packaging is merged as `dd6a432` and `v0.1.0` is published; phase 6's emulator side is merged. Later phases
 remain stacked drafts or queued work. No phase is complete until its
 implementation is merged and acceptance passes. See the [ordered PR queue](implementation-queue.md) and
 [phase-1 reproduction instructions](development.md).
@@ -315,8 +315,8 @@ implementation is merged and acceptance passes. See the [ordered PR queue](imple
 | 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | Merged: [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10) as `3eebd00`; both real layouts and CI passed; Hermes approved before merge; [hardware/schema contract](hardware-model.md) |
 | 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | Merged: [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11) as `e237b07`; [runner contract](runner.md); all three CI jobs and 144 local tests passed; Hermes approved before merge |
 | 4 | [Scenarios, smoke tests, reports, and replay](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | 6–8; golden regression checks from 11 | Implementation merged in [PR #12](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/12) as `2004377`; Hermes approved, all seven CI jobs pass using [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15); full strict firmware-functional follow-up remains open |
-| 5 | [Docker packaging, verified publishing, and maintenance](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | 9; maintenance from 11 | Implementation merged in [PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13) as `dd6a432`; actual image cases pass with visible baseline, publication-rejection setup fix is in #17; GHCR publication remains pending |
-| 6 | [Firmware release gating](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | 10; companion firmware-repository PR | [PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17) rebased onto main `dd6a432` after packaging merge; [companion firmware draft #85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85); [strict same-run gate and dry-run probes](release-gate.md); 255 local tests pass, actual image/hosted evidence pending, no active gate claimed |
+| 5 | [Docker packaging, verified publishing, and maintenance](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | 9; maintenance from 11 | Merged in [PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13) as `dd6a432`; `v0.1.0` published by [Release / Tag](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39711368887) as `ghcr.io/drewferg11/split-flap-emulator@sha256:acd9a51fe50c91530df3e1583ce070cb17e712d31d8d415654c43d97879d3935` after full image verification |
+| 6 | [Firmware release gating](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | 10; companion firmware-repository PR | Emulator side merged in [PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17); [companion firmware draft #85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85) still needs the published digest configured and strict firmware passes (SFD#54/#84 fix in SFD#91, #14 fix in SFD#90); no active gate claimed |
 
 [View all MVP issues](https://github.com/DrewFerg11/Split-Flap-Emulator/issues?q=is%3Aissue%20label%3Amvp).
 Each issue uses the `[MVP n/6]` title prefix and `mvp` label, with implementation checklists, dependencies,

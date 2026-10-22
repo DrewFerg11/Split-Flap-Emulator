@@ -21,7 +21,10 @@ supervision and bounded boot scenarios. Phase 4 adds declarative serial/HTTP/dis
 scenarios with strict versions, per-step deadlines and finalized reports/replays, and is merged as `2004377`.
 Golden CI uses the checksum-bound, issue-linked [known-issues baseline](baselines/v1.4.1-golden.yaml)
 per [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15); strict release runs use no baseline.
-Phase 5 packaging implementation is merged as `dd6a432`. [Phase 6 / PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17) is next for review. Image publication and strict companion firmware acceptance remain pending; no active release gate is claimed. Full firmware-functional follow-up remains tracked in
+Phase 5 packaging is merged as `dd6a432`, and the first image, `v0.1.0`, is published as
+`ghcr.io/drewferg11/split-flap-emulator@sha256:acd9a51fe50c…` ([container docs](docs/container.md)).
+[Phase 6 / PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17) is merged; its companion
+firmware gate is not active yet (no gate is claimed). Full firmware-functional follow-up remains tracked in
 [firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54) and the separate
 [I2C investigation #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14).
 See [runner usage](docs/runner.md) and [scenario usage](docs/scenarios.md).
@@ -32,7 +35,7 @@ See [runner usage](docs/runner.md) and [scenario usage](docs/scenarios.md).
 - Physical hardware, configuration and state/timeline schemas: [`docs/hardware-model.md`](docs/hardware-model.md)
 - Per-module physical calibration and firmware verification: [`docs/calibration.md`](docs/calibration.md)
 - Live authenticated state and mechanics API: [`docs/control-api.md`](docs/control-api.md)
-- Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md) (publication verification pending)
+- Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md)
 - Ordered branch/PR workflow: [`docs/implementation-queue.md`](docs/implementation-queue.md)
 - QEMU integration decision and lifecycle: [`docs/adr/0001-qemu-integration.md`](docs/adr/0001-qemu-integration.md)
 - Native mode (firmware source built for Linux against host shims; in progress, [#24](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/24)): [`docs/native.md`](docs/native.md), [`docs/adr/0002-native-mode.md`](docs/adr/0002-native-mode.md)

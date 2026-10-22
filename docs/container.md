@@ -9,24 +9,20 @@ entrypoint. Firmware stays external; no firmware binary is baked into the image.
 Installed wheels include the hardware and scenario YAML, so commands work from
 `/work` without mounting the source checkout.
 
-**No verified image or digest is published yet.** Current candidate image
-verification is pending. Golden image checks explicitly mount the checksum-bound
+**Published:** `v0.1.0` is `ghcr.io/drewferg11/split-flap-emulator:0.1.0` (also `latest`),
+immutable reference `ghcr.io/drewferg11/split-flap-emulator@sha256:acd9a51fe50c91530df3e1583ce070cb17e712d31d8d415654c43d97879d3935`.
+Its [Release / Tag run](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39711368887) verified that exact image (installed resources, both golden
+layouts, timeout, stop, wrong-version rejection and native mode) before publishing it, and the
+image pulls anonymously. Split-Flap-Display's PR check pins it as
+`ghcr.io/drewferg11/split-flap-emulator:0.1.0@sha256:acd9a51fe50c91530df3e1583ce070cb17e712d31d8d415654c43d97879d3935`.
+
+Golden image checks explicitly mount the checksum-bound
 [known-issues baseline](../baselines/v1.4.1-golden.yaml), following the accepted
 [#15 policy](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15).
 Matched diagnostics and expected failures remain visible as
-`passed_with_known_issues`/`xfail`, including the separate unresolved
-[I2C investigation #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14).
+`passed_with_known_issues`/`xfail`, including the
+[I2C scheduling artifact #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14).
 A baseline is not a firmware fix; new-firmware release checks use no baseline.
-Publication still requires complete verification of the actual immutable candidate,
-including installed resources, both golden layouts, lifecycle and rejection.
-
-The local image from source `022a2b1` passed installed-resource, source/license,
-provenance, timeout, stop and wrong-version rejection checks
-([evidence](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6#issuecomment-6296570430)).
-Both unscaled strict smokes timed out during initial homing on the two-CPU/vfs
-host, before reaching their HTTP assertions. These local performance failures
-are separate from CI's firmware failures. Partial or failed diagnostics do not
-authorize publication; later source heads require matching image verification.
 
 ## Run a released image
 
@@ -159,10 +155,8 @@ workflow policy; a digest is the immutable reference for consumers.
 A stable `vX.Y.Z` updates `latest` only when no higher stable version is already
 published. Prereleases, such as `v0.1.0-dev.0`, never update `latest`. Publication
 runs serialize. The result artifact records image ID, source SHA, version,
-registry digest and immutable reference. There is currently no result because
-the strict firmware gates are blocked. After those gates pass and packaging is
-merged, a trusted release and recorded digest are still required to complete
-issue #6; the implementation PR alone does not close it.
+registry digest and immutable reference; the first is `v0.1.0`'s
+([run](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39711368887), digest `sha256:acd9a51fe50c91530df3e1583ce070cb17e712d31d8d415654c43d97879d3935`).
 
 See [maintenance](maintenance.md) for source licensing, cache recovery, evidence
 retention, required checks and the firmware-release integration prerequisites.
