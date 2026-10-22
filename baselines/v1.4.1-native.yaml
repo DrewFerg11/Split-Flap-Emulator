@@ -94,3 +94,47 @@ expected_failures:
     action: assert_no_errors
     error:
       regex: '^unexpected serial error: \[\s*\d+\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race, first-boot flow: POST /settings returns success but the web task's writes are
+      dropped, so the reboot keeps the 16-module default layout and never shows WIFI ERR.
+    scenario: first-boot-8
+    step: 11
+    action: wait_display
+    error: timeout
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race, first-boot flow: when the layout write survives, GET /settings can still return
+      compiled defaults for the other saved fields.
+    scenario: first-boot-8
+    step: 12
+    action: http
+    error:
+      regex: '^JSON mismatch at \$\.(name|wire1Addresses|wire1Offsets|wireOffsets|mqtt_server|mqtt_port): expected .+, got .+$'
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race, first-boot flow: the saved name, MQTT and offset values read back as compiled
+      defaults after the reboot.
+    scenario: first-boot-16
+    step: 12
+    action: http
+    error:
+      regex: '^JSON mismatch at \$\.(name|wire1Offsets|mqtt_server|mqtt_port): expected .+, got .+$'
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 4: when the race does not occur, the final strict check still sees the fresh-NVS
+      begin/NOT_FOUND diagnostic, because nothing on v1.4.1 creates the config namespace.
+    scenario: first-boot-8
+    step: 18
+    action: assert_no_errors
+    error:
+      regex: '^unexpected serial error: \[\s*\d+\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 4: when the race does not occur, the final strict check still sees the fresh-NVS
+      begin/NOT_FOUND diagnostic, because nothing on v1.4.1 creates the config namespace.
+    scenario: first-boot-16
+    step: 18
+    action: assert_no_errors
+    error:
+      regex: '^unexpected serial error: \[\s*\d+\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
