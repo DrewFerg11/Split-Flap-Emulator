@@ -64,6 +64,7 @@ class SnapshotClient:
         self.hardware = hardware
         self.lock = threading.Lock()
         self.closed = False
+        self.failure = None
         self.power = None
         connection.settimeout(0.5)
 
@@ -150,6 +151,11 @@ class SnapshotClient:
                     return result, self.power.state if self.power else "on"
                 return result
             except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
+                self.failure = {
+                    "stage": stage,
+                    "error": type(error).__name__,
+                    "detail": str(error)[:160],
+                }
                 self.closed = True
                 self.connection.close()
                 if command is not None:
@@ -226,6 +232,7 @@ class ControlServer:
         self.resets = None
         self.powers = None
         self.power_metadata = None
+        self.channel_failure = None
         self.speeds = None
         self.initial_speed = speed
         self.speed_metadata = None
@@ -550,6 +557,7 @@ class ControlServer:
         self.capabilities["power"] = False
         if client is not None:
             client.close()
+            self.channel_failure = client.failure
         if power is not None:
             self.power_metadata = power.metadata()
         if speeds is not None:
@@ -575,6 +583,7 @@ class ControlServer:
             "run_id": self.run_id,
             "endpoint": self.endpoint,
             "token_file": str(self.token_path),
+            **({"channel_failure": self.channel_failure} if self.channel_failure else {}),
             "fault_support": FAULT_SUPPORT,
             "speed": self.clock_metadata(),
             "capabilities": dict(self.capabilities),

@@ -16,6 +16,7 @@ import signal
 import subprocess
 import sys
 import time
+import traceback
 import urllib.request
 from contextlib import ExitStack
 from pathlib import Path
@@ -388,6 +389,7 @@ def verify(args):
         result.update(passed=True, returncode=returncode)
     except Exception as error:
         result.update(passed=False, error=f"{type(error).__name__}: {error}")
+        result["traceback"] = traceback.format_exc()
         if run.process.poll() is None:
             run.stop()
     result["wall_seconds"] = round(time.monotonic() - started, 3)

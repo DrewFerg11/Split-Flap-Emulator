@@ -44,3 +44,31 @@ def test_fault_config_is_literal_resolved_and_does_not_change_mechanical_draws()
     assert faulted["modules"][0].pop("faults") == {**DEFAULT_FAULTS, "present": False}
     assert faulted == normal
     assert resolved_faults({}) == DEFAULT_FAULTS
+
+
+def test_reset_uart_fragment_requires_pinned_banner_known_prefix_and_observed_reset():
+    from flapsim.scenario import serial_errors
+    from tools.verify_faults import interrupted_reset_lines
+    from tools.verify_native import KnownSerial
+
+    line = "[ 37999][E][Preferenceets Jul 29 2019 12:21:46"
+    text, fragments = interrupted_reset_lines(line, 1)
+    assert text == "ets Jul 29 2019 12:21:46"
+    assert fragments == [
+        {"kind": "reset_interrupted_diagnostic", "fragment": "[ 37999][E][Preference"}
+    ]
+    serial_errors(text, {"fresh_nvs": True}, KnownSerial())
+    with pytest.raises(RuntimeError):
+        interrupted_reset_lines(line, 0)
+    with pytest.raises(RuntimeError):
+        interrupted_reset_lines(line + "\n" + line, 1)
+    for bad in [
+        "[1][E][Wire.cpp:3] failureets Jul 29 2019 12:21:46",
+        "[1][E][Preferences.cpp:50] begin(): nvs_open failed: INVALID_HANDLE"
+        "ets Jul 29 2019 12:21:46",
+        "[1][E][Preferenceets invalid firmware banner",
+    ]:
+        preserved, fragments = interrupted_reset_lines(bad, 3)
+        assert preserved == bad and not fragments
+        with pytest.raises(RuntimeError):
+            serial_errors(preserved, {}, KnownSerial())

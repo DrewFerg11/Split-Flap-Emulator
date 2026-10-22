@@ -235,6 +235,8 @@ bool fs_restore_overlay(struct json_object *record) {
                 json_object_object_get_ex(entry, "mechanics", &physical) &&
                 fs_parse_mechanics(physical, &fs.modules[i], false);
     }
+    /* fs_restore_faults ran first: this is the recorded EFFECTIVE state, not
+     * initial hardware. Reapplying the last patch must reproduce that state. */
     FsModule copy = fs.modules[index];
     struct json_object *physical = fs_mechanics(&copy);
     struct json_object *original_faults = fs_faults(&copy), *fault_patch;

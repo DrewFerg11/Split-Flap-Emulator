@@ -93,6 +93,14 @@ def test_channel_failure_is_bounded_and_does_not_reuse_a_late_reply(failure):
     try:
         with pytest.raises(Unavailable):
             client.snapshot()
+        assert client.failure["stage"] in {"model_exchange", "reply_validation"}
+        assert client.failure["error"] in {
+            "TimeoutError",
+            "ValueError",
+            "TypeError",
+            "BrokenPipeError",
+        }
+        assert len(client.failure["detail"]) <= 160
         with pytest.raises(Unavailable):
             client.snapshot()
     finally:

@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import re
 import signal
 import urllib.error
 import urllib.request
@@ -19,6 +20,33 @@ CASES = {
     "motor-dead": {"motor": "dead"},
     "absent": {"present": False},
 }
+
+
+def interrupted_reset_lines(text, observed_resets):
+    """Keep reset-interrupted UART fragments as evidence, not complete diagnostics.
+
+    Only the known Preferences begin diagnostic's literal prefix, immediately
+    joined to the pinned ESP32 ROM banner, can be classified this way. Complete
+    errors and other prefixes remain subject to the ordinary serial checks.
+    """
+    canonical = "Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
+    banner = "ets Jul 29 2019 12:21:46"
+    fragments, lines = [], []
+    for line in text.splitlines():
+        before, separator, after = line.partition(banner)
+        match = re.fullmatch(r"\[\s*\d+\]\[E\]\[(Preference.*)", before)
+        if (
+            separator
+            and match
+            and len(match[1]) < len(canonical)
+            and canonical.startswith(match[1])
+        ):
+            fragments.append({"kind": "reset_interrupted_diagnostic", "fragment": before})
+            if len(fragments) > observed_resets:
+                raise RuntimeError("more interrupted diagnostics than observed controller resets")
+            line = banner + after
+        lines.append(line)
+    return "\n".join(lines), fragments
 
 
 class FaultProbe:
@@ -42,6 +70,7 @@ class FaultProbe:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.out = context.out
         native = manifest["mode"] == "native"
+        self.native = native
 
         def record():
             (context.out / "fault-verification.json").write_text(
@@ -144,6 +173,7 @@ class FaultProbe:
         self.evidence["lifecycle"] = {"reset": reset, "off": off, "on": on, "resumed": resumed}
         self.evidence["cleared"] = patch(DEFAULT_FAULTS, 2, 1)
         recovery = api("/reset", {"id": 2}, 202)
+        self.evidence["recovery_reset"] = recovery
         text = (" " if native else "X") * len(context.hardware["modules"])
         while True:
             state = api()["state"]
@@ -180,6 +210,15 @@ class FaultProbe:
 
     def verify_final(self, out, hardware):
         text = (out / "serial.log").read_text(errors="replace")
+        if not self.native:
+            lifecycle = self.evidence["lifecycle"]
+            resets = {
+                r["boot_generation"]
+                for r in [lifecycle["reset"], lifecycle["on"], self.evidence["recovery_reset"]]
+            }
+            text, fragments = interrupted_reset_lines(text, len(resets))
+            self.evidence["reset_interrupted_diagnostics"] = fragments
+            (out / "fault-verification.json").write_text(json.dumps(self.evidence, indent=2) + "\n")
         expected = "Error writing data to module 32, error code: 2"
         count = text.splitlines().count(expected)
         if self.case == "absent":
