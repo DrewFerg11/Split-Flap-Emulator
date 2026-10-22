@@ -64,6 +64,18 @@ bool fs_parse_faults(struct json_object *entry, FsModule *module) {
         fs_fail("normalized faults must be an object");
         return false;
     }
+    static const char *const KEYS[] = {"sensor", "motor",   "i2c",  "sensor_noise",   "slip",
+                                       "nack",   "corrupt", "seed", "disappear_at_ns"};
+    json_object_object_foreach(faults, key, unused) {
+        (void)unused;
+        size_t i = 0;
+        while (i < sizeof(KEYS) / sizeof(*KEYS) && strcmp(key, KEYS[i]))
+            i++;
+        if (i == sizeof(KEYS) / sizeof(*KEYS)) {
+            fs_fail("normalized faults.%s is not a fault parameter", key);
+            return false;
+        }
+    }
     FsFaults *f = &module->faults;
     f->configured = true;
     f->sensor = choice(faults, "sensor", SENSOR, 5);

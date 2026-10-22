@@ -1369,6 +1369,17 @@ def test_bad_fault_configuration_is_rejected(faults):
         normalize_hardware(document)
 
 
+def test_model_rejects_unknown_fault_parameters_beside_a_valid_fault(make_model):
+    model = faulted(make_model, {"sensor": "stuck_active"})
+    config = json.loads(model.config.read_text())
+    module = config["modules"][0]
+    module["faults"]["power"] = "cycle"
+    model.lib.fs_model_close()
+    model.config.write_text(json.dumps(config))
+    assert model.lib.fs_model_init(str(model.config).encode()) != 0
+    assert b"faults.power" in model.lib.fs_model_error()
+
+
 def test_native_power_checkpoint_preserves_moving_state_and_resumes_once(make_model):
     model = make_model(angles=(100, 200), buses=(0, 0))
     model.control({"sensor_window": 41})
