@@ -5,9 +5,13 @@ repository adds one **non-gating** job that builds each pull request's own sourc
 and runs the emulator's scenarios against it. QEMU mode against the released image stays the
 release gate. Make the job required once it has been stable on firmware PRs for a while.
 
-Copy [`firmware-native-ci.yml`](firmware-native-ci.yml) to
-`.github/workflows/ci-native-emulator.yml` in Split-Flap-Display. Then set `EMULATOR_REF` to a
-merged emulator commit (a full SHA, so the checks change only when you bump it on purpose).
+The job uses only the **published image**, pinned by digest: it pulls the image, builds the PR's
+source inside it with `--network none` (the pinned libraries ship in the image), and runs every
+scenario in it. It needs no emulator checkout, no host toolchain and no registry login (the image
+is public). [`firmware-native-ci.yml`](firmware-native-ci.yml) mirrors the job as installed in
+Split-Flap-Display's `.github/workflows/ci-native-emulator.yml`. To move to a newer emulator, set
+`FLAPSIM_IMAGE` to the `ghcr.io/drewferg11/split-flap-emulator@sha256:...` reference that release's
+publication recorded.
 
 ## What it checks
 
