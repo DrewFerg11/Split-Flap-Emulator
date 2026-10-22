@@ -1,6 +1,7 @@
 """Runner-owned control service; firmware HTTP remains a separate endpoint."""
 
 import asyncio
+import copy
 import hmac
 import json
 import os
@@ -62,6 +63,7 @@ class SnapshotClient:
         self.hardware = hardware
         self.lock = threading.Lock()
         self.closed = False
+        self.power = None
         connection.settimeout(0.5)
 
     def close(self):
@@ -92,12 +94,20 @@ class SnapshotClient:
     def snapshot(self):
         return self.dispatch()
 
-    def dispatch(self, command=None, journal=None):
+    def view(self):
+        return self.dispatch(with_power=True)
+
+    def dispatch(self, command=None, journal=None, *, with_power=False):
         if not self.lock.acquire(blocking=False):
             raise Unavailable("model request already in progress")
         try:
             if self.closed:
                 raise Unavailable("model channel is unavailable")
+            if self.power is not None and self.power.state == "off":
+                if command is not None:
+                    return {"error": "controller_off"}
+                frozen = copy.deepcopy(self.power.frozen)
+                return (frozen, "off") if with_power else frozen
             stage = "intent_audit"
             try:
                 if command is not None:
@@ -119,6 +129,7 @@ class SnapshotClient:
                         "stale_or_reused_id",
                         "revision_exhausted",
                         "backend_unavailable",
+                        "controller_off",
                     }:
                         raise ValueError("invalid model rejection")
                 else:
@@ -131,6 +142,8 @@ class SnapshotClient:
                 if command is not None:
                     stage = "result_audit"
                     journal({"phase": "result", "command": command, "result": result})
+                if with_power:
+                    return result, self.power.state if self.power else "on"
                 return result
             except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
                 self.closed = True
@@ -205,6 +218,8 @@ class ControlServer:
         self.backend = backend
         self.client = None
         self.resets = None
+        self.powers = None
+        self.power_metadata = None
         self.capabilities = dict(CAPABILITIES)
         self.run_id = str(uuid.uuid4())
         self.token = secrets.token_urlsafe(32)
@@ -221,13 +236,15 @@ class ControlServer:
             with os.fdopen(fd, "w") as secret:
                 secret.write(self.token + "\n")
 
-            def envelope(snapshot):
+            def envelope(snapshot, power_state=None):
+                power_state = power_state or (self.powers.state if self.powers else "on")
                 return {
                     "api_version": 1,
                     "run_id": self.run_id,
                     "backend": backend,
                     "boot_generation": snapshot["guest_resets"],
-                    "live": True,
+                    "live": power_state == "on",
+                    "power_state": power_state,
                     "capabilities": dict(self.capabilities),
                 }
 
@@ -252,10 +269,10 @@ class ControlServer:
                 if client is None:
                     return JSONResponse({"error": "backend_unavailable"}, status_code=503)
                 try:
-                    snapshot = await run_in_threadpool(client.snapshot)
+                    snapshot, power_state = await run_in_threadpool(client.view)
                 except Unavailable:
                     return JSONResponse({"error": "backend_unavailable"}, status_code=503)
-                return JSONResponse({**envelope(snapshot), "state": snapshot})
+                return JSONResponse({**envelope(snapshot, power_state), "state": snapshot})
 
             async def mechanics(request):
                 from starlette.concurrency import run_in_threadpool
@@ -320,23 +337,24 @@ class ControlServer:
                 if client is None:
                     return JSONResponse({"error": "backend_unavailable"}, status_code=503)
                 try:
-                    snapshot = await run_in_threadpool(client.snapshot)
+                    snapshot, power_state = await run_in_threadpool(client.view)
                 except Unavailable:
                     return JSONResponse({"error": "backend_unavailable"}, status_code=503)
                 applied = snapshot.get("last_operation")
                 if applied is None or applied["command"]["id"] != request.path_params["id"]:
                     return JSONResponse(
-                        {**envelope(snapshot), "status": "unknown"}, status_code=404
+                        {**envelope(snapshot, power_state), "status": "unknown"}, status_code=404
                     )
                 return JSONResponse(
-                    {**envelope(snapshot), "status": "applied", "operation": applied}
+                    {**envelope(snapshot, power_state), "status": "applied", "operation": applied}
                 )
 
             async def reset(request):
                 from starlette.concurrency import run_in_threadpool
                 from starlette.requests import ClientDisconnect
 
-                controller = self.resets
+                is_power = request.url.path.startswith("/api/emu/power")
+                controller = self.powers if is_power else self.resets
                 if controller is None:
                     return JSONResponse({"error": "backend_unavailable"}, status_code=503)
                 if request.method == "GET":
@@ -377,9 +395,10 @@ class ControlServer:
                     return JSONResponse({"error": "invalid_json"}, status_code=400)
                 if (
                     not isinstance(command, dict)
-                    or set(command) != {"id"}
+                    or set(command) != ({"id", "on"} if is_power else {"id"})
                     or type(command["id"]) is not int
                     or not 1 <= command["id"] <= MAX_CONTROL_ID
+                    or (is_power and type(command["on"]) is not bool)
                 ):
                     return JSONResponse({"error": "invalid_command"}, status_code=422)
                 try:
@@ -390,7 +409,9 @@ class ControlServer:
                     )
                 code = 202
                 if "error" in result:
-                    code = 409 if result["error"] == "stale_or_reused_id" else 503
+                    code = (
+                        409 if result["error"] in {"stale_or_reused_id", "controller_off"} else 503
+                    )
                 elif result["status"] == "unknown":
                     code = 503
                 return JSONResponse(
@@ -407,6 +428,8 @@ class ControlServer:
                     Route("/api/emu/operations/{id:int}", operation, methods=["GET"]),
                     Route("/api/emu/reset", reset, methods=["POST"]),
                     Route("/api/emu/reset/operations/{id:int}", reset, methods=["GET"]),
+                    Route("/api/emu/power", reset, methods=["POST"]),
+                    Route("/api/emu/power/operations/{id:int}", reset, methods=["GET"]),
                 ]
             )
 
@@ -462,7 +485,7 @@ class ControlServer:
             self.close()
             raise
 
-    def attach(self, connection, *, reset=None):
+    def attach(self, connection, *, reset=None, power=None):
         self.detach()
         self.client = SnapshotClient(connection, self.hardware)
         if self.backend == "native" or reset is not None:
@@ -470,13 +493,22 @@ class ControlServer:
 
             self.resets = ResetController(self.client, reset)
             self.capabilities["reset"] = True
+        if power is not None:
+            from flapsim.power import PowerController
+
+            self.powers = PowerController(self.client, power)
+            self.capabilities["power"] = True
 
     def detach(self):
         client, self.client = self.client, None
+        power, self.powers = self.powers, None
         self.resets = None
         self.capabilities["reset"] = False
+        self.capabilities["power"] = False
         if client is not None:
             client.close()
+        if power is not None:
+            self.power_metadata = power.metadata()
 
     def metadata(self):
         return {
@@ -485,6 +517,13 @@ class ControlServer:
             "endpoint": self.endpoint,
             "token_file": str(self.token_path),
             "capabilities": dict(self.capabilities),
+            **(
+                {"power": self.powers.metadata()}
+                if self.powers
+                else {"power": self.power_metadata}
+                if self.power_metadata
+                else {}
+            ),
         }
 
     def close(self):

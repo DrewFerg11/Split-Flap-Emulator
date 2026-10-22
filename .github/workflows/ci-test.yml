@@ -96,6 +96,19 @@ jobs:
             python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
               --case control --timeout ${{ matrix.timeout }} --out "runs/native/control-$hardware"
           done
+      - name: Verify controller power and checkpoint resume on both layouts
+        run: |
+          set -e
+          for hardware in esp32-8-single esp32-16-dual; do
+            python -m tools.verify_power --mode native --native-build build/native/golden \
+              --hardware "$hardware" --out "runs/native/power-$hardware"
+          done
+          python -m tools.verify_power --mode native --native-build build/native/golden \
+            --end-off --out runs/native/power-end-off
+          for result in timeout interrupt; do
+            python -m tools.verify_power --mode native --native-build build/native/golden \
+              --off-exit "$result" --out "runs/native/power-off-$result"
+          done
       - name: Run the golden smoke scenarios natively under the native known-issues baseline
         if: matrix.name != 'sanitizers'
         run: |
@@ -216,6 +229,12 @@ jobs:
             --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
             --hardware "${{ matrix.hardware }}" --known-issues baselines/v1.4.1-golden.yaml \
             --out runs/scenario
+      - name: Verify stopped controller power and power-on during motion
+        if: startsWith(matrix.name, 'control-')
+        run: |
+          python -m tools.verify_power --mode qemu \
+            --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+            --hardware "${{ matrix.hardware }}" --out runs/power
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
         run: python -m tools.summarize_run runs/scenario/run.json

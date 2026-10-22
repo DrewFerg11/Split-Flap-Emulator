@@ -272,8 +272,13 @@ def run(args, *, executor=None, interrupt=None):
                             context.pause()
                         if control is not None:
                             from flapsim.lifecycle import qmp_reset
+                            from flapsim.power import QemuPower
 
-                            control.attach(connection, reset=lambda path=qmp: qmp_reset(path))
+                            control.attach(
+                                connection,
+                                reset=lambda path=qmp: qmp_reset(path),
+                                power=QemuPower(qmp),
+                            )
                             manifest["control"] = control.metadata()
                         manifest["status"] = "executing"
                         save_manifest(out, manifest)
@@ -295,6 +300,9 @@ def run(args, *, executor=None, interrupt=None):
                         raise
                     finally:
                         try:
+                            if control is not None and manifest["status"] == "executing":
+                                control.close()
+                                manifest["control"] = {**control.metadata(), "status": "stopped"}
                             stop_group(process)
                         finally:
                             attempt["returncode"] = process.poll()
@@ -391,6 +399,7 @@ def run_native(args, *, executor=None, interrupt=None):
         "attempts": [],
     }
     process = None
+    owner = None
     control = None
     broker = observer = None
     exit_code = EXIT_RUNTIME
@@ -446,14 +455,47 @@ def run_native(args, *, executor=None, interrupt=None):
                 if child_channel is not None:
                     child_channel.close()
                 attempt["pid"] = process.pid
+                if control is not None:
+                    from flapsim.power import NativePower
+
+                    def launch_power_on(child, resume):
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("deadline reached before power-on")
+                        if interrupt and interrupt() is not None:
+                            raise TimeoutError("interrupted before power-on")
+                        return subprocess.Popen(
+                            command,
+                            stdin=subprocess.DEVNULL,
+                            stdout=log,
+                            stderr=subprocess.STDOUT,
+                            start_new_session=True,
+                            env={
+                                **{
+                                    k: v
+                                    for k, v in os.environ.items()
+                                    if k not in {"FLAPSIM_CONTROL_FD", "FLAPSIM_NATIVE_BOOT"}
+                                },
+                                "FLAPSIM_CONTROL_FD": str(child.fileno()),
+                                "FLAPSIM_NATIVE_BOOT": resume,
+                            },
+                            pass_fds=(server.fileno(), child.fileno()),
+                        )
+
+                    owner = NativePower(process, launch_power_on)
                 context = RunContext(
-                    out, hardware, manifest["endpoint"], process, deadline, interrupt, services
+                    out,
+                    hardware,
+                    manifest["endpoint"],
+                    owner or process,
+                    deadline,
+                    interrupt,
+                    services,
                 )
                 try:
                     while not native.ready(out):
                         context.pause()
                     if control is not None:
-                        control.attach(connection)
+                        control.attach(connection, power=owner)
                         manifest["control"] = control.metadata()
                     manifest["status"] = "executing"
                     save_manifest(out, manifest)
@@ -461,10 +503,15 @@ def run_native(args, *, executor=None, interrupt=None):
                     context.checkpoint()
                 finally:
                     try:
-                        stop_group(process)
+                        if control is not None:
+                            control.close()
+                            manifest["control"] = {**control.metadata(), "status": "stopped"}
+                        owner.stop() if owner is not None else stop_group(process)
                     finally:
-                        attempt["returncode"] = process.poll()
-                        manifest["native_returncode"] = process.poll()
+                        attempt["returncode"] = (owner.current if owner else process).poll()
+                        manifest["native_returncode"] = attempt["returncode"]
+                        if owner is not None:
+                            attempt["power_processes"] = owner.history
                     process = None
         exit_code = verify_outputs(out, hardware, executor, manifest)
     except BaseException as error:
@@ -472,7 +519,7 @@ def run_native(args, *, executor=None, interrupt=None):
     finally:
         if process is not None:
             try:
-                stop_group(process)
+                owner.stop() if owner is not None else stop_group(process)
             except Exception as error:
                 manifest["cleanup_error"] = str(error)
                 exit_code = EXIT_RUNTIME
@@ -515,7 +562,12 @@ def verify_outputs(out, hardware, executor, manifest):
     """Confirm complete artifacts after stopping, not merely a transient success flag."""
     if not (out / "serial.log").is_file() or not (out / "timeline.jsonl").is_file():
         raise RuntimeError("missing serial/model diagnostics")
-    if read_settlement(out, hardware) is None:
+    power = manifest.get("control", {}).get("power", {})
+    if power.get("state") == "off":
+        from flapsim.state import validate_state
+
+        validate_state(power["snapshot"], hardware, require_settled=False)
+    elif read_settlement(out, hardware) is None:
         raise RuntimeError("missing fresh final model output")
     validate_timeline(out / "timeline.jsonl")
     if hasattr(executor, "verify_final"):
