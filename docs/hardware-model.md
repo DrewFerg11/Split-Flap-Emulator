@@ -214,8 +214,10 @@ modules:
 
 Faults act only on what the firmware sees. The snapshot keeps reporting the
 physical angle, displayed flap and electrical `hall`, so a run's output shows
-both what really happened and what the firmware was told. A faulted NACK
-behaves exactly like an absent address and does not count as a model anomaly.
+both what really happened and what the firmware was told. Sensor faults apply
+to the firmware's reads only; a write transaction never samples the sensor. A
+faulted NACK behaves exactly like an absent address and does not count as a
+model anomaly.
 
 **Randomness.** Each faulted module has its own xorshift32 stream. The stream
 is seeded with the mechanical seed XOR `0x5bd1e995` XOR `(bus << 8 | addr)`;
@@ -223,7 +225,9 @@ if that comes out as zero, `0x5bd1e995` is used instead. The seed is recorded
 as `faults.seed` in the normalized module. Only firmware transactions advance
 the stream. Snapshots and other modules never touch it, so the same seed and
 the same firmware traffic inject the same faults. `disappear_at` is stored as
-`disappear_at_ns`.
+`disappear_at_ns`. Like drums and latches, a new process starts its fault state
+from the normalized configuration: after a native crash resume or power restart
+each stream starts again from its seed and `events` from zero.
 
 **Evidence.** When any module has faults, the identity block in state,
 activity and timeline output gains a top-level `faults` list. Each entry has

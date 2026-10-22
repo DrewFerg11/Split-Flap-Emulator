@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Injected per-module faults (#19). Randomness comes from one xorshift32 stream per module,
  * seeded by the normalized config and advanced only by firmware transactions, so a run with
- * the same seed and firmware traffic injects the same faults and snapshots never perturb it. */
+ * the same seed and firmware traffic injects the same faults and snapshots never perturb it.
+ * A resumed process restarts each stream from its seed, like the rest of the configuration. */
 #include "internal.h"
 #include <string.h>
 
