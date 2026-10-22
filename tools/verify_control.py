@@ -169,6 +169,17 @@ class ControlProbe:
         if restored_state["state"]["modules"] != paused["state"]["modules"]:
             raise RuntimeError("restoring mechanics did not preserve the external state")
         qmp(qmp_path, "cont")
+        # A running hard reset must also work during physical motion. Do not
+        # pause the VM here: firmware should continue normally after reset.
+        while (moving_again := snapshot())["state"]["settled"]:
+            context.pause()
+        record("moving_before_public_reset", moving_again)
+        moving_reset = reset(3)
+        if moving_reset["boot_generation"] != moving_again["boot_generation"] + 1:
+            raise RuntimeError("running reset was not observed exactly once")
+        record("moving_reset", moving_reset)
+        if snapshot()["state"]["last_operation"] != restored["operation"]:
+            raise RuntimeError("running reset lost the mechanics receipt")
         while True:
             final = snapshot()
             state = final["state"]
@@ -179,6 +190,7 @@ class ControlProbe:
                 record("tolerated_stalls", tolerated)
             if (
                 state["settled"]
+                and state["sequence"] > moving_reset["sequence"]
                 and state["settlement_id"] > before_reset["state"]["settlement_id"]
                 and state["text"] == "X" * len(context.hardware["modules"])
                 and display_aligned(state, state["text"])
