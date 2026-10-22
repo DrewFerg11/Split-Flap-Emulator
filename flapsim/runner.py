@@ -214,7 +214,7 @@ def run(args, *, executor=None, interrupt=None):
         if control_port is not None:
             from flapsim.control import ControlServer
 
-            control = ControlServer(control_port, out, hardware)
+            control = ControlServer(control_port, out, hardware, timing=args.timing)
             manifest["control"] = control.metadata()
         (out / "flash.bin").write_bytes(data + b"\xff" * (FLASH_SIZE - len(data)))
         config = write_model_config(hardware, out, trace=args.trace)
@@ -407,7 +407,7 @@ def run_native(args, *, executor=None, interrupt=None):
         if control_port is not None:
             from flapsim.control import ControlServer
 
-            control = ControlServer(control_port, out, hardware, backend="native")
+            control = ControlServer(control_port, out, hardware, backend="native", speed=speed)
             manifest["control"] = control.metadata()
         deadline = started + timeout
         services = {}
