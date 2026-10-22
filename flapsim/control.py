@@ -67,8 +67,11 @@ class SnapshotClient:
         connection.settimeout(0.5)
 
     def close(self):
+        # Close admission immediately, including handlers that already captured
+        # this client but are still uploading a body. An admitted request may
+        # finish under the lock before its transport is closed.
+        self.closed = True
         with self.lock:
-            self.closed = True
             self.connection.close()
 
     def _validate_snapshot(self, state):

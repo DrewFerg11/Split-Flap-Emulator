@@ -301,7 +301,7 @@ def run(args, *, executor=None, interrupt=None):
                     finally:
                         try:
                             if control is not None and manifest["status"] == "executing":
-                                control.close()
+                                control.detach()
                                 manifest["control"] = {**control.metadata(), "status": "stopped"}
                             stop_group(process)
                         finally:
@@ -504,7 +504,7 @@ def run_native(args, *, executor=None, interrupt=None):
                 finally:
                     try:
                         if control is not None:
-                            control.close()
+                            control.detach()
                             manifest["control"] = {**control.metadata(), "status": "stopped"}
                         owner.stop() if owner is not None else stop_group(process)
                     finally:

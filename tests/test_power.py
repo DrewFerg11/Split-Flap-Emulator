@@ -22,6 +22,8 @@ class Backend:
 
     def off(self, client):
         self.calls.append("off")
+        if self.failure == "unexpected":
+            raise AttributeError("injected unexpected adapter failure")
         if self.failure:
             raise OSError("lost checkpoint acknowledgement")
         return client._validate_snapshot(client._exchange(b"FLAPSIM_STATE/1"))
@@ -46,10 +48,10 @@ def power_client():
     assert not worker.is_alive()
 
 
-@pytest.mark.parametrize("failure", [None, "intent", "result", "transport"])
+@pytest.mark.parametrize("failure", [None, "intent", "result", "transport", "unexpected"])
 def test_power_audit_unknown_outcomes_and_retry_never_repeat_transition(power_client, failure):
     client, state = power_client
-    backend = Backend(state, failure == "transport")
+    backend = Backend(state, "unexpected" if failure == "unexpected" else failure == "transport")
     power = PowerController(client, backend)
     entries = []
 

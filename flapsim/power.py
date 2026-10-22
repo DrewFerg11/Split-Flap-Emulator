@@ -1,7 +1,6 @@
 """Controller power approximation, independent of external module power."""
 
 import socket
-import subprocess
 import threading
 import time
 
@@ -207,15 +206,9 @@ class PowerController:
                 journal({"phase": "result", "kind": "power", "command": command, "result": result})
                 self.state, self.receipt = target, result
                 return result
-            except (
-                OSError,
-                ValueError,
-                TypeError,
-                KeyError,
-                RecursionError,
-                RuntimeError,
-                subprocess.SubprocessError,
-            ) as error:
+            except Exception as error:
+                # Any failure after admission can follow a real power transition.
+                # Poison even unexpected adapter errors, never attempt another launch.
                 self.state = "unknown"
                 client.closed = True
                 client.connection.close()
@@ -230,7 +223,7 @@ class PowerController:
                             "channel": "closed",
                         }
                     )
-                except (OSError, ValueError, TypeError, KeyError, RecursionError):
+                except Exception:
                     pass
                 raise Unavailable("power result unknown") from error
         finally:
