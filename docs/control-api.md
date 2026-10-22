@@ -2,8 +2,7 @@
 
 The runner can expose current physical state independently of the firmware's
 web server. The implemented QEMU and native routes provide authenticated live state, atomic mechanics
-edits, controller reset/power transitions, native runtime speed and operation receipts. Fault mutation,
-I2C history and WebSockets remain unavailable and are explicitly false in `capabilities`. Issue #20 stays
+edits, controller reset/power transitions, native runtime speed, deterministic module faults and operation receipts. I2C history and WebSockets remain unavailable and are explicitly false in `capabilities`. Issue #20 stays
 open. See [the implementation plan](control-api-plan.md) for later slices.
 
 ```sh
@@ -79,9 +78,10 @@ Supported patch fields are `steps_per_rotation`, `magnet_position`, `flap_offset
 limits as hardware configuration. Unknown fields, random specifications, empty
 patches, booleans in integer fields, non-finite numbers and duplicate JSON keys
 are rejected. Bodies are UTF-8 JSON, limited to 2048 bytes and one second to arrive.
-Topology, flap order, physical angle, firmware settings and faults are not editable.
+Topology, flap order, physical angle and firmware settings are not editable.
+The deterministic fault subset below is editable through a nested `faults` patch.
 
-All edits require **every motor off and both model buses idle**. Otherwise the model
+Geometry and mixed geometry/fault edits require **every motor off and both model buses idle**. Otherwise the model
 returns `409 model_busy` without applying or queuing anything; retry when idle.
 The complete resulting geometry must be valid, including inherited fields and
 the current angle. Changing rotation size never wraps/rescales the angle.
@@ -418,3 +418,53 @@ QEMU `GET /api/emu/speed` reports `runtime: false` and the startup `timing` pres
 `POST` returns `409 unsupported_capability`: pinned QEMU has no supported live
 icount-rate setter. The API never restarts QEMU or substitutes pause/resume for a
 speed change. Its `capabilities.speed` remains false.
+
+## Deterministic module faults
+
+`POST /api/emu/modules/0/32/mech` also accepts a strict nested fault patch:
+
+```json
+{"id":1,"expected_revision":0,"patch":{"faults":{"hall":"stuck_inactive"}}}
+```
+
+Faults and geometry share revisions, command IDs, audit ordering, latest receipts
+and reset/power persistence. Send only fields to change; `normal` / `present: true`
+repair a fault without clearing its observed counters. An absent module remains
+addressable by the control API so it can be restored.
+
+| Field | Values | Physical meaning |
+|---|---|---|
+| `hall` | `normal`, `stuck_active`, `stuck_inactive` | Force physical detection before applying configured sensor polarity; active-low still has a low electrical bit for active detection |
+| `motor` | `normal`, `dead` | Coils and driver phase update, but valid steps do not move the drum while dead |
+| `present` | `true`, `false` | I²C ACK/NACK presence; disconnecting leaves the external latch, coils and drum angle preserved |
+
+Fault-only patches may apply during motion, between acknowledged I²C transactions.
+An active two-byte read/write returns `409 model_busy`; no input is changed halfway
+through a latched read. An address NACK has no latched data transaction, so it does
+not prevent restoration even on an adapter that supplies no later STOP callback.
+Mixed geometry/fault patches retain the existing all-motors-off requirement.
+Invalid or busy changes apply nothing and do not consume IDs/revisions. New changes
+while the controller is off are rejected as before.
+
+The same literal registry is accepted in each YAML module mapping, for example
+`{addr: 32, faults: {motor: dead}}`. Unspecified fields resolve to `hall: normal`,
+`motor: normal`, `present: true`. Faults do not consume random geometry/angle draws.
+Noise, inversion, probabilistic slip, NACK bursts, read corruption, electrical
+power loss and brownouts remain unsupported under #19; `fault_support` lists the
+available literals, and `capabilities.set_fault` advertises this subset.
+
+Healthy legacy recordings are unchanged. Once a non-normal startup fault or any
+runtime fault command is used, `faults_version: 1` and immutable `initial_faults`
+identify the extension in state/activity/timeline evidence. Each full module
+snapshot includes resolved `faults` and `fault_counters` (`blocked_steps`, `nacks`).
+The first blocked step/NACK after a change or resume emits `fault_observed`;
+subsequent samples/settlements retain cumulative effects without per-step flooding.
+`faults_changed` records an admitted edit; a moving edit does not fabricate a
+settlement. Readers/replay show the effective historical overlay; native resume
+validates it against the initial configuration before restoring dynamic state.
+
+Blocked steps and intentional address NACKs are separate from unexpected stalls
+and anomalies. Tests must prove the intended fault effect and unaffected modules,
+then restore faults and verify recovery; injecting a fault does not disable normal
+error checks or grant a blanket serial-error allowance. The real-firmware probe
+accepts only the targeted module's explicitly evidenced address-NACK diagnostic.

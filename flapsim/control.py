@@ -12,12 +12,13 @@ import time
 import uuid
 from contextlib import contextmanager
 
+from flapsim.faults import FAULT_SUPPORT, validate_faults
 from flapsim.state import MAX_CONTROL_ID, MECHANICS, validate_state
 
 CAPABILITIES = {
     "snapshot": True,
     "set_mechanics": True,
-    "set_fault": False,
+    "set_fault": True,
     "reset": False,
     "power": False,
     "speed": False,
@@ -193,10 +194,12 @@ def validate_command(value, bus, addr):
         if type(value[key]) is not int or not lo <= value[key] <= hi:
             raise ValueError("invalid " + key)
     patch = value["patch"]
-    if not isinstance(patch, dict) or not patch or set(patch) - MECHANICS:
+    if not isinstance(patch, dict) or not patch or set(patch) - (MECHANICS | {"faults"}):
         raise ValueError("empty or unknown mechanics fields")
     for key, part in patch.items():
-        if key == "sensor_polarity":
+        if key == "faults":
+            validate_faults(part, partial=True)
+        elif key == "sensor_polarity":
             if part not in ("active-high", "active-low"):
                 raise ValueError("invalid sensor polarity")
         elif type(part) is not int or not 0 <= part <= 1000000:
@@ -253,6 +256,7 @@ class ControlServer:
                     "live": power_state == "on",
                     "power_state": power_state,
                     "capabilities": dict(self.capabilities),
+                    "fault_support": FAULT_SUPPORT,
                     "speed": self.clock_metadata(),
                 }
 
@@ -571,6 +575,7 @@ class ControlServer:
             "run_id": self.run_id,
             "endpoint": self.endpoint,
             "token_file": str(self.token_path),
+            "fault_support": FAULT_SUPPORT,
             "speed": self.clock_metadata(),
             "capabilities": dict(self.capabilities),
             **(

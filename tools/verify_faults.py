@@ -1,0 +1,230 @@
+"""Real firmware: inject an evidenced fault, check unaffected modules, then recover."""
+
+import argparse
+import json
+import signal
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+from flapsim.faults import DEFAULT_FAULTS
+from flapsim.runner import run
+from flapsim.scenario import serial_errors
+from flapsim.state import display_aligned
+from tools.verify_native import KnownSerial
+
+CASES = {
+    "hall-active": {"hall": "stuck_active"},
+    "hall-inactive": {"hall": "stuck_inactive"},
+    "motor-dead": {"motor": "dead"},
+    "absent": {"present": False},
+}
+
+
+class FaultProbe:
+    timeout = 600
+    document = {"version": 1, "mode": "fault-probe", "timeout": 600}
+
+    def __init__(self, case, mode, hardware):
+        self.case = case
+        self.evidence = {"case": case, "complete": False}
+        if mode == "native":
+            # Match the real configured topology, so every additional NACK is attributable.
+            config = {"ssid": "flapsim-faults", "password": "probe-only"}
+            if "8-" in hardware:
+                config.update(wire1Addresses="", wire1Offsets="")
+            self.native_setup = {"services": [], "clock": None, "nvs": {"config": config}}
+
+    def execute(self, context):
+        manifest = json.loads((context.out / "run.json").read_text())
+        endpoint = manifest["control"]["endpoint"]
+        token = (context.out / "control-token").read_text().strip()
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.out = context.out
+        native = manifest["mode"] == "native"
+
+        def record():
+            (context.out / "fault-verification.json").write_text(
+                json.dumps(self.evidence, indent=2) + "\n"
+            )
+
+        def api(path="/state", body=None, expected=200):
+            context.checkpoint()
+            request = urllib.request.Request(
+                endpoint + "/api/emu" + path,
+                headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+                data=None if body is None else json.dumps(body).encode(),
+            )
+            try:
+                response = opener.open(request, timeout=12)
+            except urllib.error.HTTPError as error:
+                response = error
+            with response:
+                result = json.load(response)
+                if response.status != expected:
+                    raise RuntimeError(f"{path}: HTTP {response.status}: {result}")
+                return result
+
+        def patch(faults, identifier, revision):
+            command = {"id": identifier, "expected_revision": revision, "patch": {"faults": faults}}
+            while True:
+                # Busy is an unadmitted transaction-boundary rejection, safe to retry.
+                context.checkpoint()
+                request = urllib.request.Request(
+                    endpoint + "/api/emu/modules/0/32/mech",
+                    headers={
+                        "Authorization": "Bearer " + token,
+                        "Content-Type": "application/json",
+                    },
+                    data=json.dumps(command).encode(),
+                )
+                try:
+                    response = opener.open(request, timeout=12)
+                except urllib.error.HTTPError as error:
+                    response = error
+                with response:
+                    result = json.load(response)
+                    if response.status == 202:
+                        return result
+                    if response.status != 409 or result.get("error") != "model_busy":
+                        raise RuntimeError(f"fault patch failed: {result}")
+                context.pause()
+
+        initial = api()
+        if not initial["capabilities"]["set_fault"]:
+            raise RuntimeError("fault capability missing")
+        changed = patch(CASES[self.case], 1, 0)
+        # A retained operation is queryable and a same-ID retry never reapplies.
+        if api("/operations/1")["operation"] != changed["operation"]:
+            raise RuntimeError("fault receipt unavailable")
+        self.evidence["applied"] = changed
+        frozen_angle = api()["state"]["modules"][0]["angle"]
+        frozen_latch = api()["state"]["modules"][0]["latch"]
+        while True:
+            state = api()["state"]
+            target = state["modules"][0]
+            siblings = state["modules"][1:]
+            healthy = all(
+                not m["energized"]
+                and m["char"] == (" " if native else "X")
+                and abs(m["flap_error"]) <= 0.25
+                and m["counters"]["reads"] > 0
+                for m in siblings
+            )
+            effects = target["fault_counters"]
+            if self.case == "motor-dead":
+                observed = effects["blocked_steps"] > 0 and target["angle"] == frozen_angle
+            elif self.case == "absent":
+                observed = effects["nacks"] > 0 and target["latch"] == frozen_latch
+            else:
+                level = (self.case == "hall-active") != (
+                    target["mechanics"]["sensor_polarity"] == "active-low"
+                )
+                observed = target["hall"] == level and target["counters"]["reads"] > 0
+            if healthy and observed:
+                if state["counters"]["stalls"] or state["counters"]["anomalies"]:
+                    raise RuntimeError("unexpected model faults alongside injection")
+                break
+            context.pause()
+        self.evidence["observed"] = state
+        record()
+        reset = api("/reset", {"id": 1}, 202)
+        if api()["state"]["modules"][0]["faults"] != target["faults"]:
+            raise RuntimeError("reset cleared fault overlay")
+        off = api("/power", {"id": 1, "on": False}, 202)
+        on = api("/power", {"id": 2, "on": True}, 202)
+        resumed = api()["state"]
+        if (
+            on["boot_generation"] != off["boot_generation"] + 1
+            or resumed["modules"][0]["faults"] != target["faults"]
+        ):
+            raise RuntimeError("power-on lost fault overlay")
+        if api("/operations/1")["operation"] != changed["operation"]:
+            raise RuntimeError("lifecycle transition lost fault receipt")
+        self.evidence["lifecycle"] = {"reset": reset, "off": off, "on": on, "resumed": resumed}
+        self.evidence["cleared"] = patch(DEFAULT_FAULTS, 2, 1)
+        recovery = api("/reset", {"id": 2}, 202)
+        text = (" " if native else "X") * len(context.hardware["modules"])
+        while True:
+            state = api()["state"]
+            homed = True
+            if native:
+                records = [
+                    json.loads(line)
+                    for line in (context.out / "timeline.jsonl")
+                    .read_text()
+                    .splitlines(keepends=True)
+                    if line.endswith("\n")
+                ]
+                homed = any(
+                    r["event"] == "move_finished"
+                    and r["text"].strip() == "OK"
+                    and recovery["sequence"] < r["sequence"] < state["sequence"]
+                    for r in records
+                )
+            if (
+                homed
+                and state["settled"]
+                and state["text"] == text
+                and state["sequence"] > recovery["sequence"]
+                and display_aligned(state, text)
+            ):
+                if state["counters"]["stalls"] or state["counters"]["anomalies"]:
+                    raise RuntimeError("unexpected model faults during recovery")
+                break
+            context.pause()
+        self.evidence["final"] = state
+        self.evidence["complete"] = True
+        record()
+        return {"state": state}
+
+    def verify_final(self, out, hardware):
+        text = (out / "serial.log").read_text(errors="replace")
+        expected = "Error writing data to module 32, error code: 2"
+        count = text.splitlines().count(expected)
+        if self.case == "absent":
+            if (
+                not 1 <= count <= 3
+                or not self.evidence["observed"]["modules"][0]["fault_counters"]["nacks"]
+            ):
+                raise RuntimeError("missing/excess firmware NACK evidence")
+            text = "\n".join(line for line in text.splitlines() if line != expected)
+        serial_errors(text, {"fresh_nvs": True}, KnownSerial())
+        if not self.evidence["complete"]:
+            raise RuntimeError("incomplete fault proof")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=["native", "qemu"], required=True)
+    parser.add_argument("--case", choices=CASES, required=True)
+    parser.add_argument("--native-build", type=Path)
+    parser.add_argument("--firmware", type=Path)
+    parser.add_argument("--qemu-prefix", type=Path, default=Path("build/qemu/install"))
+    parser.add_argument("--hardware", default="esp32-16-dual")
+    parser.add_argument("--out", type=Path, required=True)
+    args = parser.parse_args()
+    args.firmware_src = None
+    args.speed, args.scenario, args.seed = 10, "boot", 7
+    args.timeout, args.trace, args.control_port, args.timing = 600, False, 0, "ci"
+    received = []
+
+    def interrupted(signum, frame):
+        received.append(signum)
+
+    previous = {s: signal.signal(s, interrupted) for s in [signal.SIGINT, signal.SIGTERM]}
+    try:
+        code = run(
+            args,
+            executor=FaultProbe(args.case, args.mode, args.hardware),
+            interrupt=lambda: received[0] if received else None,
+        )
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+    print((args.out / "run.json").read_text())
+    return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

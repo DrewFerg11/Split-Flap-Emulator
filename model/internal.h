@@ -15,10 +15,14 @@ typedef struct {
     int bus, addr, angle, phase, steps, magnet, flap_offset, window;
     bool energized, active_low;
     uint16_t latch;
+    int hall_fault; /* 0 normal, 1 stuck active, 2 stuck inactive (physical detection). */
+    bool dead_motor, absent, observed_nack, observed_block;
+    uint64_t blocked_steps, nacks;
     FsCounters counters;
 } FsModule;
 typedef struct {
     int selected, direction, writes, reads;
+    bool active, rejected;
     uint8_t bytes[2];
     uint16_t input;
 } FsBus;
@@ -28,7 +32,7 @@ typedef struct {
     char flaps[96];
     FsBus buses[2];
     FsCounters totals;
-    bool initialized, failed, pending_anomaly;
+    bool initialized, failed, pending_anomaly, faults_enabled, fault_event_pending;
     uint64_t movement_id, settlement_id, sequence;
     uint64_t guest_resets, mechanics_revision;
     struct json_object *operation;
@@ -54,6 +58,10 @@ void fs_write_activity(void);
 struct json_object *fs_mechanics(const FsModule *module);
 struct json_object *fs_initial_mechanics(void);
 bool fs_parse_mechanics(struct json_object *object, FsModule *module, bool partial);
+struct json_object *fs_faults(const FsModule *module);
+struct json_object *fs_initial_faults(void);
+bool fs_parse_faults(struct json_object *object, FsModule *module, bool partial);
+bool fs_restore_faults(struct json_object *record);
 bool fs_restore_overlay(struct json_object *record);
 char *fs_control_command(const char *request, int64_t guest_ns);
 bool fs_restore(const char *timeline_path, bool *recorded_reset);

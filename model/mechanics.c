@@ -21,6 +21,108 @@ static bool integer(struct json_object *object, const char *key, int64_t lo, int
     return *out >= lo && *out <= hi;
 }
 
+/* Shared literal registry for startup configuration, runtime patches and resume evidence. */
+struct json_object *fs_faults(const FsModule *module) {
+    struct json_object *object = json_object_new_object();
+    const char *hall[] = {"normal", "stuck_active", "stuck_inactive"};
+    json_object_object_add(object, "hall", json_object_new_string(hall[module->hall_fault]));
+    json_object_object_add(object, "motor",
+                           json_object_new_string(module->dead_motor ? "dead" : "normal"));
+    json_object_object_add(object, "present", json_object_new_boolean(!module->absent));
+    return object;
+}
+
+struct json_object *fs_initial_faults(void) {
+    struct json_object *array = json_object_new_array();
+    for (int i = 0; i < fs.count; i++)
+        json_object_array_add(array, fs_faults(&fs.initial_modules[i]));
+    return array;
+}
+
+bool fs_parse_faults(struct json_object *object, FsModule *module, bool partial) {
+    if (!object || !json_object_is_type(object, json_type_object))
+        return false;
+    int count = json_object_object_length(object);
+    if (count < 1 || (!partial && count != 3))
+        return false;
+    json_object_object_foreach(object, key, value) {
+        if (!strcmp(key, "present")) {
+            if (!json_object_is_type(value, json_type_boolean))
+                return false;
+            module->absent = !json_object_get_boolean(value);
+        } else {
+            if (!json_object_is_type(value, json_type_string))
+                return false;
+            const char *text = json_object_get_string(value);
+            if (strlen(text) != (size_t)json_object_get_string_len(value))
+                return false;
+            if (!strcmp(key, "hall")) {
+                if (!strcmp(text, "normal"))
+                    module->hall_fault = 0;
+                else if (!strcmp(text, "stuck_active"))
+                    module->hall_fault = 1;
+                else if (!strcmp(text, "stuck_inactive"))
+                    module->hall_fault = 2;
+                else
+                    return false;
+            } else if (!strcmp(key, "motor")) {
+                if (!strcmp(text, "normal"))
+                    module->dead_motor = false;
+                else if (!strcmp(text, "dead"))
+                    module->dead_motor = true;
+                else
+                    return false;
+            } else
+                return false;
+        }
+    }
+    return true;
+}
+
+bool fs_restore_faults(struct json_object *record) {
+    struct json_object *version, *initial, *modules, *entry, *value, *effects;
+    bool enabled = json_object_object_get_ex(record, "faults_version", &version);
+    if (!json_object_object_get_ex(record, "modules", &modules) ||
+        !json_object_is_type(modules, json_type_array) ||
+        json_object_array_length(modules) != (size_t)fs.count)
+        return false;
+    if (!enabled) {
+        if (fs.faults_enabled || json_object_object_get_ex(record, "initial_faults", &initial))
+            return false;
+        for (int i = 0; i < fs.count; i++) {
+            entry = json_object_array_get_idx(modules, i);
+            if (json_object_object_get_ex(entry, "faults", &value) ||
+                json_object_object_get_ex(entry, "fault_counters", &value))
+                return false;
+        }
+        return true;
+    }
+    if (!json_object_is_type(version, json_type_int) || json_object_get_int64(version) != 1 ||
+        !json_object_object_get_ex(record, "initial_faults", &initial))
+        return false;
+    struct json_object *configured = fs_initial_faults();
+    bool valid = json_object_equal(configured, initial);
+    json_object_put(configured);
+    for (int i = 0; valid && i < fs.count; i++) {
+        entry = json_object_array_get_idx(modules, i);
+        int64_t blocked, nacks;
+        valid = json_object_object_get_ex(entry, "faults", &value) &&
+                fs_parse_faults(value, &fs.modules[i], false) &&
+                json_object_object_get_ex(entry, "fault_counters", &effects) &&
+                json_object_is_type(effects, json_type_object) &&
+                json_object_object_length(effects) == 2 &&
+                integer(effects, "blocked_steps", 0, INT64_MAX, &blocked) &&
+                integer(effects, "nacks", 0, INT64_MAX, &nacks);
+        if (valid) {
+            fs.modules[i].blocked_steps = (uint64_t)blocked;
+            fs.modules[i].nacks = (uint64_t)nacks;
+        }
+    }
+    if (valid)
+        fs.faults_enabled = true;
+    return valid;
+}
+
 struct json_object *fs_mechanics(const FsModule *module) {
     struct json_object *object = json_object_new_object();
     number(object, "steps_per_rotation", module->steps);
@@ -48,7 +150,10 @@ bool fs_parse_mechanics(struct json_object *object, FsModule *module, bool parti
     if (count < 1 || (!partial && count != 5))
         return false;
     json_object_object_foreach(object, key, value) {
-        if (!strcmp(key, "sensor_polarity")) {
+        if (!strcmp(key, "faults")) {
+            if (!partial || !fs_parse_faults(value, module, true))
+                return false;
+        } else if (!strcmp(key, "sensor_polarity")) {
             if (!json_object_is_type(value, json_type_string))
                 return false;
             const char *text = json_object_get_string(value);
@@ -132,11 +237,18 @@ bool fs_restore_overlay(struct json_object *record) {
     }
     FsModule copy = fs.modules[index];
     struct json_object *physical = fs_mechanics(&copy);
+    struct json_object *original_faults = fs_faults(&copy), *fault_patch;
+    if (json_object_object_get_ex(patch, "faults", &fault_patch) && !fs.faults_enabled)
+        valid = false;
     valid = valid && fs_parse_mechanics(patch, &copy, true);
     struct json_object *patched = fs_mechanics(&copy);
     valid = valid && json_object_equal(physical, patched);
     json_object_put(physical);
     json_object_put(patched);
+    struct json_object *patched_faults = fs_faults(&copy);
+    valid = valid && json_object_equal(original_faults, patched_faults);
+    json_object_put(original_faults);
+    json_object_put(patched_faults);
     int64_t record_sequence, record_guest;
     valid = valid && integer(record, "sequence", sequence, INT64_MAX, &record_sequence) &&
             integer(record, "guest_ns", guest, INT64_MAX, &record_guest);
@@ -211,7 +323,10 @@ char *fs_control_command(const char *request, int64_t guest_ns) {
         goto done;
     }
     /* No changes mid-transaction, or while any motor remains energized. Busy is retryable. */
-    if (fs_any_energized() || fs.buses[0].selected >= 0 || fs.buses[1].selected >= 0) {
+    struct json_object *fault_patch;
+    bool changes_faults = json_object_object_get_ex(patch, "faults", &fault_patch);
+    bool fault_only = changes_faults && json_object_object_length(patch) == 1;
+    if ((!fault_only && fs_any_energized()) || fs.buses[0].active || fs.buses[1].active) {
         error = "model_busy";
         goto done;
     }
@@ -227,10 +342,14 @@ char *fs_control_command(const char *request, int64_t guest_ns) {
     if (fs.operation)
         json_object_put(fs.operation);
     fs.operation = operation;
+    if (changes_faults)
+        changed.observed_nack = changed.observed_block = false;
     fs.modules[index] = changed;
+    if (changes_faults)
+        fs.faults_enabled = true;
     fs.mechanics_revision++;
     fs.now = guest_ns;
-    fs_emit("mechanics_changed", true);
+    fs_emit(changes_faults ? "faults_changed" : "mechanics_changed", !fs_any_energized());
     if (!fs.failed && fsync(fileno(fs.timeline)) != 0)
         fs_fail("cannot commit mechanics timeline");
     json_object_put(command);

@@ -97,7 +97,8 @@ function draw(){
     guest_seconds:frame.guest_ns/1e9,event:frame.event,movement:frame.movement_id,
     settlement:frame.settlement_id,settled:frame.settled,counters:frame.counters,
     mechanics_revision:frame.mechanics_revision??0,last_operation:frame.last_operation,
-    mechanics:frame.modules.map(m=>({bus:m.bus,addr:m.addr,mechanics:m.mechanics}))},null,2);
+    mechanics:frame.modules.map(m=>({bus:m.bus,addr:m.addr,mechanics:m.mechanics,
+      faults:m.faults,fault_counters:m.fault_counters}))},null,2);
 }
 scrub.max=Math.max(0,frames.length-1);scrub.disabled=!frames.length;play.disabled=!frames.length;
 scrub.addEventListener('input',()=>{pause();draw();});

@@ -32,24 +32,46 @@ static int event_inner(uint8_t id, uint8_t address, uint16_t event, int64_t gues
         return 1;
     fs.now = guest_ns;
     int index = fs_find(id, address);
+    int kind = event & 255;
+    if (index >= 0 && fs.modules[index].absent) {
+        if (kind <= 2) {
+            FsModule *module = &fs.modules[index];
+            module->nacks++;
+            if (!module->observed_nack) {
+                module->observed_nack = true;
+                fs.fault_event_pending = true;
+            }
+        }
+        index = -1;
+    }
     if (fs.trace) {
         fprintf(fs.trace, "%lld bus=%u addr=0x%02x event=0x%04x %s\n", (long long)guest_ns, id,
                 address, event, index >= 0 ? "present" : "absent");
         fflush(fs.trace);
     }
     FsBus *bus = &fs.buses[id];
-    int kind = event & 255;
     if (kind <= 2) {
         if (bus->selected >= 0)
             fs_anomaly(&fs.modules[bus->selected], "START while transaction open");
         memset(bus, 0, sizeof(*bus));
         bus->selected = index;
+        bus->active = index >= 0;
+        bus->rejected = index < 0;
         bus->direction = kind;
         if (index >= 0) {
             FsModule *module = &fs.modules[index];
             bus->input = (module->latch & 0x7fff) | (fs_hall(module) ? 0x8000 : 0);
         }
         return index >= 0 ? 0 : 1;
+    }
+    if (kind == 3) {
+        bus->active = false;
+        /* A NACKed address has no latched transaction. Its eventual STOP may
+         * arrive after the module has been restored through the control API. */
+        if (bus->rejected) {
+            bus->rejected = false;
+            return 1;
+        }
     }
     if (index < 0)
         return kind == 6 ? 0xff : 1;
@@ -89,6 +111,10 @@ static int event_inner(uint8_t id, uint8_t address, uint16_t event, int64_t gues
 
 int fs_model_event(uint8_t id, uint8_t address, uint16_t event, int64_t guest_ns) {
     int result = event_inner(id, address, event, guest_ns);
+    if (fs.fault_event_pending) {
+        fs.fault_event_pending = false;
+        fs_emit("fault_observed", !fs_any_energized());
+    }
     if (fs.pending_anomaly) {
         fs.pending_anomaly = false;
         fs_emit("anomaly", false);

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from flapsim.faults import resolved_faults, validate_faults
 from flapsim.resources import resolve_resource
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -146,9 +147,11 @@ def normalize_hardware(document, *, seed=None):
             overrides = {}
             address = entry
             if isinstance(entry, dict):
-                mapping(entry, "module", {"addr"}, MECHANICAL_SALTS)
+                mapping(entry, "module", {"addr"}, set(MECHANICAL_SALTS) | {"faults"})
                 address = entry["addr"]
                 overrides = {k: v for k, v in entry.items() if k != "addr"}
+                if "faults" in overrides:
+                    validate_faults(overrides["faults"], partial=True)
             integer(address, f"bus {bus_id} module address", 0x08, 0x77)
             if bus_id == 0 and address == 0x48:
                 raise ValueError(
@@ -215,6 +218,7 @@ def normalize_hardware(document, *, seed=None):
                 "angle": angle,
                 **geometry,
                 "sensor_polarity": polarity,
+                **({"faults": resolved_faults(overrides)} if "faults" in overrides else {}),
             }
         )
     return {

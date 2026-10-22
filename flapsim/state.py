@@ -4,6 +4,8 @@ import json
 import math
 from pathlib import Path
 
+from flapsim.faults import DEFAULT_FAULTS, resolved_faults, validate_fault_identity, validate_faults
+
 MAX_CONTROL_ID = 2**53 - 1
 MECHANICS = {
     "steps_per_rotation",
@@ -96,9 +98,13 @@ def validate_overlay(value):
     if (
         not isinstance(command["patch"], dict)
         or not command["patch"]
-        or set(command["patch"]) - MECHANICS
+        or set(command["patch"]) - (MECHANICS | {"faults"})
     ):
         raise ValueError("invalid mechanics command patch")
+    if "faults" in command["patch"]:
+        validate_faults(command["patch"]["faults"], partial=True)
+        if not validate_fault_identity(value):
+            raise ValueError("fault patch without fault evidence")
     return revision
 
 
@@ -153,6 +159,13 @@ def validate_state(state, hardware, *, require_settled=True):
             validate_mechanics(mechanics, len(hardware["drum"]["flaps"]))
         if recorded_initial != initial:
             raise ValueError("model initial mechanics do not match hardware")
+    faults_enabled = validate_fault_identity(state)
+    initial_faults = [resolved_faults(m) for m in hardware["modules"]]
+    if faults_enabled:
+        if state["initial_faults"] != initial_faults:
+            raise ValueError("model initial faults do not match hardware")
+    elif any(f != DEFAULT_FAULTS for f in initial_faults):
+        raise ValueError("missing configured fault evidence")
     text, rows = "", ["", ""]
     for actual, expected in zip(modules, hardware["modules"], strict=True):
         if not isinstance(actual, dict) or any(
@@ -170,6 +183,18 @@ def validate_state(state, hardware, *, require_settled=True):
         if type(actual.get("phase")) is not int or not -1 <= actual["phase"] <= 3:
             raise ValueError("invalid model rotor phase")
         validate_counters(actual.get("counters"))
+        faults = dict(DEFAULT_FAULTS)
+        if faults_enabled:
+            faults = validate_faults(actual.get("faults"))
+            effects = actual.get("fault_counters")
+            if (
+                not isinstance(effects, dict)
+                or set(effects) != {"blocked_steps", "nacks"}
+                or any(type(n) is not int or n < 0 for n in effects.values())
+            ):
+                raise ValueError("invalid observed fault counters")
+        elif "faults" in actual or "fault_counters" in actual:
+            raise ValueError("fault state without version")
         mechanics = initial[len(text)]
         if revision:
             mechanics = validate_mechanics(actual.get("mechanics"), len(hardware["drum"]["flaps"]))
@@ -194,8 +219,10 @@ def validate_state(state, hardware, *, require_settled=True):
                 raise ValueError(f"invalid model {key}")
         # Derive fields for older v1 recordings as well as validating new output.
         actual.update(flap_position=position, flap_error=error)
-        if revision:
+        if revision or faults_enabled:
             present = ((angle - mechanics["magnet_position"]) % steps) < mechanics["sensor_window"]
+            if faults["hall"] != "normal":
+                present = faults["hall"] == "stuck_active"
             if actual["hall"] != (present != (mechanics["sensor_polarity"] == "active-low")):
                 raise ValueError("model hall does not match effective mechanics")
         text += char
@@ -211,11 +238,17 @@ def validate_state(state, hardware, *, require_settled=True):
         target = next(
             (m for m in modules if (m["bus"], m["addr"]) == (command["bus"], command["addr"])), None
         )
-        if target is None or any(
-            type(v) is not type(target["mechanics"].get(k)) or v != target["mechanics"][k]
-            for k, v in command["patch"].items()
-        ):
-            raise ValueError("mechanics do not match last applied command")
+        if target is None:
+            raise ValueError("mechanics command target is missing")
+        for key, part in command["patch"].items():
+            if key == "faults":
+                if any(v != target["faults"].get(k) for k, v in part.items()):
+                    raise ValueError("faults do not match last applied command")
+            elif (
+                type(part) is not type(target["mechanics"].get(key))
+                or part != target["mechanics"][key]
+            ):
+                raise ValueError("mechanics do not match last applied command")
     return state
 
 
@@ -248,3 +281,4 @@ def validate_identity(value):
         raise ValueError("invalid model settled flag")
     validate_counters(value.get("counters"))
     validate_overlay(value)
+    validate_fault_identity(value)

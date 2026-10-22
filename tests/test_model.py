@@ -1195,3 +1195,186 @@ def test_native_power_checkpoint_preserves_moving_state_and_resumes_once(make_mo
     model.write(COILS[3])
     model.write(OFF)
     assert model.state()["counters"]["stalls"] == 0
+
+
+@pytest.mark.parametrize("polarity", ["active-high", "active-low"])
+@pytest.mark.parametrize("hall,detected", [("stuck_active", True), ("stuck_inactive", False)])
+def test_literal_hall_faults_apply_to_physical_detection_and_survive_resume(
+    make_model, polarity, hall, detected
+):
+    model = make_model(polarity=polarity, angles=(0,))
+    result = model.control({"faults": {"hall": hall}})
+    assert result["modules"][0]["hall"] is (detected != (polarity == "active-low"))
+    assert bool(model.read() & 0x8000) is result["modules"][0]["hall"]
+    assert resume(model, model.now) == 0
+    after = model.control({"faults": {"hall": hall}})
+    assert after["modules"][0]["faults"]["hall"] == hall
+    validate_state(after, json.loads(model.config.read_text()))
+
+
+def test_dead_motor_can_be_changed_during_motion_and_never_moves_or_invents_stalls(make_model):
+    model = make_model(angles=(100, 100), buses=(0, 0))
+    model.write(COILS[0])
+    changed = model.control({"faults": {"motor": "dead"}})
+    assert changed["modules"][0]["energized"]
+    for phase in [1, 2, 3, 0]:
+        model.write(COILS[phase])
+    model.write(COILS[0], addr=33)
+    model.write(COILS[1], addr=33)
+    model.write(OFF)
+    model.write(OFF, addr=33)
+    state = model.state()
+    assert state["modules"][0]["angle"] == 100
+    assert state["modules"][0]["fault_counters"]["blocked_steps"] == 4
+    assert state["modules"][0]["counters"]["stalls"] == 0
+    assert state["modules"][1]["angle"] == 101
+    assert any(r["event"] == "fault_observed" for r in model.timeline())
+    assert resume(model, model.now) == 0
+    restored = model.control({"faults": {"motor": "normal"}}, identifier=2, revision=1)
+    assert restored["modules"][0]["fault_counters"]["blocked_steps"] == 4
+    model.write(COILS[0])
+    model.write(COILS[1])
+    model.write(OFF)
+    assert model.state()["modules"][0]["angle"] == 101
+
+
+def test_absent_module_nacks_without_changing_latches_and_is_still_addressable_by_control(
+    make_model,
+):
+    model = make_model(angles=(100,))
+    model.write(COILS[0])
+    before = model.control({"faults": {"present": False}})
+    assert model.event(1) == 1
+    model.event(3)
+    after = model.control({"faults": {"present": False}})
+    assert after["modules"][0]["latch"] == before["modules"][0]["latch"]
+    assert after["modules"][0]["fault_counters"]["nacks"] == 1
+    assert after["modules"][0]["counters"]["anomalies"] == 0
+    assert resume(model, model.now) == 0
+    restored = model.control({"faults": {"present": True}}, identifier=2, revision=1)
+    assert restored["modules"][0]["fault_counters"]["nacks"] == 1
+    assert model.event(1) == 0
+    model.event(3)
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [{}, {"hall": "noisy"}, {"motor": "slip"}, {"present": 0}, {"unknown": True}, {"hall": True}],
+)
+def test_invalid_fault_patch_is_atomic_and_does_not_consume_revision(make_model, patch):
+    model = make_model()
+    assert model.control({"faults": patch}) == {"error": "invalid_mechanics"}
+    assert "faults_version" not in model.state()
+    assert model.control({"faults": {"hall": "stuck_active"}})["mechanics_revision"] == 1
+
+
+def test_faults_are_available_in_startup_config_and_validated_in_resume(make_model):
+    model = make_model(module_overrides={0: {"faults": {"hall": "stuck_active", "present": False}}})
+    state = model.state()
+    assert state["faults_version"] == 1 and state["modules"][0]["hall"]
+    validate_state(state, json.loads(model.config.read_text()))
+    assert model.event(1) == 1
+    model.event(3)
+    assert resume(model, model.now) == 0
+    state = model.timeline()[-1]
+    assert state["modules"][0]["fault_counters"]["nacks"] == 1
+    model.lib.fs_model_close()
+    state["modules"][0]["faults"]["hall"] = "noisy"
+    (model.out / "timeline.jsonl").write_text(json.dumps(state) + "\n")
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0
+
+
+def test_faults_never_change_a_latched_read_but_can_recover_after_address_nack(make_model):
+    model = make_model()
+    assert model.event(0) == 0
+    model.event(6)
+    assert model.control({"faults": {"hall": "stuck_active"}}) == {"error": "model_busy"}
+    assert model.event(6) & 0x80 == 0
+    model.event(4)
+    model.event(3)
+    assert model.control({"faults": {"present": False}})["mechanics_revision"] == 1
+    assert model.event(1) == 1
+    # No bytes latched on an address NACK: recovery does not need a STOP callback.
+    assert (
+        model.control({"faults": {"present": True}}, identifier=2, revision=1)["mechanics_revision"]
+        == 2
+    )
+    model.event(3)
+    model.write(OFF)
+    assert model.state()["counters"]["anomalies"] == 0
+
+
+def test_http_faults_share_mechanics_receipts_and_strict_validation(model_http):
+    model, server = model_http
+    for faults in [{}, {"present": 1}, {"motor": "slip"}, {"hall": "noisy"}]:
+        command = {"id": 1, "expected_revision": 0, "patch": {"faults": faults}}
+        assert http_control(server, data=json.dumps(command).encode())[0] == 422
+    command = {"id": 1, "expected_revision": 0, "patch": {"faults": {"hall": "stuck_active"}}}
+    code, result = http_control(server, data=json.dumps(command).encode())
+    assert code == 202
+    assert result["capabilities"]["set_fault"]
+    assert result["fault_support"]["hall"] == ["normal", "stuck_active", "stuck_inactive"]
+    assert (
+        http_control(server, data=json.dumps(command).encode())[1]["operation"]
+        == result["operation"]
+    )
+    current = http_control(server, path="/api/emu/state")[1]["state"]
+    assert current["modules"][0]["hall"]
+    assert current["modules"][0]["faults"]["hall"] == "stuck_active"
+    assert len([r for r in model.timeline() if r["event"] == "faults_changed"]) == 1
+
+
+@pytest.mark.parametrize("problem", ["version", "missing", "counter", "initial", "receipt"])
+def test_fault_reader_rejects_malformed_or_inconsistent_evidence(make_model, problem):
+    model = make_model()
+    state = model.control({"faults": {"hall": "stuck_active"}})
+    if problem == "version":
+        state["faults_version"] = True
+    elif problem == "missing":
+        del state["modules"][0]["faults"]
+    elif problem == "counter":
+        state["modules"][0]["fault_counters"]["nacks"] = True
+    elif problem == "initial":
+        state["initial_faults"][0]["motor"] = "dead"
+    elif problem == "receipt":
+        state["last_operation"]["command"]["patch"]["faults"]["hall"] = "normal"
+    with pytest.raises(ValueError):
+        validate_state(state, json.loads(model.config.read_text()))
+
+
+def test_geometry_and_fault_changes_are_atomic_and_keep_geometry_idle_rules(make_model):
+    model = make_model(angles=(100,))
+    assert model.control({"magnet_position": 999999, "faults": {"motor": "dead"}}) == {
+        "error": "invalid_mechanics"
+    }
+    assert "faults_version" not in model.state()
+    model.write(COILS[0])
+    assert model.control({"sensor_window": 42, "faults": {"motor": "dead"}}) == {
+        "error": "model_busy"
+    }
+    model.write(OFF)
+    state = model.control({"sensor_window": 42, "faults": {"motor": "dead"}})
+    assert state["modules"][0]["mechanics"]["sensor_window"] == 42
+    assert state["modules"][0]["faults"]["motor"] == "dead"
+    assert resume(model, model.now) == 0
+    validate_state(model.timeline()[-1], json.loads(model.config.read_text()))
+
+
+@pytest.mark.parametrize("problem", ["hall", "version", "counter", "initial", "receipt"])
+def test_native_resume_rejects_inconsistent_fault_history(make_model, problem):
+    model = make_model()
+    record = model.control({"faults": {"hall": "stuck_active"}})
+    model.lib.fs_model_close()
+    if problem == "hall":
+        record["modules"][0]["hall"] = False
+    elif problem == "version":
+        record["faults_version"] = True
+    elif problem == "counter":
+        record["modules"][0]["fault_counters"]["nacks"] = -1
+    elif problem == "initial":
+        record["initial_faults"][0]["motor"] = "dead"
+    elif problem == "receipt":
+        record["last_operation"]["command"]["patch"]["faults"]["hall"] = "normal"
+    record["event"] = "faults_changed"
+    (model.out / "timeline.jsonl").write_text(json.dumps(record) + "\n")
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0

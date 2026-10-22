@@ -142,7 +142,9 @@ def test_real_http_auth_origin_capabilities_and_shutdown(tmp_path):
         assert document["capabilities"]["snapshot"] is True
         assert document["capabilities"]["set_mechanics"] is True
         assert not any(
-            v for k, v in document["capabilities"].items() if k not in {"snapshot", "set_mechanics"}
+            v
+            for k, v in document["capabilities"].items()
+            if k not in {"snapshot", "set_mechanics", "set_fault"}
         )
         assert document["boot_generation"] == 0
         assert document["state"]["text"] == state["text"]

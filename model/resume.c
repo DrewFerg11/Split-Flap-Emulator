@@ -48,6 +48,13 @@ static bool module(struct json_object *entry, FsModule *target) {
     target->phase = (int)phase;
     target->energized = json_object_get_boolean(energized);
     target->counters = count;
+    if (fs.faults_enabled) {
+        struct json_object *hall;
+        if (!json_object_object_get_ex(entry, "hall", &hall) ||
+            !json_object_is_type(hall, json_type_boolean) ||
+            json_object_get_boolean(hall) != fs_hall(target))
+            return false;
+    }
     return true;
 }
 
@@ -74,7 +81,7 @@ static bool restore(const char *text, size_t end, bool *recorded_reset) {
                  json_object_is_type(modules, json_type_array) &&
                  (int)json_object_array_length(modules) == fs.count;
     if (valid)
-        valid = fs_restore_overlay(record);
+        valid = fs_restore_faults(record) && fs_restore_overlay(record);
     uint64_t anomalies = 0;
     for (int i = 0; valid && i < fs.count; i++) {
         valid = module(json_object_array_get_idx(modules, i), &fs.modules[i]);
