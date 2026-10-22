@@ -665,6 +665,16 @@ def test_checked_in_baseline_is_valid_and_bound_to_the_golden_checksum():
         "x Error writing data to module 34, error code: 5",
     ]:
         assert known.tolerated_serial(line) is None
+    # Both points where the #54 race can invalidate the shared handle (seen in CI on QEMU).
+    prefix = "[ 26540][E][Preferences.cpp:"
+    for line in [
+        prefix + "483] getString(): nvs_get_str len fail: wire1Offsets INVALID_HANDLE",
+        prefix + "490] getString(): nvs_get_str fail: wire1Offsets INVALID_HANDLE",
+    ]:
+        assert known.tolerated_serial(line)["issue"] == "DrewFerg11/Split-Flap-Display#54"
+    assert (
+        known.tolerated_serial(prefix + "490] getString(): nvs_get_str fail: x NOT_FOUND") is None
+    )
 
 
 @pytest.mark.parametrize(

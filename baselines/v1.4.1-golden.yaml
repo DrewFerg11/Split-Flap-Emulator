@@ -21,8 +21,9 @@ serial:
   - issue: DrewFerg11/Split-Flap-Display#54
     reason: >-
       Item 1: the loop and web-server tasks share one Preferences handle without a lock, so one task's
-      end() invalidates the other's read.
-    regex: '^\[\s*\d+\]\[E\]\[Preferences\.cpp:\d+\] (getString|getBytesLength)\(\): nvs_get_(str|blob) len fail: \w+ INVALID_HANDLE$'
+      end() invalidates the other's read. The handle can go stale between the length query and the
+      read itself, which logs "nvs_get_str fail" without "len" (Preferences.cpp:490).
+    regex: '^\[\s*\d+\]\[E\]\[Preferences\.cpp:\d+\] (getString|getBytesLength)\(\): nvs_get_(str|blob) (len )?fail: \w+ INVALID_HANDLE$'
   - issue: DrewFerg11/Split-Flap-Emulator#14
     reason: >-
       Emulator scheduling artifact in 16-module dual-bus runs. QEMU runs the two cores in turn, so
