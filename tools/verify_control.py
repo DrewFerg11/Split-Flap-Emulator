@@ -68,7 +68,7 @@ class ControlProbe:
             )
             with opener.open(request, timeout=2) as response:
                 value = json.load(response)
-            if value["capabilities"]["reset"] or not value["live"]:
+            if not value["capabilities"]["reset"] or not value["live"]:
                 raise RuntimeError("incorrect control capabilities/freshness")
             return value
 
@@ -125,11 +125,27 @@ class ControlProbe:
         # A replay has the same receipt and changes neither counters nor timeline sequences.
         if change(1, 0, edited["operation"]["command"]["patch"]) != edited or snapshot() != changed:
             raise RuntimeError("replayed command applied more than once")
-        # Verify the owner-context channel and reset counter across an actual QMP
-        # reset, without making reset a public HTTP capability in this first slice.
+        # Exercise the public reset dispatcher while QEMU remains paused.
         before_reset = snapshot()
         record("before_reset", before_reset)
-        qmp(qmp_path, "system_reset")
+
+        def reset(identifier):
+            request = urllib.request.Request(
+                endpoint + "/api/emu/reset",
+                headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
+                data=json.dumps({"id": identifier}).encode(),
+            )
+            with opener.open(request, timeout=7) as response:
+                if response.status != 202:
+                    raise RuntimeError("reset was not acknowledged")
+                return json.load(response)
+
+        reset_receipt = reset(1)
+        record("reset_receipt", reset_receipt)
+        if qmp(qmp_path, "query-status")["status"] != "paused":
+            raise RuntimeError("public reset changed QEMU's paused state")
+        if reset(1) != reset_receipt:
+            raise RuntimeError("reset retry did not return the original receipt")
         while (after_reset := snapshot())["boot_generation"] == before_reset["boot_generation"]:
             context.pause()
         record("after_reset", after_reset)
@@ -139,6 +155,10 @@ class ControlProbe:
             raise RuntimeError("controller reset changed external physical state")
         if after_reset["state"]["last_operation"] != edited["operation"]:
             raise RuntimeError("reset lost the mechanics operation")
+        second_reset = reset(2)
+        if second_reset["boot_generation"] != after_reset["boot_generation"] + 1:
+            raise RuntimeError("second reset was not observed exactly once")
+        record("second_reset", second_reset)
         restored = change(2, 1, {"sensor_polarity": polarity})
         record("mechanics_restored", restored)
         restored_state = snapshot()
