@@ -12,8 +12,29 @@ from tools.publish_image import promote
 from tools.verify_boot import GOLDEN, ROOT
 
 
+def needs(job):
+    value = job.get("needs", [])
+    return [value] if isinstance(value, str) else value
+
+
+def check_release_approval(publish):
+    """Every release job waits for `authorize`, which needs the owner-approved environment."""
+    jobs = publish["jobs"]
+    assert jobs.get("authorize", {}).get("environment") == "release", "authorize must use release"
+    assert jobs["publish"].get("environment") == "release", "publish must use release"
+    for name in jobs:
+        seen, pending = set(), list(needs(jobs[name]))
+        while pending:
+            parent = pending.pop()
+            if parent not in seen:
+                seen.add(parent)
+                pending += needs(jobs[parent])
+        assert name == "authorize" or "authorize" in seen, f"{name} does not wait for authorize"
+
+
 def validate_workflows(root):
     publish = yaml.safe_load((root / ".github/workflows/release.yml").read_text())
+    check_release_approval(publish)
     jobs = publish["jobs"]
     assert set(jobs["publish"]["needs"]) >= {"verify", "validate"}
     condition = jobs["publish"]["if"]

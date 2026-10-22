@@ -228,6 +228,17 @@ settings, sends HELLO, and verifies exact centered ` HELLO  `.
 rows ` HELLO  ` / ` WORLD  `, followed by the explicit idempotent repeat.
 `homing-random.yaml` asserts the intermediate all-blank settlement and zero
 stalls/anomalies before completing startup X. CI runs three recorded seeds.
+`first-boot-8.yaml` / `first-boot-16.yaml` follow a new user from a blank flash
+([#22](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/22)): access point and
+no-Wi-Fi display, the compiled defaults in `GET /settings`, one save of layout (8 only),
+a calibration offset, name and MQTT broker through the access-point web UI, the reboot
+with every saved value read back and the new layout in effect, then
+`POST /settings/reset` back to the first-boot display and defaults. After each reboot
+or reset they wait for `Homing` before the display check, so a display that already
+showed the target can't match early. CI runs both natively against the golden source
+under the native baseline, where v1.4.1 fails them on
+[SFD#54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54)'s lost writes;
+firmware with that fixed passes them strictly.
 
 ## Evidence and validation
 

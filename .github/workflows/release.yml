@@ -1,3 +1,21 @@
+# Tagged releases: verify the candidate image, then publish it to GHCR.
+#
+# Restricted to the repository owner by three independent mechanisms, because a
+# release publishes the image other repositories pull to test firmware:
+#
+#   1. The `release tags` ruleset restricts creating, updating and deleting `v*`
+#      tags to repository admins, so no one else can produce the push event that
+#      starts a publishing run.
+#   2. Every job depends on `authorize`, which uses the `release` environment.
+#      That environment requires the owner's approval and only accepts
+#      deployments from `v*.*.*` tags, so nothing builds or publishes unapproved.
+#   3. `authorize` also checks the actor and the ref directly, failing fast with a
+#      readable message.
+#
+# Mechanisms 1 and 2 are enforced by GitHub server-side (environment settings:
+# docs/maintenance.md#release-approval). A manual dispatch must select a version
+# tag; it verifies but never publishes.
+
 name: Release / Tag
 
 on:
@@ -13,8 +31,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  authorize:
+    name: Authorize release
+    if: github.repository == 'DrewFerg11/Split-Flap-Emulator'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: release
+    steps:
+      - name: Verify actor
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          if [ "$ACTOR" != "$OWNER" ]; then
+            echo "::error::Releases are restricted to $OWNER. Actor was $ACTOR."
+            exit 1
+          fi
+          echo "Release authorized for $ACTOR at $GITHUB_REF."
+      - name: Verify ref is a version tag
+        run: |
+          # vMAJOR.MINOR.PATCH with an optional prerelease suffix, as tools.publish_image accepts.
+          if ! [[ "$GITHUB_REF" =~ ^refs/tags/v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::Releases run only from a vX.Y.Z or vX.Y.Z-prerelease tag, not $GITHUB_REF."
+            exit 1
+          fi
+
   validate:
     name: Validate trusted source and release version
+    needs: authorize
     if: github.repository == 'DrewFerg11/Split-Flap-Emulator'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -47,10 +91,11 @@ jobs:
 
   publish:
     name: Publish the tested image to GHCR
-    needs: [validate, verify]
+    needs: [authorize, validate, verify]
     if: github.repository == 'DrewFerg11/Split-Flap-Emulator' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    environment: release
     permissions:
       contents: read
       packages: write

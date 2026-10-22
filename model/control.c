@@ -1,10 +1,22 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
+#define _POSIX_C_SOURCE 200809L
 #include "control.h"
 #include "internal.h"
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <unistd.h>
+
+int fs_model_power_checkpoint(int64_t guest_ns) {
+    if (!fs.initialized || fs.failed || guest_ns < fs.now)
+        return -1;
+    fs_model_tick(guest_ns);
+    fs_emit("controller_power_off", false);
+    if (!fs.failed && fsync(fileno(fs.timeline)) != 0)
+        fs_fail("cannot commit power checkpoint");
+    return fs.failed ? -1 : 0;
+}
 
 static int serve(int fd, int64_t guest_ns, bool native) {
     char request[2049];
@@ -15,6 +27,10 @@ static int serve(int fd, int64_t guest_ns, bool native) {
         return 0;
     static const char expected[] = "FLAPSIM_STATE/1";
     static const char reset[] = "FLAPSIM_RESET/1";
+    static const char power[] = "FLAPSIM_POWER_OFF/1";
+    if (native && fs.initialized && !fs.failed && length == sizeof(power) - 1 &&
+        !memcmp(request, power, sizeof(power) - 1))
+        return 3; /* The native owner checkpoints and replies while retaining its lock. */
     if (native && fs.initialized && !fs.failed && length == sizeof(reset) - 1 &&
         !memcmp(request, reset, sizeof(reset) - 1)) {
         const char accepted[] = "{\"status\":\"accepted\"}";

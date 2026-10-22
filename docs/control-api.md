@@ -2,7 +2,7 @@
 
 The runner can expose current physical state independently of the firmware's
 web server. The implemented QEMU and native routes provide authenticated live state, atomic mechanics
-edits, controller resets and operation receipts. Fault mutation, controller power, speed,
+edits, controller reset/power transitions and operation receipts. Fault mutation, speed,
 I2C history and WebSockets remain unavailable and are explicitly false in `capabilities`. Issue #20 stays
 open. See [the implementation plan](control-api-plan.md) for later slices.
 
@@ -33,7 +33,7 @@ token, mechanics overlay and latest receipt survive firmware software resets
 (re-exec of the same process). Reset generations persist even before the first
 mechanics edit. Requests during reset still have the usual bounded deadline;
 a timeout leaves the result unknown and poisons the channel as described below.
-Public controller reset is available in both modes. Power switching and live speed
+Public controller reset is available in both modes. Controller power uses the approximation described below. Live speed
 controls remain unavailable.
 
 While the run is executing, read `control.endpoint` from `run.json`. The existing
@@ -195,6 +195,76 @@ QMP dispatch has a two-second host deadline, each private model exchange a
 The HTTP client should allow at least seven seconds for a complete reset call.
 No guest-time wait can extend these bounds. Ordinary scenario timeout/cancellation
 still stops the run and its listener.
+
+## Controller power off/on
+
+`POST /api/emu/power` accepts exactly `{"id":1,"on":false}` or
+`{"id":2,"on":true}`. Use distinct increasing IDs to power-cycle off then on.
+Power IDs have their own namespace, separate from reset and mechanics IDs. The
+same authentication, Host/Origin, no-store, strict JSON, 2 KiB/one-second body
+limits and single-flight rules apply. `on` must be a JSON boolean.
+
+This is **controller power approximation**, not electrical power removal. External
+expanders, motor latches and drum angles remain powered/preserved. It does not
+model brownouts, coil heating, UART input loss or network link behavior. A
+power-on acknowledges the observed next model generation, not completion of
+firmware setup, networking or homing.
+
+- QEMU off executes QMP `stop`, requires a stopped status, and verifies that two
+  owner snapshots have identical guest time/state. On performs a hard reset
+  while stopped, requires exactly one new generation with unchanged external
+  modules/counters, then executes `cont` and requires running status. Flash is
+  not recreated. Firmware sees the pinned machine's hard-reset reason; this is
+  not claimed to be an electrical power-on reset. Power-on starts execution even
+  if QEMU was already paused before power-off. Fidelity is `qmp-stop-reset-cont`.
+- Native off checkpoints and fsyncs the locked live model to a
+  `controller_power_off` timeline record, replies on the private channel, and
+  exits the whole firmware process. The runner waits for successful exit and
+  reaps the process group before acknowledging. On launches a **new PID** from
+  the existing configuration, NVS and LittleFS, with an explicit power-on resume
+  identity and the frozen guest clock/RTC state. Resume restores external state
+  and increments the reset generation once; firmware reports `ESP_RST_POWERON`.
+  The inherited firmware HTTP listener is reused and the private channel is
+  replaced without discarding operation receipts. Fidelity is
+  `native-checkpoint-restart`.
+
+While off, `GET /state` returns `live: false`, `power_state: off` and the last
+validated physical checkpoint, including its stopped guest time. This cached
+snapshot is identified as off; it is not a live reader in a dead native child.
+An energized coil remains energized in that external state. Snapshot reads and
+mechanics receipt lookup remain available. New mechanics edits and reset
+commands return `409 controller_off` without admission or consuming an ID.
+Retrying a previously applied reset may still return its original receipt.
+
+A `202` power receipt includes `api_version`, `run_id`, `backend`, `command`,
+`status: applied`, `power_state`, `boot_generation`, `guest_ns`, `sequence` and
+`fidelity`. A new command targeting the already-current state is an audited
+no-op; it does not reset/relaunch. Retrying the latest ID with the same command
+returns its original receipt. Reusing it with a different `on`, or submitting an
+older ID, returns `409 stale_or_reused_id`. Only the latest power receipt is
+retained; `GET /api/emu/power/operations/{id}` reads it independently of the
+backend channel. Missing/older receipts return `404 status: unknown`.
+
+Power intents/results are fsynced to `control.jsonl` with `kind: power`. A
+checkpoint, transport, launch, observation or audit failure consumes the ID,
+marks power state unknown, closes the channel and returns `503 result_unknown`.
+It never automatically repeats a transition or launches a second child to guess
+what happened. The latest unknown receipt remains queryable, and a new ID cannot
+bypass the poisoned channel. Preserve the journal and model timeline for recovery.
+These receipts last for this runner's run, including native child replacement,
+and do not provide reconnection after runner failure.
+
+Private exchanges have a 500 ms socket deadline; native exit observation is one
+second followed by bounded group cleanup, QMP batches share a two-second host
+deadline, and power-on generation observation has a three-second host deadline.
+Allow at least twelve seconds for an HTTP power request. Scenario deadlines and
+cancellation continue on the host clock while off. Teardown first closes control
+admission and waits for any admitted transition, then stops the currently owned
+child, including one created by power-on. Planned native exit is distinguished
+from a crash; every replacement PID and return code is recorded in
+`attempts[].power_processes`. Ending a run intentionally off validates its frozen
+snapshot rather than inventing a settlement; final metadata retains the off state.
+Existing scenario final assertions remain enforced.
 
 ## Evidence extension and resume
 

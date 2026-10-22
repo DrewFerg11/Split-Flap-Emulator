@@ -1345,3 +1345,29 @@ def test_bad_fault_configuration_is_rejected(faults):
     }
     with pytest.raises(ValueError):
         normalize_hardware(document)
+
+
+def test_native_power_checkpoint_preserves_moving_state_and_resumes_once(make_model):
+    model = make_model(angles=(100, 200), buses=(0, 0))
+    model.control({"sensor_window": 41})
+    for coils in COILS[:3]:
+        model.write(coils)
+    before_generation = model.activity()["guest_resets"]
+    model.lib.fs_model_power_checkpoint.argtypes = [ctypes.c_int64]
+    model.lib.fs_model_power_checkpoint.restype = ctypes.c_int
+    assert model.lib.fs_model_power_checkpoint(model.now) == 0
+    checkpoint = model.timeline()[-1]
+    assert checkpoint["event"] == "controller_power_off"
+    assert checkpoint["guest_resets"] == before_generation
+    assert checkpoint["modules"][0]["angle"] == 102
+    assert checkpoint["modules"][0]["energized"]
+    model.lib.fs_model_close()
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) == 0
+    restored = model.timeline()[-1]
+    assert restored["event"] == "guest_reset"
+    assert restored["guest_resets"] == before_generation + 1
+    assert restored["modules"] == checkpoint["modules"]
+    assert restored["last_operation"] == checkpoint["last_operation"]
+    model.write(COILS[3])
+    model.write(OFF)
+    assert model.state()["counters"]["stalls"] == 0

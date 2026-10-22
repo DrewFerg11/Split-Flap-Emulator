@@ -96,6 +96,19 @@ jobs:
             python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
               --case control --timeout ${{ matrix.timeout }} --out "runs/native/control-$hardware"
           done
+      - name: Verify controller power and checkpoint resume on both layouts
+        run: |
+          set -e
+          for hardware in esp32-8-single esp32-16-dual; do
+            python -m tools.verify_power --mode native --native-build build/native/golden \
+              --hardware "$hardware" --out "runs/native/power-$hardware"
+          done
+          python -m tools.verify_power --mode native --native-build build/native/golden \
+            --end-off --out runs/native/power-end-off
+          for result in timeout interrupt; do
+            python -m tools.verify_power --mode native --native-build build/native/golden \
+              --off-exit "$result" --out "runs/native/power-off-$result"
+          done
       - name: Run the golden smoke scenarios natively under the native known-issues baseline
         if: matrix.name != 'sanitizers'
         run: |
@@ -115,6 +128,16 @@ jobs:
               --scenario "$scenario" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
               --known-issues baselines/v1.4.1-native.yaml --out "runs/native/$scenario"
           done
+      - name: Run the first-boot scenarios natively on both layouts
+        if: matrix.name != 'sanitizers'
+        run: |
+          set -e
+          for layout in "8 esp32-8-single" "16 esp32-16-dual"; do
+            set -- $layout
+            flapsim run --mode native --native-build build/native/golden --hardware "$2" \
+              --scenario "first-boot-$1" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
+              --known-issues baselines/v1.4.1-native.yaml --out "runs/native/first-boot-$1"
+          done
       - name: Run injected-fault scenarios natively
         if: matrix.name != 'sanitizers'
         run: |
@@ -129,7 +152,7 @@ jobs:
         if: always() && matrix.name != 'sanitizers'
         run: |
           for run in smoke-8 smoke-16 mqtt-native-8 clock-dst-native-8 date-rollover-native-8 \
-              fault-stuck-sensor-8 fault-module-lost-8; do
+                     first-boot-8 first-boot-16 fault-stuck-sensor-8 fault-module-lost-8; do
             python -m tools.summarize_run "runs/native/$run/run.json"
           done
       - name: Upload native evidence
@@ -227,6 +250,12 @@ jobs:
             --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
             --hardware "${{ matrix.hardware }}" --known-issues baselines/v1.4.1-golden.yaml \
             --out runs/scenario
+      - name: Verify stopped controller power and power-on during motion
+        if: startsWith(matrix.name, 'control-')
+        run: |
+          python -m tools.verify_power --mode qemu \
+            --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+            --hardware "${{ matrix.hardware }}" --out runs/power
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
         run: python -m tools.summarize_run runs/scenario/run.json
