@@ -63,8 +63,10 @@ def improv_packet(ssid, password):
 
 def records(out):
     """Complete timeline records; a final line still being written is left for the next poll."""
-    with (out / "timeline.jsonl").open() as timeline:
-        return [json.loads(line) for line in timeline if line.endswith("\n")]
+    # Capture one contiguous prefix before splitting. Iterating a growing file can
+    # skip an incomplete readline(), then parse its newly appended suffix alone.
+    text = (out / "timeline.jsonl").read_text()
+    return [json.loads(line) for line in text.splitlines(keepends=True) if line.endswith("\n")]
 
 
 class Run:
