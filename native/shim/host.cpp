@@ -382,10 +382,16 @@ void start_control() {
                 continue;
             if (ready <= 0 || !(request.revents & POLLIN))
                 break;
-            std::lock_guard<std::timed_mutex> owner(model_mutex);
-            if (!fs_control_serve(fd, vclock::now_ns()))
+            int status;
+            {
+                std::lock_guard<std::timed_mutex> owner(model_mutex);
+                status = fs_control_serve_native(fd, vclock::now_ns());
+                check_model();
+            }
+            if (!status)
                 break;
-            check_model();
+            if (status == 2)
+                reset(ESP_RST_SW, true);
         }
         /* Retain the inherited descriptor for re-exec even after peer loss.
          * Closing it here would leave a stale FD in the saved reset environment. */

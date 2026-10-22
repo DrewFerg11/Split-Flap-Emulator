@@ -271,7 +271,10 @@ def run(args, *, executor=None, interrupt=None):
                                 break
                             context.pause()
                         if control is not None:
-                            control.attach(connection)
+                            from flapsim.lifecycle import qmp_reset
+
+                            control.attach(connection, reset=lambda path=qmp: qmp_reset(path))
+                            manifest["control"] = control.metadata()
                         manifest["status"] = "executing"
                         save_manifest(out, manifest)
                         manifest["result"] = executor.execute(context)
@@ -451,6 +454,7 @@ def run_native(args, *, executor=None, interrupt=None):
                         context.pause()
                     if control is not None:
                         control.attach(connection)
+                        manifest["control"] = control.metadata()
                     manifest["status"] = "executing"
                     save_manifest(out, manifest)
                     manifest["result"] = executor.execute(context)

@@ -202,7 +202,10 @@ class ControlServer:
         from starlette.routing import Route
 
         self.hardware = hardware
+        self.backend = backend
         self.client = None
+        self.resets = None
+        self.capabilities = dict(CAPABILITIES)
         self.run_id = str(uuid.uuid4())
         self.token = secrets.token_urlsafe(32)
         self.listener = socket.socket()
@@ -225,7 +228,7 @@ class ControlServer:
                     "backend": backend,
                     "boot_generation": snapshot["guest_resets"],
                     "live": True,
-                    "capabilities": CAPABILITIES,
+                    "capabilities": dict(self.capabilities),
                 }
 
             def journal(entry):
@@ -329,6 +332,72 @@ class ControlServer:
                     {**envelope(snapshot), "status": "applied", "operation": applied}
                 )
 
+            async def reset(request):
+                from starlette.concurrency import run_in_threadpool
+                from starlette.requests import ClientDisconnect
+
+                controller = self.resets
+                if controller is None:
+                    return JSONResponse({"error": "backend_unavailable"}, status_code=503)
+                if request.method == "GET":
+                    receipt = controller.receipt
+                    if receipt is None or receipt["command"]["id"] != request.path_params["id"]:
+                        return JSONResponse(
+                            {
+                                "run_id": self.run_id,
+                                "api_version": 1,
+                                "backend": backend,
+                                "status": "unknown",
+                            },
+                            status_code=404,
+                        )
+                    return JSONResponse(
+                        {"run_id": self.run_id, "api_version": 1, "backend": backend, **receipt}
+                    )
+                if request.headers.getlist("content-type") != ["application/json"]:
+                    return JSONResponse({"error": "json_required"}, status_code=415)
+
+                async def read_body():
+                    data = bytearray()
+                    async for chunk in request.stream():
+                        data.extend(chunk)
+                        if len(data) > 2048:
+                            return None
+                    return bytes(data)
+
+                try:
+                    data = await asyncio.wait_for(read_body(), timeout=1)
+                except (TimeoutError, ClientDisconnect):
+                    return JSONResponse({"error": "body_timeout"}, status_code=408)
+                if data is None:
+                    return JSONResponse({"error": "body_too_large"}, status_code=413)
+                try:
+                    command = strict_json(data.decode("utf-8"))
+                except (ValueError, UnicodeError, RecursionError):
+                    return JSONResponse({"error": "invalid_json"}, status_code=400)
+                if (
+                    not isinstance(command, dict)
+                    or set(command) != {"id"}
+                    or type(command["id"]) is not int
+                    or not 1 <= command["id"] <= MAX_CONTROL_ID
+                ):
+                    return JSONResponse({"error": "invalid_command"}, status_code=422)
+                try:
+                    result = await run_in_threadpool(controller.apply, command, journal)
+                except Unavailable:
+                    return JSONResponse(
+                        {"error": "result_unknown", "id": command["id"]}, status_code=503
+                    )
+                code = 202
+                if "error" in result:
+                    code = 409 if result["error"] == "stale_or_reused_id" else 503
+                elif result["status"] == "unknown":
+                    code = 503
+                return JSONResponse(
+                    {"run_id": self.run_id, "api_version": 1, "backend": backend, **result},
+                    status_code=code,
+                )
+
             app = Starlette(
                 routes=[
                     Route("/api/emu/state", state, methods=["GET"]),
@@ -336,6 +405,8 @@ class ControlServer:
                         "/api/emu/modules/{bus:int}/{addr:int}/mech", mechanics, methods=["POST"]
                     ),
                     Route("/api/emu/operations/{id:int}", operation, methods=["GET"]),
+                    Route("/api/emu/reset", reset, methods=["POST"]),
+                    Route("/api/emu/reset/operations/{id:int}", reset, methods=["GET"]),
                 ]
             )
 
@@ -391,12 +462,19 @@ class ControlServer:
             self.close()
             raise
 
-    def attach(self, connection):
+    def attach(self, connection, *, reset=None):
         self.detach()
         self.client = SnapshotClient(connection, self.hardware)
+        if self.backend == "native" or reset is not None:
+            from flapsim.lifecycle import ResetController
+
+            self.resets = ResetController(self.client, reset)
+            self.capabilities["reset"] = True
 
     def detach(self):
         client, self.client = self.client, None
+        self.resets = None
+        self.capabilities["reset"] = False
         if client is not None:
             client.close()
 
@@ -406,7 +484,7 @@ class ControlServer:
             "run_id": self.run_id,
             "endpoint": self.endpoint,
             "token_file": str(self.token_path),
-            "capabilities": dict(CAPABILITIES),
+            "capabilities": dict(self.capabilities),
         }
 
     def close(self):
