@@ -24,6 +24,7 @@ extern "C" {
 #include <json.h>
 #include <poll.h>
 #include <stdexcept>
+#include <sys/socket.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>
@@ -382,10 +383,35 @@ void start_control() {
                 continue;
             if (ready <= 0 || !(request.revents & POLLIN))
                 break;
-            std::lock_guard<std::timed_mutex> owner(model_mutex);
-            if (!fs_control_serve(fd, vclock::now_ns()))
+            int status;
+            {
+                std::lock_guard<std::timed_mutex> owner(model_mutex);
+                status = fs_control_serve_native(fd, vclock::now_ns());
+                check_model();
+                if (status == 3) {
+                    int64_t guest = vclock::now_ns();
+                    if (fs_model_power_checkpoint(guest) != 0)
+                        _exit(kExitRuntime);
+                    char *snapshot = fs_model_snapshot(guest);
+                    if (!snapshot)
+                        _exit(kExitRuntime);
+                    json_object *reply = json_object_new_object();
+                    json_object_object_add(reply, "state", json_tokener_parse(snapshot));
+                    std::free(snapshot);
+                    std::string resume = std::to_string(boots + 1) + ":1:" + std::to_string(guest) +
+                                         ":" + (clock_set ? "1" : "0");
+                    json_object_object_add(reply, "resume", json_object_new_string(resume.c_str()));
+                    fs_model_close();
+                    const char *data =
+                        json_object_to_json_string_ext(reply, JSON_C_TO_STRING_PLAIN);
+                    ssize_t sent = ::send(fd, data, std::strlen(data), MSG_DONTWAIT | MSG_NOSIGNAL);
+                    _exit(sent == (ssize_t)std::strlen(data) ? 0 : kExitRuntime);
+                }
+            }
+            if (!status)
                 break;
-            check_model();
+            if (status == 2)
+                reset(ESP_RST_SW, true);
         }
         /* Retain the inherited descriptor for re-exec even after peer loss.
          * Closing it here would leave a stale FD in the saved reset environment. */

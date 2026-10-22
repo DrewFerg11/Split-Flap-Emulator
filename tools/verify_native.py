@@ -137,7 +137,7 @@ class Run:
             data=None if body is None else json.dumps(body).encode(),
         )
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(request, timeout=2) as response:
+        with opener.open(request, timeout=7) as response:
             return json.load(response)
 
     def serial(self):
@@ -305,6 +305,60 @@ def verify(args):
             ):
                 raise RuntimeError("native reset lost the mechanics overlay")
             result["control"].update(after_reset=after_reset, receipt=receipt, duplicate=duplicate)
+            # Controller resets use the public API, retain NVS/overlay and
+            # are observed before success. Retry the first ID, then reset during motion.
+            first = run.api("/reset", {"id": 1})
+            if first["status"] != "applied" or first["boot_generation"] != 2:
+                raise RuntimeError("public native reset was not observed")
+            if run.api("/reset", {"id": 1}) != first:
+                raise RuntimeError("public native reset was repeated")
+            run.wait("motion after public reset", moving, deadline)
+            second = run.api("/reset", {"id": 2})
+            if second["status"] != "applied" or second["boot_generation"] != 3:
+                raise RuntimeError("native reset during motion was not observed")
+
+            def final_blank():
+                items = records(run.out)
+                ok = [
+                    r
+                    for r in items
+                    if r["sequence"] > second["sequence"]
+                    and r["event"] == "move_finished"
+                    and r["text"].strip() == "OK"
+                ]
+                if not ok:
+                    return None
+                value = run.api()
+                state = value["state"]
+                return (
+                    state
+                    if (
+                        value["boot_generation"] == 3
+                        and state["settled"]
+                        and state["sequence"] > ok[0]["sequence"]
+                        and state["text"] == " " * count
+                    )
+                    else None
+                )
+
+            check_faults(run.wait("post-reset blank settlement", final_blank, deadline))
+            if run.process.pid != pid or run.process.poll() is not None:
+                raise RuntimeError("public reset lost the supervised native PID")
+            if run.api("/operations/1")["operation"] != applied["operation"]:
+                raise RuntimeError("public reset lost the mechanics receipt")
+            result["control"].update(public_reset=first, moving_reset=second)
+            items = records(run.out)
+            resets = [i for i, record in enumerate(items) if record["event"] == "guest_reset"]
+            if len(resets) != 3:
+                raise RuntimeError("public reset was applied more than once")
+            # Idle resets have an exact adjacent boundary. During motion the
+            # previous sampled timeline frame can lag the actual reset; exact
+            # moving-state restore is covered by the C model resume regression.
+            for index in resets[:-1]:
+                if items[index]["modules"] != items[index - 1]["modules"]:
+                    raise RuntimeError("native reset changed external mechanics")
+            if run.serial().count("Reset reason: software reset") != 3:
+                raise RuntimeError("native public reset reported the wrong reset reason")
         returncode = run.stop()
         validate_timeline(run.out / "timeline.jsonl")
         final = read_settlement(run.out, hardware)
@@ -315,9 +369,21 @@ def verify(args):
         observed = {}
         complete = serial[: serial.rfind("\n") + 1]
         # Each boot reports its own missing modules; check every boot's log separately.
-        for boot_log in re.split(r"(?m)^(?=rst:0x)", complete):
-            if boot_log.strip():
-                serial_errors(boot_log, policy, KnownSerial(), observed)
+        boot_logs = [b for b in re.split(r"(?m)^(?=rst:0x)", complete) if b.strip()]
+        for index, boot_log in enumerate(boot_logs, 1):
+            boot_policy = policy
+            if args.case == "control" and index == 3 and default_eight:
+                # This boot is intentionally reset during the initial moving
+                # module scan. Require a valid prefix, not eight diagnostics for
+                # operations the interrupted firmware never reached.
+                pattern = r"(?m)^Error writing data to module (\d+), error code: 2\r?$"
+                missing = [int(addr) for addr in re.findall(pattern, boot_log)]
+                if missing != list(range(32, 32 + len(missing))) or len(missing) > 8:
+                    raise RuntimeError("invalid partial absent-module scan before reset")
+                result["interrupted_boot_missing_scan"] = missing
+                boot_log = re.sub(pattern, "", boot_log)
+                boot_policy = {**policy, "default_missing_bus1": False}
+            serial_errors(boot_log, boot_policy, KnownSerial(), observed)
         result["tolerated_serial"] = [{"regex": k, **v} for k, v in observed.items()]
         result.update(passed=True, returncode=returncode)
     except Exception as error:
