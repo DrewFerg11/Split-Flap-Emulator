@@ -9,9 +9,10 @@ The job uses only the **published image**, pinned by digest: it pulls the image,
 source inside it with `--network none` (the pinned libraries ship in the image), and runs every
 scenario in it. It needs no emulator checkout, no host toolchain and no registry login (the image
 is public). [`firmware-native-ci.yml`](firmware-native-ci.yml) mirrors the job as installed in
-Split-Flap-Display's `.github/workflows/ci-native-emulator.yml`. To move to a newer emulator, set
-`FLAPSIM_IMAGE` to the `ghcr.io/drewferg11/split-flap-emulator@sha256:...` reference that release's
-publication recorded.
+Split-Flap-Display's `.github/workflows/ci-native-emulator.yml`. `FLAPSIM_IMAGE` is
+`ghcr.io/drewferg11/split-flap-emulator:<version>@sha256:<digest>`: Docker pulls by the digest, and
+the tag is there for readers. To move to a newer emulator, update both from the digest that
+release's publication recorded.
 
 ## What it checks
 
