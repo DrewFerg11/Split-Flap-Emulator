@@ -3,7 +3,9 @@ name: clock-soak-native-8
 timeout: 3600
 # Long soak (#24): three guest hours of time mode, one display update a minute (180 moves).
 # Run it with --speed 50: one guest hour then takes about 72 wall seconds. Step timeouts
-# (wall seconds) leave room for slow or busy hosts. Native only.
+# (wall seconds) leave room for slow or busy hosts. At that speed each minute is on the
+# display for about a wall second, so the waits read the settlement history instead of
+# polling the current display, which a busy host can miss. Native only.
 modes: [native]
 clock: {start: "2027-06-15T08:58:50Z", sync: boot}
 nvs:
@@ -13,14 +15,14 @@ nvs:
     wire1Addresses: ""
     wire1Offsets: ""
 steps:
-  - wait_display: {text: "  0859  "}
+  - wait_display: {text: "  0859  ", history: true}
     timeout: 120
-  - wait_display: {text: "  0900  "}
+  - wait_display: {text: "  0900  ", history: true}
     timeout: 60
-  - wait_display: {text: "  1000  "}
+  - wait_display: {text: "  1000  ", history: true}
     timeout: 900
-  - wait_display: {text: "  1100  "}
+  - wait_display: {text: "  1100  ", history: true}
     timeout: 900
-  - wait_display: {text: "  1200  "}
+  - wait_display: {text: "  1200  ", history: true}
     timeout: 900
   - assert_no_errors: {}
