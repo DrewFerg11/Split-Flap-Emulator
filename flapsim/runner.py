@@ -353,6 +353,11 @@ def run_native(args, *, executor=None, interrupt=None):
     emulator = emulator_provenance()
     if interrupt and (signum := interrupt()) is not None:
         raise InterruptedRun(signum)
+    control_port = getattr(args, "control_port", None)
+    if control_port is not None:
+        from flapsim.control import check_port
+
+        check_port(control_port)
     enable_subreaper()
     if args.firmware_src is None:
         out = claim_output(args.out)
@@ -383,9 +388,15 @@ def run_native(args, *, executor=None, interrupt=None):
         "attempts": [],
     }
     process = None
+    control = None
     broker = observer = None
     exit_code = EXIT_RUNTIME
     try:
+        if control_port is not None:
+            from flapsim.control import ControlServer
+
+            control = ControlServer(control_port, out, hardware, backend="native")
+            manifest["control"] = control.metadata()
         deadline = started + timeout
         services = {}
         if "mqtt" in setup["services"]:
@@ -411,7 +422,10 @@ def run_native(args, *, executor=None, interrupt=None):
             manifest["attempts"].append(attempt)
             manifest["status"] = "starting"
             save_manifest(out, manifest)
-            with (out / "native-attempt-1.log").open("wb") as log:
+            with (
+                channel(control) as (control_env, pass_fds, connection, child_channel),
+                (out / "native-attempt-1.log").open("wb") as log,
+            ):
                 if time.monotonic() >= deadline:
                     raise TimeoutError("deadline reached before native launch")
                 process = subprocess.Popen(
@@ -420,8 +434,14 @@ def run_native(args, *, executor=None, interrupt=None):
                     stdout=log,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
-                    pass_fds=(server.fileno(),),
+                    env={
+                        **{k: v for k, v in os.environ.items() if k != "FLAPSIM_CONTROL_FD"},
+                        **control_env,
+                    },
+                    pass_fds=(server.fileno(), *pass_fds),
                 )
+                if child_channel is not None:
+                    child_channel.close()
                 attempt["pid"] = process.pid
                 context = RunContext(
                     out, hardware, manifest["endpoint"], process, deadline, interrupt, services
@@ -429,6 +449,8 @@ def run_native(args, *, executor=None, interrupt=None):
                 try:
                     while not native.ready(out):
                         context.pause()
+                    if control is not None:
+                        control.attach(connection)
                     manifest["status"] = "executing"
                     save_manifest(out, manifest)
                     manifest["result"] = executor.execute(context)
@@ -447,6 +469,13 @@ def run_native(args, *, executor=None, interrupt=None):
         if process is not None:
             try:
                 stop_group(process)
+            except Exception as error:
+                manifest["cleanup_error"] = str(error)
+                exit_code = EXIT_RUNTIME
+        if control is not None:
+            try:
+                control.close()
+                manifest["control"]["status"] = "stopped"
             except Exception as error:
                 manifest["cleanup_error"] = str(error)
                 exit_code = EXIT_RUNTIME

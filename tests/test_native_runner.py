@@ -178,10 +178,6 @@ def cli_args(**values):
             {"mode": "native", "native_build": Path("b"), "timing": "ci"},
             "apply only to --mode qemu",
         ),
-        (
-            {"mode": "native", "native_build": Path("b"), "control_port": 0},
-            "--control-port applies only to --mode qemu",
-        ),
     ],
 )
 def test_each_mode_accepts_only_its_own_inputs(values, message):
@@ -279,6 +275,58 @@ def test_scenario_modes_are_validated_and_enforced(tmp_path):
             load_executor(str(scenario), hardware)
     scenario.write_text(body.format(modes=""))
     assert load_executor(str(scenario), hardware, mode="native")
+
+
+def test_native_mode_accepts_control_port():
+    check_mode_arguments(cli_args(mode="native", native_build=Path("b"), control_port=0))
+
+
+@pytest.mark.parametrize("early_exit", [False, True])
+def test_native_control_listener_cleanup(native_args, monkeypatch, early_exit):
+    import urllib.error
+    import urllib.request
+
+    native_args.control_port = 0
+    monkeypatch.setenv("FLAPSIM_CONTROL_FD", "999999")
+    if early_exit:
+        monkeypatch.setenv("FLAPSIM_FAKE_MODE", "exit")
+
+    class Probe:
+        timeout = 5
+        document = {"version": 1, "mode": "boot", "timeout": 5}
+
+        def execute(self, context):
+            value = manifest(native_args)
+            token = (context.out / "control-token").read_text().strip()
+            assert token not in json.dumps(value)
+            request = urllib.request.Request(
+                value["control"]["endpoint"] + "/api/emu/state",
+                headers={"Authorization": "Bearer " + token},
+            )
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with pytest.raises(urllib.error.HTTPError) as error:
+                opener.open(request, timeout=2)
+            assert error.value.code == 503
+            return {}
+
+    assert run(native_args, executor=Probe()) == (3 if early_exit else 0)
+    value = manifest(native_args)
+    assert value["control"]["status"] == "stopped"
+    boot = json.loads((native_args.out / "boot-1.json").read_text())
+    assert boot["control_type"] == socket.SOCK_SEQPACKET
+    port = int(value["control"]["endpoint"].rsplit(":", 1)[1])
+    with socket.socket() as connection:
+        assert connection.connect_ex(("127.0.0.1", port)) != 0
+    assert_reaped(value)
+
+
+def test_native_disabled_control_strips_inherited_descriptor(native_args, monkeypatch):
+    monkeypatch.setenv("FLAPSIM_CONTROL_FD", "999999")
+    assert run(native_args) == 0
+    boot = json.loads((native_args.out / "boot-1.json").read_text())
+    assert boot["control_type"] is None
+    assert "control" not in manifest(native_args)
+    assert not (native_args.out / "control-token").exists()
 
 
 def test_firmware_source_is_built_into_the_run_directory(native_args, monkeypatch, tmp_path):

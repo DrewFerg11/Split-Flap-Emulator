@@ -29,6 +29,9 @@ coverage QEMU mode cannot reach.
 - Phase 4: native mode in the container image ([container](container.md#native-mode-in-the-image))
   and a non-gating firmware CI job for Split-Flap Display ([firmware CI](firmware-ci.md)).
 
+The native runner also supports the shared authenticated
+[state and mechanics API](control-api.md) with `--control-port`.
+
 ## Build
 
 Requirements: Linux, a C++17 compiler, CMake ≥ 3.20, pkg-config, `libjson-c-dev`, git, and

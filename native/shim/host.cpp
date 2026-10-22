@@ -5,6 +5,7 @@
 #include "vclock.h"
 
 extern "C" {
+#include "control.h"
 #include "model.h"
 }
 
@@ -21,6 +22,7 @@ extern "C" {
 #include <execinfo.h>
 #include <fcntl.h>
 #include <json.h>
+#include <poll.h>
 #include <stdexcept>
 #include <thread>
 #include <unistd.h>
@@ -359,6 +361,37 @@ void start_model(int64_t guest) {
     }).detach();
 }
 
+void start_control() {
+    const char *value = std::getenv("FLAPSIM_CONTROL_FD");
+    if (!value)
+        return;
+    char *end;
+    errno = 0;
+    long parsed = std::strtol(value, &end, 10);
+    if (errno || end == value || *end || parsed < 3 || parsed > INT32_MAX)
+        fail("invalid FLAPSIM_CONTROL_FD");
+    int fd = int(parsed);
+    /* pass_fds clears close-on-exec: the same private channel survives firmware resets. */
+    if (::fcntl(fd, F_GETFD) < 0)
+        fail("invalid control descriptor");
+    std::thread([fd] {
+        pollfd request{fd, POLLIN, 0};
+        while (true) {
+            int ready = ::poll(&request, 1, -1);
+            if (ready < 0 && errno == EINTR)
+                continue;
+            if (ready <= 0 || !(request.revents & POLLIN))
+                break;
+            std::lock_guard<std::timed_mutex> owner(model_mutex);
+            if (!fs_control_serve(fd, vclock::now_ns()))
+                break;
+            check_model();
+        }
+        /* Retain the inherited descriptor for re-exec even after peer loss.
+         * Closing it here would leave a stale FD in the saved reset environment. */
+    }).detach();
+}
+
 void fill_input() {
     uint8_t buffer[256];
     while (input_fd >= 0) {
@@ -455,6 +488,7 @@ void start(int argc, char **argv) {
     install_panic_handlers();
     boot_banner();
     start_model(guest);
+    start_control();
     flapsim_freertos_enter_loop_task();
 }
 

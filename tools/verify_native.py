@@ -16,6 +16,8 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.request
+from contextlib import ExitStack
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +30,7 @@ from flapsim.runner import validate_timeline  # noqa: E402
 from flapsim.scenario import serial_errors  # noqa: E402
 from flapsim.state import read_settlement, validate_state  # noqa: E402
 
-CASES = ["boot", "improv-reboot"]
+CASES = ["boot", "improv-reboot", "control"]
 
 
 class KnownSerial:
@@ -65,7 +67,7 @@ def records(out):
 
 
 class Run:
-    def __init__(self, build, hardware_name, out, speed, serial_input):
+    def __init__(self, build, hardware_name, out, speed, serial_input, control=False):
         self.out = out.resolve()
         if self.out.exists() and any(self.out.iterdir()):
             raise ValueError(f"{self.out} must be a fresh or empty directory")
@@ -91,13 +93,52 @@ class Run:
             str(self.out / "native.json"),
         ]
         self.log = (self.out / "native.log").open("wb")
-        self.process = subprocess.Popen(
-            self.command,
-            stdin=subprocess.DEVNULL,
-            stdout=self.log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
+        self.resources = ExitStack()
+        self.control = None
+        control_env, pass_fds, connection, child_channel = {}, (), None, None
+        try:
+            if control:
+                from flapsim.control import ControlServer, channel
+
+                self.control = ControlServer(0, self.out, self.hardware, backend="native")
+                self.resources.callback(self.control.close)
+                control_env, pass_fds, connection, child_channel = self.resources.enter_context(
+                    channel(self.control)
+                )
+            self.process = subprocess.Popen(
+                self.command,
+                env={
+                    **{k: v for k, v in os.environ.items() if k != "FLAPSIM_CONTROL_FD"},
+                    **control_env,
+                },
+                pass_fds=pass_fds,
+                stdin=subprocess.DEVNULL,
+                stdout=self.log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            if child_channel is not None:
+                child_channel.close()
+                self.control.attach(connection)
+        except BaseException:
+            if hasattr(self, "process"):
+                stop_group(self.process)
+            self.resources.close()
+            self.log.close()
+            raise
+
+    def api(self, path="/state", body=None):
+        request = urllib.request.Request(
+            self.control.endpoint + "/api/emu" + path,
+            headers={
+                "Authorization": "Bearer " + self.control.token,
+                "Content-Type": "application/json",
+            },
+            data=None if body is None else json.dumps(body).encode(),
         )
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=2) as response:
+            return json.load(response)
 
     def serial(self):
         try:
@@ -127,6 +168,7 @@ class Run:
             return stop_group(self.process)
         finally:
             self.log.close()
+            self.resources.close()
 
 
 def check_faults(state):
@@ -137,7 +179,14 @@ def check_faults(state):
 def verify(args):
     build = args.build.resolve()
     info = json.loads((build / "build-info.json").read_text())
-    run = Run(build, args.hardware, args.out, args.speed, args.case == "improv-reboot")
+    run = Run(
+        build,
+        args.hardware,
+        args.out,
+        args.speed,
+        args.case in {"improv-reboot", "control"},
+        control=args.case == "control",
+    )
     hardware = run.hardware
     count = len(hardware["modules"])
     default_eight = [m["addr"] for m in hardware["modules"]] == list(range(32, 40)) and all(
@@ -148,6 +197,13 @@ def verify(args):
     started = time.monotonic()
     deadline = started + args.timeout
     try:
+        if args.case == "control":
+
+            def moving():
+                snapshot = run.api()
+                return snapshot if not snapshot["state"]["settled"] else None
+
+            result["control"] = {"moving": run.wait("live moving snapshot", moving, deadline)}
         boot = run.wait("startup settlement at X", run.settled("X" * count), deadline)
         check_faults(boot)
         serial = run.serial()
@@ -157,7 +213,24 @@ def verify(args):
             raise RuntimeError("first boot did not report a power-on reset")
         serial_errors(serial[: serial.rfind("\n") + 1], policy)
         result["boot"] = {"guest_ns": boot["guest_ns"], "text": boot["text"]}
-        if args.case == "improv-reboot":
+        if args.case == "control":
+            snapshot = run.api()
+            if snapshot["backend"] != "native" or snapshot["boot_generation"] != 0:
+                raise RuntimeError("incorrect native snapshot identity")
+            before_edit = snapshot["state"]["modules"][0]
+            edit = {
+                "id": 1,
+                "expected_revision": 0,
+                "patch": {"sensor_window": before_edit["mechanics"]["sensor_window"] + 1},
+            }
+            applied = run.api("/modules/0/32/mech", edit)
+            if applied["status"] != "applied":
+                raise RuntimeError("native mechanics edit was not applied")
+            after_edit = run.api()["state"]["modules"][0]
+            if before_edit["angle"] != after_edit["angle"]:
+                raise RuntimeError("mechanics edit moved a drum")
+            result["control"].update(initial=snapshot, applied=applied)
+        if args.case in {"improv-reboot", "control"}:
             pid = run.process.pid
             with (run.out / "serial.in").open("wb") as pipe:
                 pipe.write(improv_packet("flapsim-net", "secret-pass"))
@@ -215,6 +288,23 @@ def verify(args):
                 "ok_text": ok["text"],
                 "final_text": blank["text"],
             }
+        if args.case == "control":
+            after_reset = run.api()
+            if after_reset["boot_generation"] != 1:
+                raise RuntimeError("native reset generation was not retained")
+            receipt = run.api("/operations/1")
+            duplicate = run.api("/modules/0/32/mech", edit)
+            if (
+                receipt["operation"] != applied["operation"]
+                or duplicate["operation"] != applied["operation"]
+            ):
+                raise RuntimeError("native reset lost or repeated the operation")
+            if (
+                after_reset["state"]["modules"][0]["mechanics"]["sensor_window"]
+                != edit["patch"]["sensor_window"]
+            ):
+                raise RuntimeError("native reset lost the mechanics overlay")
+            result["control"].update(after_reset=after_reset, receipt=receipt, duplicate=duplicate)
         returncode = run.stop()
         validate_timeline(run.out / "timeline.jsonl")
         final = read_settlement(run.out, hardware)
@@ -236,7 +326,7 @@ def verify(args):
             run.stop()
     result["wall_seconds"] = round(time.monotonic() - started, 3)
     (run.out / "verification.json").write_text(json.dumps(result, indent=2) + "\n")
-    print(json.dumps({k: v for k, v in result.items() if k != "build"}, indent=2))
+    print(json.dumps({k: v for k, v in result.items() if k not in {"build", "control"}}, indent=2))
     return 0 if result["passed"] else 1
 
 

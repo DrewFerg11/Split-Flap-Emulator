@@ -1134,3 +1134,38 @@ def test_private_transport_rejects_oversize_even_with_a_valid_maximum_size_prefi
         parent.sendall(valid)
         assert model.lib.fs_control_serve(child.fileno(), model.now) == 1
         assert json.loads(parent.recv(65536))["mechanics_revision"] == 1
+
+
+def test_native_reset_generations_persist_before_any_mechanics_edit(make_model):
+    model = make_model()
+    for generation in range(1, 4):
+        assert resume(model, model.now + 1000000) == 0
+        assert model.activity()["guest_resets"] == generation
+    reply = model.control({"sensor_window": 20})
+    assert reply["guest_resets"] == 3
+    assert resume(model, model.now + 1000000) == 0
+    assert model.control({"sensor_window": 20})["guest_resets"] == 4
+
+
+@pytest.mark.parametrize("generation", [-1, True, "1", None])
+def test_native_resume_rejects_invalid_reset_generation(make_model, generation):
+    model = make_model()
+    model.lib.fs_model_close()
+    timeline = model.out / "timeline.jsonl"
+    items = [json.loads(line) for line in timeline.read_text().splitlines()]
+    items[-1]["guest_resets"] = generation
+    timeline.write_text("".join(json.dumps(item) + "\n" for item in items))
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0
+
+
+def test_native_resume_accepts_legacy_records_without_reset_generation(make_model):
+    model = make_model()
+    model.lib.fs_model_guest_reset()
+    model.lib.fs_model_close()
+    timeline = model.out / "timeline.jsonl"
+    items = [json.loads(line) for line in timeline.read_text().splitlines()]
+    for item in items:
+        item.pop("guest_resets")
+    timeline.write_text("".join(json.dumps(item) + "\n" for item in items))
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) == 0
+    assert model.control({"sensor_window": 20})["guest_resets"] == 1

@@ -88,6 +88,19 @@ static bool restore(const char *text, size_t end, bool *recorded_reset) {
         valid = false;
     if (valid) {
         *recorded_reset = !strcmp(json_object_get_string(event), "guest_reset");
+        /* New records persist reset generations even before the first mechanics edit.
+         * Legacy timelines have no count; retain the one reset their last event proves. */
+        struct json_object *resets;
+        int64_t generation;
+        if (json_object_object_get_ex(record, "guest_resets", &resets)) {
+            if (!integer(record, "guest_resets", 0, INT64_MAX, &generation)) {
+                json_object_put(record);
+                return false;
+            }
+            fs.guest_resets = (uint64_t)generation;
+        } else {
+            fs.guest_resets = *recorded_reset ? 1 : 0;
+        }
         fs.now = guest;
         fs.sequence = (uint64_t)sequence;
         fs.movement_id = (uint64_t)movement;
