@@ -317,6 +317,9 @@ def test_faults_normalize_with_reproducible_per_module_streams(document):
         ({"i2c": "nack", "nack": 1.5}, "probability in (0, 1]"),
         ({"i2c": "corrupt", "corrupt": True}, "probability in (0, 1]"),
         ({"i2c": "disappear", "disappear_at": 0}, "guest seconds > 0"),
+        ({"i2c": "disappear", "disappear_at": 1e-10}, "guest seconds > 0"),
+        ({"i2c": "disappear", "disappear_at": float("inf")}, "guest seconds > 0"),
+        ({"i2c": "disappear", "disappear_at": 1e10}, "guest seconds > 0"),
         ({"sensor": "inverted", "colour": "red"}, "colour"),
     ],
 )

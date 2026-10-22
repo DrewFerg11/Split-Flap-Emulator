@@ -1,6 +1,7 @@
 """Strict physical-hardware configuration and a versioned model JSON boundary."""
 
 import json
+import math
 import secrets
 from pathlib import Path
 
@@ -60,7 +61,12 @@ def normalize_faults(value, where, seed):
     for name in given:
         if name == "disappear_at":
             seconds = value[name]
-            if type(seconds) not in (int, float) or isinstance(seconds, bool) or not seconds > 0:
+            # Checked after rounding: the model needs a positive int64 nanosecond time.
+            if (
+                type(seconds) not in (int, float)
+                or not math.isfinite(seconds)
+                or not 0 < round(seconds * 1_000_000_000) < 2**63
+            ):
                 raise ValueError(f"{where} faults.disappear_at must be guest seconds > 0")
             normalized["disappear_at_ns"] = round(seconds * 1_000_000_000)
         else:
