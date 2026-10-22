@@ -92,6 +92,14 @@ class PowerProbe:
                     return value
                 context.pause()
 
+        if not is_native:
+            timing = api("/speed")
+            if timing["runtime"] or timing["timing"] != manifest["timing"]:
+                raise RuntimeError("QEMU did not report its fixed startup timing")
+            rejected = api("/speed", {"id": 1, "speed": 2}, 409)
+            if rejected["error"] != "unsupported_capability":
+                raise RuntimeError("QEMU incorrectly accepted live speed")
+            evidence["fixed_timing"] = timing
         while api()["state"]["settled"]:
             context.pause()
         before = api()

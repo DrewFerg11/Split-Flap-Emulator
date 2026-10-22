@@ -50,7 +50,7 @@ std::timed_mutex model_mutex;
 char **saved_argv;
 /* Prepared at startup so the reset path needs no allocation (it also runs in signal handlers). */
 std::vector<char *> exec_environment;
-char boot_slot[96];
+char boot_slot[160];
 char *alternate_stack;
 
 [[noreturn]] void fail(const std::string &message) {
@@ -170,8 +170,9 @@ void load_config(const char *file) {
     json_object_put(root);
 }
 
-/* FLAPSIM_NATIVE_BOOT=<boot>:<reason>:<guest_ns>:<rtc set> is set only by an emulated reset; the
- * RTC keeps a synchronized wall clock across software resets, as on the device. */
+/* FLAPSIM_NATIVE_BOOT=<boot>:<reason>:<guest_ns>:<rtc set>[:<rate bits>] is private resume
+ * state. The optional IEEE-754 rate bits preserve the exact double without allocating in
+ * the signal reset path; older four-field identities retain the configured initial rate. */
 int64_t load_boot_state() {
     const char *value = std::getenv(kBootVariable);
     if (!value)
@@ -179,8 +180,17 @@ int64_t load_boot_state() {
     unsigned long long count = 0, code = 0, rtc = 0;
     long long guest = 0;
     char tail;
-    if (std::sscanf(value, "%llu:%llu:%lld:%llu%c", &count, &code, &guest, &rtc, &tail) != 4 ||
-        count < 2 || code > ESP_RST_SDIO || guest < 0 || rtc > 1)
+    unsigned long long bits = 0;
+    int fields =
+        std::sscanf(value, "%llu:%llu:%lld:%llu:%llu%c", &count, &code, &guest, &rtc, &bits, &tail);
+    if (fields == 5) {
+        uint64_t raw = bits;
+        static_assert(sizeof(raw) == sizeof(settings.speed));
+        std::memcpy(&settings.speed, &raw, sizeof(raw));
+    } else if (std::sscanf(value, "%llu:%llu:%lld:%llu%c", &count, &code, &guest, &rtc, &tail) != 4)
+        fail("invalid reset state in FLAPSIM_NATIVE_BOOT");
+    if (fields == 6 || count < 2 || count > UINT32_MAX || code > ESP_RST_SDIO || guest < 0 ||
+        rtc > 1)
         fail("invalid reset state in FLAPSIM_NATIVE_BOOT");
     boots = unsigned(count);
     reason = esp_reset_reason_t(code);
@@ -239,6 +249,11 @@ void write_text(int fd, const char *text) { write_all(fd, text, std::strlen(text
     out = append_number(out, (unsigned long long)vclock::now_ns());
     *out++ = ':';
     out = append_number(out, clock_set ? 1 : 0);
+    *out++ = ':';
+    double speed = vclock::speed();
+    uint64_t bits;
+    std::memcpy(&bits, &speed, sizeof(bits));
+    out = append_number(out, bits);
     *out = '\0';
     execve("/proc/self/exe", saved_argv, exec_environment.data());
     write_text(STDERR_FILENO, "flapsim-native: emulated reset failed: cannot re-execute\n");
@@ -362,6 +377,53 @@ void start_model(int64_t guest) {
     }).detach();
 }
 
+bool serve_speed(int fd) {
+    constexpr char prefix[] = "FLAPSIM_SPEED/1";
+    constexpr ssize_t prefix_size = sizeof(prefix) - 1;
+    char packet[2049];
+    ssize_t length = ::recv(fd, packet, sizeof(packet), MSG_PEEK | MSG_DONTWAIT | MSG_TRUNC);
+    if (length < prefix_size || std::memcmp(packet, prefix, prefix_size))
+        return false;
+    length = ::recv(fd, packet, sizeof(packet) - 1, MSG_DONTWAIT | MSG_TRUNC);
+    json_object *reply = nullptr;
+    if (length == prefix_size) {
+        reply = json_object_new_object();
+    } else if (length > prefix_size + 1 && length < (ssize_t)sizeof(packet) &&
+               packet[prefix_size] == ' ' && !std::memchr(packet, 0, size_t(length))) {
+        packet[length] = 0;
+        json_object *command = json_tokener_parse(packet + prefix_size + 1);
+        json_object *value = nullptr, *id = nullptr;
+        if (command && json_object_is_type(command, json_type_object) &&
+            json_object_object_length(command) == 2 &&
+            json_object_object_get_ex(command, "speed", &value) &&
+            (json_object_is_type(value, json_type_double) ||
+             json_object_is_type(value, json_type_int)) &&
+            json_object_object_get_ex(command, "id", &id) &&
+            json_object_is_type(id, json_type_int) && json_object_get_int64(id) > 0) {
+            try {
+                fs_model_tick(vclock::now_ns());
+                vclock::set_speed(json_object_get_double(value));
+                reply = json_object_new_object();
+            } catch (const std::invalid_argument &) {
+            }
+        }
+        if (command)
+            json_object_put(command);
+    }
+    if (!reply)
+        reply = json_tokener_parse(R"({"error":"invalid_speed"})");
+    else {
+        json_object_object_add(reply, "speed", json_object_new_double(vclock::speed()));
+        char *state = fs_model_snapshot(vclock::now_ns());
+        json_object_object_add(reply, "state", state ? json_tokener_parse(state) : nullptr);
+        std::free(state);
+    }
+    const char *data = json_object_to_json_string_ext(reply, JSON_C_TO_STRING_PLAIN);
+    ::send(fd, data, std::strlen(data), MSG_DONTWAIT | MSG_NOSIGNAL);
+    json_object_put(reply);
+    return true;
+}
+
 void start_control() {
     const char *value = std::getenv("FLAPSIM_CONTROL_FD");
     if (!value)
@@ -386,6 +448,8 @@ void start_control() {
             int status;
             {
                 std::lock_guard<std::timed_mutex> owner(model_mutex);
+                if (serve_speed(fd))
+                    continue;
                 status = fs_control_serve_native(fd, vclock::now_ns());
                 check_model();
                 if (status == 3) {
@@ -400,6 +464,10 @@ void start_control() {
                     std::free(snapshot);
                     std::string resume = std::to_string(boots + 1) + ":1:" + std::to_string(guest) +
                                          ":" + (clock_set ? "1" : "0");
+                    double speed = vclock::speed();
+                    uint64_t bits;
+                    std::memcpy(&bits, &speed, sizeof(bits));
+                    resume += ":" + std::to_string(bits);
                     json_object_object_add(reply, "resume", json_object_new_string(resume.c_str()));
                     fs_model_close();
                     const char *data =

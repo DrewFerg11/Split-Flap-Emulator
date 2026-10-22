@@ -207,7 +207,7 @@ def validate_command(value, bus, addr):
 class ControlServer:
     """Loopback only; auth secret lives in a mode-0600 file, never the manifest."""
 
-    def __init__(self, port, out, hardware, *, backend="qemu"):
+    def __init__(self, port, out, hardware, *, backend="qemu", speed=5.0, timing="ci"):
         if backend not in {"qemu", "native"}:
             raise ValueError("unknown control backend")
         check_port(port)
@@ -223,6 +223,10 @@ class ControlServer:
         self.resets = None
         self.powers = None
         self.power_metadata = None
+        self.speeds = None
+        self.initial_speed = speed
+        self.speed_metadata = None
+        self.timing = timing
         self.capabilities = dict(CAPABILITIES)
         self.run_id = str(uuid.uuid4())
         self.token = secrets.token_urlsafe(32)
@@ -249,6 +253,7 @@ class ControlServer:
                     "live": power_state == "on",
                     "power_state": power_state,
                     "capabilities": dict(self.capabilities),
+                    "speed": self.clock_metadata(),
                 }
 
             def journal(entry):
@@ -357,9 +362,27 @@ class ControlServer:
                 from starlette.requests import ClientDisconnect
 
                 is_power = request.url.path.startswith("/api/emu/power")
-                controller = self.powers if is_power else self.resets
+                is_speed = request.url.path.startswith("/api/emu/speed")
+                if is_speed and backend == "qemu":
+                    if request.method == "GET" and "id" not in request.path_params:
+                        return JSONResponse(self.clock_metadata())
+                    return JSONResponse(
+                        {
+                            "error": "unsupported_capability",
+                            "reason": "QEMU timing is fixed at startup",
+                            "speed": self.clock_metadata(),
+                        },
+                        status_code=409,
+                    )
+                controller = self.speeds if is_speed else self.powers if is_power else self.resets
                 if controller is None:
                     return JSONResponse({"error": "backend_unavailable"}, status_code=503)
+                if request.method == "GET" and is_speed and "id" not in request.path_params:
+                    try:
+                        result = await run_in_threadpool(controller.apply, None, journal)
+                    except Unavailable:
+                        return JSONResponse({"error": "backend_unavailable"}, status_code=503)
+                    return JSONResponse(result, status_code=503 if "error" in result else 200)
                 if request.method == "GET":
                     receipt = controller.receipt
                     if receipt is None or receipt["command"]["id"] != request.path_params["id"]:
@@ -396,12 +419,16 @@ class ControlServer:
                     command = strict_json(data.decode("utf-8"))
                 except (ValueError, UnicodeError, RecursionError):
                     return JSONResponse({"error": "invalid_json"}, status_code=400)
+                from flapsim.speed import valid_speed
+
                 if (
                     not isinstance(command, dict)
-                    or set(command) != ({"id", "on"} if is_power else {"id"})
+                    or set(command)
+                    != ({"id", "speed"} if is_speed else {"id", "on"} if is_power else {"id"})
                     or type(command["id"]) is not int
                     or not 1 <= command["id"] <= MAX_CONTROL_ID
                     or (is_power and type(command["on"]) is not bool)
+                    or (is_speed and not valid_speed(command["speed"]))
                 ):
                     return JSONResponse({"error": "invalid_command"}, status_code=422)
                 try:
@@ -431,6 +458,8 @@ class ControlServer:
                     Route("/api/emu/operations/{id:int}", operation, methods=["GET"]),
                     Route("/api/emu/reset", reset, methods=["POST"]),
                     Route("/api/emu/reset/operations/{id:int}", reset, methods=["GET"]),
+                    Route("/api/emu/speed", reset, methods=["GET", "POST"]),
+                    Route("/api/emu/speed/operations/{id:int}", reset, methods=["GET"]),
                     Route("/api/emu/power", reset, methods=["POST"]),
                     Route("/api/emu/power/operations/{id:int}", reset, methods=["GET"]),
                 ]
@@ -496,6 +525,11 @@ class ControlServer:
 
             self.resets = ResetController(self.client, reset)
             self.capabilities["reset"] = True
+        if self.backend == "native":
+            from flapsim.speed import SpeedController
+
+            self.speeds = SpeedController(self.client, self.initial_speed)
+            self.capabilities["speed"] = True
         if power is not None:
             from flapsim.power import PowerController
 
@@ -505,6 +539,8 @@ class ControlServer:
     def detach(self):
         client, self.client = self.client, None
         power, self.powers = self.powers, None
+        speeds, self.speeds = self.speeds, None
+        self.capabilities["speed"] = False
         self.resets = None
         self.capabilities["reset"] = False
         self.capabilities["power"] = False
@@ -512,6 +548,22 @@ class ControlServer:
             client.close()
         if power is not None:
             self.power_metadata = power.metadata()
+        if speeds is not None:
+            self.speed_metadata = speeds.metadata()
+
+    def clock_metadata(self):
+        if self.backend == "qemu":
+            return {
+                "runtime": False,
+                "timing": self.timing,
+                "reason": "QEMU timing is fixed at startup",
+            }
+        return (
+            self.speeds.metadata()
+            if self.speeds
+            else self.speed_metadata
+            or {"current": self.initial_speed, "min": 0.25, "max": 50, "runtime": False}
+        )
 
     def metadata(self):
         return {
@@ -519,6 +571,7 @@ class ControlServer:
             "run_id": self.run_id,
             "endpoint": self.endpoint,
             "token_file": str(self.token_path),
+            "speed": self.clock_metadata(),
             "capabilities": dict(self.capabilities),
             **(
                 {"power": self.powers.metadata()}
