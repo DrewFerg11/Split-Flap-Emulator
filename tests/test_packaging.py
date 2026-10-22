@@ -9,6 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+import yaml
 
 import tools.verify_container as verify_container
 from flapsim.executor import load_executor
@@ -23,7 +24,7 @@ from tools.publish_image import (
 )
 from tools.verify_boot import GOLDEN
 from tools.verify_container import ImageVerifier
-from tools.verify_publication_gate import validate_workflows
+from tools.verify_publication_gate import check_release_approval, validate_workflows
 
 REVISION = "a" * 40
 IMAGE_ID = "sha256:" + "b" * 64
@@ -262,6 +263,25 @@ def test_registry_only_treats_authorized_404_as_missing(registry_server):
 
 def test_publication_workflow_requires_verification_and_scopes_write_permission():
     validate_workflows(Path(__file__).resolve().parents[1])
+
+
+@pytest.mark.parametrize(
+    "mutate, message",
+    [
+        (lambda jobs: jobs["authorize"].pop("environment"), "authorize must use release"),
+        (lambda jobs: jobs["publish"].pop("environment"), "publish must use release"),
+        (lambda jobs: jobs["validate"].pop("needs"), "does not wait for authorize"),
+        (lambda jobs: jobs["verify"].update(needs=[]), "does not wait for authorize"),
+        (lambda jobs: jobs["publish"].pop("needs"), "does not wait for authorize"),
+    ],
+)
+def test_release_jobs_cannot_bypass_owner_approval(mutate, message):
+    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
+    publish = yaml.safe_load(workflow.read_text())
+    check_release_approval(publish)
+    mutate(publish["jobs"])
+    with pytest.raises(AssertionError, match=message):
+        check_release_approval(publish)
 
 
 def test_only_clean_checked_out_commits_on_main_can_be_published(tmp_path, monkeypatch):
