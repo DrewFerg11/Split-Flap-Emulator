@@ -187,3 +187,30 @@ controls are preserved. Local reusable-workflow references, cache identity paths
 and publication workflow validation point to the renamed files. The container
 verification host explicitly installs `packaging>=25,<27`, which its publication
 verifier imports; a runtime-only flapsim install does not provide that host tool.
+
+## Release approval
+
+Releases are owner-only, the same way as in Split-Flap-Display and numbers-go-up:
+
+1. The `release tags` ruleset lets only admins create, move or delete `v*` tags.
+2. `Release / Tag` starts with `authorize`, which uses the `release` environment.
+   Every other job waits for it, so nothing is built or published until the owner
+   approves the run in the Actions tab.
+3. `authorize` also fails fast unless the actor is the repository owner and the ref
+   is a `vX.Y.Z` or `vX.Y.Z-prerelease` tag.
+
+`tools.verify_publication_gate` (run in CI by the packaging tests) fails if any job
+stops depending on `authorize`, or if `authorize` or `publish` drops the
+environment.
+
+One-time environment settings (Settings → Environments → `release`):
+
+- **Required reviewers:** the repository owner; leave **Prevent self-review** off so
+  the owner can approve their own tag.
+- **Deployment branches and tags:** selected tags only, rule `v*.*.*`.
+- **Allow administrators to bypass:** off.
+
+To release: push the tag (`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`),
+open the run, choose **Review deployments → Approve**, then take the digest from the
+publish job's summary or its `container-publication-result` artifact.
+

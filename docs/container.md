@@ -145,7 +145,10 @@ builds are not claimed to be bit-for-bit reproducible.
 
 `release.yml` accepts trusted `v*` tags whose commit belongs to `origin/main`
 and whose SemVer version matches `pyproject.toml` (PEP 440 prerelease equivalence
-is checked). A manual dispatch verifies only; it cannot push. No PR publishes.
+is checked). Every run first waits in the `authorize` job for the owner's approval
+through the `release` environment ([setup](maintenance.md#release-approval)); nothing
+is built or published before that. A manual dispatch must select a version tag and
+verifies only; it cannot push. No PR publishes.
 
 The reusable verification workflow builds once, loads the candidate locally,
 verifies that exact image ID, then exports it and its proof only on success.
