@@ -1,0 +1,88 @@
+version: 1
+name: first-boot-8
+timeout: 600
+# A new user's first boot on a blank flash (#22): access point and no-Wi-Fi display,
+# configuration through the access-point web UI, reboot with the settings in effect,
+# then reset to defaults. Eight modules: bus 2's default addresses are absent.
+steps:
+  - wait_serial: "=== Split Flap Display ==="
+    timeout: 120
+  - expect_serial: "Firmware: ${FIRMWARE_VERSION} ("
+  - wait_serial: "AP IP Address: http://192.168.4.1"
+    timeout: 60
+  - wait_display: {text: XXXXXXXX}
+    timeout: 120
+  - http:
+      path: /settings
+      status: 200
+      json:
+        name: My Display
+        mdns: splitflap
+        ssid: ""
+        mqtt_server: ""
+        mqtt_port: 1883
+        wireAddresses: "32,33,34,35,36,37,38,39"
+        wire1Addresses: "32,33,34,35,36,37,38,39"
+        mode: 0
+      wait_ready: true
+    timeout: 60
+  - assert_no_errors: {fresh_nvs: true, default_missing_bus1: true}
+  # Layout (drop the absent bus), a calibration offset, identity and MQTT in one save.
+  - http:
+      method: POST
+      path: /settings
+      body:
+        name: Kitchen
+        wire1Addresses: ""
+        wire1Offsets: ""
+        wireOffsets: "0,0,0,0,0,0,0,1"
+        mqtt_server: broker.local
+        mqtt_port: 1884
+      status: 200
+      json: {type: success}
+    timeout: 60
+  - wait_serial: "Reset reason: software reset"
+    timeout: 120
+  - wait_serial: "AP IP Address: http://192.168.4.1"
+    timeout: 60
+  # Homing after the reboot, so a display that already showed the target can't match early.
+  - wait_serial: "Homing"
+    timeout: 120
+  - wait_display: {text: "WIFI ERR"}
+    timeout: 120
+  - http:
+      path: /settings
+      status: 200
+      json:
+        name: Kitchen
+        wire1Addresses: ""
+        wire1Offsets: ""
+        wireOffsets: "0,0,0,0,0,0,0,1"
+        mqtt_server: broker.local
+        mqtt_port: 1884
+      wait_ready: true
+    timeout: 60
+  - assert_no_errors: {fresh_nvs: true}
+  - http:
+      method: POST
+      path: /settings/reset
+      status: 200
+    timeout: 60
+  # The reset reconnects: the display blanks, then shows the no-Wi-Fi X again. Waiting
+  # for the blank settlement first stops an earlier X from matching.
+  - wait_display: {text: "        ", history: true}
+    timeout: 120
+  - wait_display: {text: XXXXXXXX}
+    timeout: 180
+  - http:
+      path: /settings
+      status: 200
+      json:
+        name: My Display
+        mqtt_server: ""
+        mqtt_port: 1883
+        wireOffsets: "0,0,0,0,0,0,0,0"
+        wire1Addresses: "32,33,34,35,36,37,38,39"
+      wait_ready: true
+    timeout: 60
+  - assert_no_errors: {}

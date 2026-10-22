@@ -92,7 +92,7 @@ mkdir -p out/native-8
 docker run --rm --network none --user "$(id -u):$(id -g)" \
   --mount "type=bind,source=$(realpath fw-src),target=/firmware-src,readonly" \
   --mount "type=bind,source=$(realpath out/native-8),target=/out" \
-  ghcr.io/drewferg11/flapsim:<version> run --mode native --firmware-src /firmware-src \
+  ghcr.io/drewferg11/split-flap-emulator:<version> run --mode native --firmware-src /firmware-src \
   --hardware esp32-8-single --scenario release-smoke-8 --var FIRMWARE_VERSION=v1.4.1 \
   --out /out/run
 ```
@@ -145,7 +145,10 @@ builds are not claimed to be bit-for-bit reproducible.
 
 `release.yml` accepts trusted `v*` tags whose commit belongs to `origin/main`
 and whose SemVer version matches `pyproject.toml` (PEP 440 prerelease equivalence
-is checked). A manual dispatch verifies only; it cannot push. No PR publishes.
+is checked). Every run first waits in the `authorize` job for the owner's approval
+through the `release` environment ([setup](maintenance.md#release-approval)); nothing
+is built or published before that. A manual dispatch must select a version tag and
+verifies only; it cannot push. No PR publishes.
 
 The reusable verification workflow builds once, loads the candidate locally,
 verifies that exact image ID, then exports it and its proof only on success.

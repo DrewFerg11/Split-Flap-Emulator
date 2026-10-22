@@ -236,6 +236,18 @@ all 30 rounds.
 `clock-soak-native-8.yaml` (native only) runs time mode for three guest hours, 180 display
 updates, and then asserts no errors and no model faults. Run it with `--speed 50`: it takes
 about 3.5 wall minutes. CI runs it on the golden source under the native baseline.
+`first-boot-8.yaml` / `first-boot-16.yaml` follow a new user from a blank flash
+([#22](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/22)): access point and
+no-Wi-Fi display, the compiled defaults in `GET /settings`, one save of layout (8 only),
+a calibration offset, name and MQTT broker through the access-point web UI, the reboot
+with every saved value read back and the new layout in effect, then
+`POST /settings/reset` back to the first-boot display and defaults. After the reboot
+they wait for `Homing` before the display check; after the reset, which does not home,
+they wait for the blank settlement (`history: true`). Either way a display that already
+showed the target can't match early. CI runs both natively against the golden source
+under the native baseline, where v1.4.1 fails them on
+[SFD#54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54)'s lost writes;
+firmware with that fixed passes them strictly.
 
 ## Evidence and validation
 
