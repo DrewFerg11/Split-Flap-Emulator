@@ -53,7 +53,9 @@ static int event_inner(uint8_t id, uint8_t address, uint16_t event, int64_t gues
         bus->direction = kind;
         if (index >= 0) {
             FsModule *module = &fs.modules[index];
-            bus->input = (module->latch & 0x7fff) | (fs_fault_hall(module) ? 0x8000 : 0);
+            /* Only a read samples the sensor, so writes never consume or count sensor faults. */
+            int hall = kind == 0 ? fs_fault_hall(module) : fs_hall(module);
+            bus->input = (module->latch & 0x7fff) | (hall ? 0x8000 : 0);
         }
         return index >= 0 ? 0 : 1;
     }

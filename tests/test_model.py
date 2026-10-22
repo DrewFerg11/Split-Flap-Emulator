@@ -1230,6 +1230,28 @@ def test_sensor_faults_change_what_firmware_reads_not_the_physical_sensor(
         model.lib.fs_model_close()
 
 
+def test_only_reads_sample_a_faulted_sensor(make_model):
+    def levels(writes):
+        model = faulted(make_model, {"sensor": "noisy", "sensor_noise": 0.3}, angles=(0,))
+        values = []
+        for _ in range(100):
+            for _ in range(writes):
+                model.write(OFF)
+            values.append(bool(model.read() & 0x8000))
+        events = fault_record(model)["events"]
+        model.lib.fs_model_close()
+        return values, events
+
+    # Coil writes between reads neither shift the noise stream nor count as fault events.
+    assert levels(3) == levels(0)
+    model = faulted(make_model, {"sensor": "stuck_active"}, angles=(0,))
+    for _ in range(5):
+        model.write(OFF)
+    assert fault_record(model)["events"] == 0
+    model.read()
+    assert fault_record(model)["events"] == 1
+
+
 def test_noisy_sensor_flips_some_reads_reproducibly(make_model):
     def levels():
         model = faulted(make_model, {"sensor": "noisy", "sensor_noise": 0.3}, angles=(0,))
