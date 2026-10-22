@@ -234,10 +234,8 @@ fails the step with the round and the values seen. v1.4.1 loses the first write 
 mode, so golden runs record it as a #54 expected failure; firmware with the fix passes
 all 30 rounds.
 `clock-soak-native-8.yaml` (native only) runs time mode for three guest hours, 180 display
-updates, and then asserts no errors and no model faults. Run it with `--speed 50`: fixed
-firmware takes about 3.5 wall minutes. It isn't in the golden CI lane because v1.4.1's
-`NOT_FOUND` log flood ([SFD#84](https://github.com/DrewFerg11/Split-Flap-Display/issues/84))
-slows that build to roughly 8×; it is meant for checking firmware changes.
+updates, and then asserts no errors and no model faults. Run it with `--speed 50`: it takes
+about 3.5 wall minutes. CI runs it on the golden source under the native baseline.
 
 ## Evidence and validation
 

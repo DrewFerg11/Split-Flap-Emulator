@@ -115,17 +115,21 @@ jobs:
               --scenario "$scenario" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
               --known-issues baselines/v1.4.1-native.yaml --out "runs/native/$scenario"
           done
-      - name: Stress the settings race natively
+      - name: Stress the settings race and soak time mode natively
         if: matrix.name != 'sanitizers'
         run: |
+          set -e
           flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
             --scenario settings-race-8 --seed 7 \
             --known-issues baselines/v1.4.1-native.yaml --out runs/native/settings-race-8
+          flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
+            --scenario clock-soak-native-8 --seed 7 --speed 50 \
+            --known-issues baselines/v1.4.1-native.yaml --out runs/native/clock-soak-native-8
       - name: Log native scenario outcomes
         if: always() && matrix.name != 'sanitizers'
         run: |
           for run in smoke-8 smoke-16 mqtt-native-8 clock-dst-native-8 date-rollover-native-8 \
-                     settings-race-8; do
+                     settings-race-8 clock-soak-native-8; do
             python -m tools.summarize_run "runs/native/$run/run.json"
           done
       - name: Upload native evidence

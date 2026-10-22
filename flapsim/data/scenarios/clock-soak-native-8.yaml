@@ -2,9 +2,8 @@ version: 1
 name: clock-soak-native-8
 timeout: 3600
 # Long soak (#24): three guest hours of time mode, one display update a minute (180 moves).
-# Run it with --speed 50: one guest hour then takes about 72 wall seconds on fixed firmware.
-# Step timeouts (wall seconds) leave room for slower builds; v1.4.1's NOT_FOUND log flood
-# (SFD#84) cuts its effective speed to about 8x. Native only.
+# Run it with --speed 50: one guest hour then takes about 72 wall seconds. Step timeouts
+# (wall seconds) leave room for slow or busy hosts. Native only.
 modes: [native]
 clock: {start: "2027-06-15T08:58:50Z", sync: boot}
 nvs:
