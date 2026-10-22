@@ -17,7 +17,8 @@ flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
 also allowed. Without this option no service/socket is created and the optional
 HTTP dependencies are not imported. The Docker image includes the extra.
 The listener is inside the container's loopback namespace; external binding and
-live-panel/serve mode are future work, not provided by port publication alone.
+a long-running serve mode is future work, not provided by port publication alone.
+For a read-only live view of a run, see [the panel](panel.md).
 
 Native mode uses the same option and API contract:
 
