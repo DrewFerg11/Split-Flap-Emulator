@@ -1,4 +1,5 @@
-# Tagged releases: verify the candidate image, then publish it to GHCR.
+# Tagged releases: verify the candidate images, then publish them to GHCR as one linux/amd64 +
+# linux/arm64 image, mirrored to Docker Hub when vars.DOCKERHUB_IMAGE is set (#23).
 #
 # Restricted to the repository owner by three independent mechanisms, because a
 # release publishes the image other repositories pull to test firmware:
@@ -48,6 +49,23 @@ jobs:
             exit 1
           fi
           echo "Release authorized for $ACTOR at $GITHUB_REF."
+      # Fail before anything is built rather than after GHCR is already published.
+      - name: Verify Docker Hub mirror credentials
+        if: vars.DOCKERHUB_IMAGE != ''
+        env:
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_USERNAME" ] || [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::vars.DOCKERHUB_IMAGE is set ($DOCKERHUB_IMAGE) but the DOCKERHUB_USERNAME and/or DOCKERHUB_TOKEN secrets are missing from the release environment. Set both, or unset the variable to release to GHCR only."
+            exit 1
+          fi
+          if ! [[ "$DOCKERHUB_IMAGE" =~ ^[a-z0-9]+([._-][a-z0-9]+)*/[a-z0-9]+([._-][a-z0-9]+)*$ ]]; then
+            echo "::error::vars.DOCKERHUB_IMAGE must be <namespace>/<name> in lowercase, not $DOCKERHUB_IMAGE."
+            exit 1
+          fi
+          echo "Docker Hub mirror enabled: docker.io/$DOCKERHUB_IMAGE"
       - name: Verify ref is a version tag
         run: |
           # vMAJOR.MINOR.PATCH with an optional prerelease suffix, as tools.publish_image accepts.
@@ -74,12 +92,16 @@ jobs:
         env:
           RELEASE_EVENT: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.ref_name }}
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
         run: |
+          # Same mirror flag as the publish step, so its validation runs before anything is built.
+          mirror=()
+          if [ -n "$DOCKERHUB_IMAGE" ]; then mirror=(--mirror "docker.io/$DOCKERHUB_IMAGE"); fi
           if test "$RELEASE_EVENT" = push; then
-            python -m tools.publish_image --validate-only --revision "$GITHUB_SHA" \
+            python -m tools.publish_image --validate-only --revision "$GITHUB_SHA" "${mirror[@]}" \
               --tag "$RELEASE_TAG" --out runs/release-validation.json
           else
-            python -m tools.publish_image --validate-only --revision "$GITHUB_SHA" \
+            python -m tools.publish_image --validate-only --revision "$GITHUB_SHA" "${mirror[@]}" \
               --out runs/release-validation.json
           fi
 
@@ -90,11 +112,12 @@ jobs:
       export_image: true
 
   publish:
-    name: Publish the tested image to GHCR
+    name: Publish the tested images to GHCR (and Docker Hub)
     needs: [authorize, validate, verify]
     if: github.repository == 'DrewFerg11/Split-Flap-Emulator' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
+    # Also where the Docker Hub secrets live: only a job that declares the environment can read them.
     environment: release
     permissions:
       contents: read
@@ -109,24 +132,65 @@ jobs:
       - run: python -m pip install 'packaging>=25,<27'
       - uses: actions/download-artifact@v4
         with:
-          name: verified-container-candidate
-          path: runs/candidate
-      - name: Load the exact image that passed verification
-        run: docker load --input runs/candidate/candidate-image.tar.gz
+          pattern: verified-container-candidate-*
+          path: runs/candidates
+      - name: Load the exact images that passed verification
+        run: |
+          for archive in runs/candidates/*/candidate-image.tar.gz; do
+            docker load --input "$archive"
+          done
+      - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/login-action@v3
+        if: vars.DOCKERHUB_IMAGE != ''
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Promote verified bits and record immutable reference
+        id: promote
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          python -m tools.publish_image --proof runs/candidate/container/verification.json \
-            --image "$(cat runs/candidate/candidate-id.txt)" --revision "$GITHUB_SHA" \
-            --tag "$RELEASE_TAG" --out runs/publication.json
+          mirror=()
+          if [ -n "$DOCKERHUB_IMAGE" ]; then mirror=(--mirror "docker.io/$DOCKERHUB_IMAGE"); fi
+          python -m tools.publish_image --candidate runs/candidates/verified-container-candidate-amd64 \
+            --candidate runs/candidates/verified-container-candidate-arm64 "${mirror[@]}" \
+            --revision "$GITHUB_SHA" --tag "$RELEASE_TAG" --out runs/publication.json
           cat runs/publication.json >> "$GITHUB_STEP_SUMMARY"
+          # The description sync below follows this decision instead of re-deriving it.
+          echo "mirror=${DOCKERHUB_IMAGE:+docker.io/$DOCKERHUB_IMAGE}" >> "$GITHUB_OUTPUT"
+      # Best effort: the image is already published and digest-checked. A token without the
+      # "Read, Write, Delete" scope cannot update the description; that only warns.
+      - name: Sync the Docker Hub description from the README
+        if: steps.promote.outputs.mirror != ''
+        env:
+          MIRROR: ${{ steps.promote.outputs.mirror }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          JWT=$(curl -sS --fail -H 'Content-Type: application/json' \
+            -d "$(jq -n --arg u "$DOCKERHUB_USERNAME" --arg p "$DOCKERHUB_TOKEN" '{username:$u,password:$p}')" \
+            https://hub.docker.com/v2/users/login/ | jq -r .token) || {
+            echo "::warning::Docker Hub login for the description sync failed"; exit 0; }
+          jq -n --rawfile full README.md \
+            '{full_description: $full, description: "Split-Flap Display firmware emulator (QEMU and native)"}' \
+            > runs/dockerhub-description.json
+          code=$(curl -sS -X PATCH "https://hub.docker.com/v2/repositories/${MIRROR#docker.io/}/" \
+            -H "Authorization: JWT $JWT" -H 'Content-Type: application/json' \
+            --data @runs/dockerhub-description.json -o /dev/null -w '%{http_code}')
+          if [ "$code" != 200 ]; then
+            echo "::warning::Docker Hub description sync returned HTTP $code"
+          fi
       - name: Retain publication result
         if: always()
         uses: actions/upload-artifact@v4

@@ -2,7 +2,9 @@
 
 import argparse
 import contextlib
+import hashlib
 import json
+import re
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,13 +18,18 @@ from flapsim.executor import load_executor
 from flapsim.hardware import load_hardware
 from flapsim.resources import resolve_resource
 from tools.publish_image import (
+    ARCHITECTURES,
+    IMAGE,
+    MIRROR_PATTERN,
     REQUIRED_CASES,
     Registry,
+    load_candidate,
     promote,
     release_version,
     validate_checkout,
 )
 from tools.verify_boot import GOLDEN
+from tools.verify_container import ARCHITECTURES as VERIFIED_ARCHITECTURES
 from tools.verify_container import ImageVerifier
 from tools.verify_publication_gate import check_release_approval, validate_workflows
 
@@ -71,10 +78,11 @@ def test_failed_native_container_cases_are_still_recorded(monkeypatch, tmp_path,
         assert record["exit_code"] == 2 and "no run.json" in record["error"]
 
 
-def candidate():
+def candidate(architecture="amd64"):
+    image_id = IMAGE_ID if architecture == "amd64" else "sha256:" + "e" * 64
     info = {
-        "Id": IMAGE_ID,
-        "Architecture": "amd64",
+        "Id": image_id,
+        "Architecture": architecture,
         "Os": "linux",
         "Config": {
             "Labels": {
@@ -87,7 +95,7 @@ def candidate():
         "passed": True,
         "mode": "all",
         "timeout_scale": 1,
-        "image": {"Id": IMAGE_ID},
+        "image": {"Id": image_id, "Architecture": architecture},
         "resources": {"version": "1.2.3", "provenance": {"source_revision": REVISION}},
         "cases": [
             {"case": name, "exit_code": code, "expected_exit": code}
@@ -97,15 +105,29 @@ def candidate():
     return proof, info
 
 
+def platform_digest(tag):
+    return "sha256:" + hashlib.sha256(tag.encode()).hexdigest()
+
+
+def candidates():
+    return {architecture: candidate(architecture) for architecture in ARCHITECTURES}
+
+
 class ControlledRegistry:
-    def __init__(self, *, existing=False, newer=False):
-        self.pushed = {"1.2.3"} if existing else set()
+    """A fake registry pair: GHCR (this object) plus an optional Docker Hub mirror."""
+
+    def __init__(
+        self, *, existing=False, newer=False, mirror_existing=False, mirror_diverges=False
+    ):
+        self.pushed = {"1.2.3": DIGEST} if existing else {}
         self.commands, self.checks = [], []
         self.newer = newer
+        self.mirror = MirrorRegistry({"1.2.3": DIGEST} if mirror_existing else {})
+        self.mirror_diverges = mirror_diverges
 
     def digest(self, tag):
         self.checks.append(tag)
-        return DIGEST if tag in self.pushed else None
+        return self.pushed.get(tag)
 
     def tags(self):
         return list(self.pushed) + (["2.0.0"] if self.newer else [])
@@ -113,7 +135,26 @@ class ControlledRegistry:
     def docker(self, command):
         self.commands.append(command)
         if command[0] == "push":
-            self.pushed.add(command[1].rsplit(":", 1)[1])
+            tag = command[1].rsplit(":", 1)[1]
+            self.pushed[tag] = platform_digest(tag)
+        elif command[:3] == ["buildx", "imagetools", "create"]:
+            for target in command[4::2][: command.count("-t")]:
+                image, tag = target.rsplit(":", 1)
+                if image == IMAGE:
+                    self.pushed[tag] = DIGEST
+                else:
+                    self.mirror.pushed[tag] = (
+                        "sha256:" + "f" * 64 if self.mirror_diverges else DIGEST
+                    )
+        return ""
+
+
+class MirrorRegistry:
+    def __init__(self, pushed):
+        self.pushed = pushed
+
+    def digest(self, tag):
+        return self.pushed.get(tag)
 
 
 def test_builtins_resolve_outside_checkout_and_explicit_bad_paths_do_not_fall_back(
@@ -185,28 +226,109 @@ def test_unverified_or_mismatched_candidates_cannot_reach_registry(mutation):
         info["Config"]["Labels"]["org.opencontainers.image.version"] = "1.2.4"
     registry = ControlledRegistry()
     with pytest.raises(ValueError):
-        promote(proof, info, REVISION, "1.2.3", True, registry, registry.docker)
+        promote(
+            {**candidates(), "amd64": (proof, info)},
+            REVISION,
+            "1.2.3",
+            True,
+            registry,
+            registry.docker,
+        )
     assert not registry.commands and not registry.checks
 
 
-def test_existing_immutable_version_refuses_overwrite():
-    registry = ControlledRegistry(existing=True)
+@pytest.mark.parametrize("mutation", ["missing", "swapped", "extra"])
+def test_a_release_needs_exactly_one_verified_candidate_per_platform(mutation):
+    verified = candidates()
+    if mutation == "missing":
+        del verified["arm64"]
+    elif mutation == "swapped":
+        verified["arm64"] = verified["amd64"]
+    else:
+        verified["riscv64"] = candidate("riscv64")
+    registry = ControlledRegistry()
+    with pytest.raises(ValueError):
+        promote(verified, REVISION, "1.2.3", True, registry, registry.docker)
+    assert not registry.commands and not registry.checks
+
+
+@pytest.mark.parametrize("where", ["ghcr", "amd64", "arm64", "mirror"])
+def test_existing_immutable_version_refuses_overwrite(where):
+    registry = ControlledRegistry(existing=where == "ghcr", mirror_existing=where == "mirror")
+    if where in ARCHITECTURES:
+        # Any platform tag, including the last one checked, refuses before anything is pushed.
+        registry.pushed[f"1.2.3-{where}"] = DIGEST
     with pytest.raises(RuntimeError, match="already exists"):
-        promote(*candidate(), REVISION, "1.2.3", True, registry, registry.docker)
+        promote(
+            candidates(),
+            REVISION,
+            "1.2.3",
+            True,
+            registry,
+            registry.docker,
+            mirror=("docker.io/drewferg11/split-flap-emulator", registry.mirror),
+        )
     assert not registry.commands
 
 
 @pytest.mark.parametrize(
     "stable,newer,latest", [(True, False, True), (False, False, False), (True, True, False)]
 )
-def test_verified_same_image_is_tagged_and_pushed_without_rebuild(stable, newer, latest):
+@pytest.mark.parametrize("mirrored", [False, True])
+def test_verified_images_are_pushed_and_joined_without_rebuild(stable, newer, latest, mirrored):
     registry = ControlledRegistry(newer=newer)
-    result = promote(*candidate(), REVISION, "1.2.3", stable, registry, registry.docker)
-    assert result["reference"].endswith("@" + DIGEST)
+    hub = "docker.io/drewferg11/split-flap-emulator"
+    mirror = (hub, registry.mirror) if mirrored else None
+    result = promote(
+        candidates(), REVISION, "1.2.3", stable, registry, registry.docker, mirror=mirror
+    )
+    assert result["reference"] == f"{IMAGE}@{DIGEST}"
+    assert result["mirror_reference"] == (f"{hub}@{DIGEST}" if mirrored else None)
     assert result["latest_promoted"] is latest
-    assert {command[0] for command in registry.commands} == {"tag", "push"}
-    assert all(command[1] == IMAGE_ID for command in registry.commands if command[0] == "tag")
-    assert len(registry.commands) == (4 if latest else 2)
+    assert result["platform_digests"] == {a: platform_digest(f"1.2.3-{a}") for a in ARCHITECTURES}
+    tags = [c for c in registry.commands if c[0] == "tag"]
+    assert tags == [["tag", candidates()[a][1]["Id"], f"{IMAGE}:1.2.3-{a}"] for a in ARCHITECTURES]
+    *_, create = registry.commands
+    targets = [f"{IMAGE}:1.2.3"] + ([f"{IMAGE}:latest"] if latest else [])
+    if mirrored:
+        targets += [f"{hub}:1.2.3"] + ([f"{hub}:latest"] if latest else [])
+    assert create == ["buildx", "imagetools", "create"] + [
+        x for target in targets for x in ["-t", target]
+    ] + [f"{IMAGE}@" + platform_digest(f"1.2.3-{a}") for a in ARCHITECTURES]
+    assert len(registry.commands) == 5
+
+
+def test_mirror_digest_must_match_the_ghcr_index():
+    registry = ControlledRegistry(mirror_diverges=True)
+    with pytest.raises(RuntimeError, match="does not identify the published index"):
+        promote(
+            candidates(),
+            REVISION,
+            "1.2.3",
+            True,
+            registry,
+            registry.docker,
+            mirror=("docker.io/drewferg11/split-flap-emulator", registry.mirror),
+        )
+
+
+def test_candidate_artifacts_are_read_with_their_platform(tmp_path):
+    proof, info = candidate("arm64")
+    (tmp_path / "container").mkdir()
+    (tmp_path / "container/verification.json").write_text(json.dumps(proof))
+    (tmp_path / "candidate-id.txt").write_text(info["Id"] + "\n")
+    calls = []
+
+    def docker(command):
+        calls.append(command)
+        return json.dumps([info])
+
+    assert load_candidate(tmp_path, docker) == ("arm64", (proof, info))
+    assert calls == [["image", "inspect", info["Id"]]]
+
+
+def test_published_and_verified_platforms_agree():
+    assert VERIFIED_ARCHITECTURES == ARCHITECTURES
 
 
 @pytest.fixture
@@ -282,6 +404,30 @@ def test_release_jobs_cannot_bypass_owner_approval(mutate, message):
     mutate(publish["jobs"])
     with pytest.raises(AssertionError, match=message):
         check_release_approval(publish)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "owner/name",
+        "Owner/name",
+        "owner/nAme-x",
+        "owner.baz-bar",
+        "drewferg11/split-flap-emulator",
+        "a/b",
+        "a//b",
+        "a/b/c",
+        "-a/b",
+    ],
+)
+def test_authorize_preflight_accepts_the_same_mirrors_as_the_publisher(name):
+    # The authorize job checks vars.DOCKERHUB_IMAGE before approval; publish_image checks
+    # it again before pushing. A name only one of them accepts would fail after approval.
+    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
+    preflight = re.search(r'"\$DOCKERHUB_IMAGE" =~ (\S+) \]\]', workflow.read_text())
+    assert preflight, "authorize no longer checks DOCKERHUB_IMAGE"
+    expected = bool(re.fullmatch(MIRROR_PATTERN, "docker.io/" + name))
+    assert bool(re.fullmatch(preflight.group(1), name)) == expected
 
 
 def test_only_clean_checked_out_commits_on_main_can_be_published(tmp_path, monkeypatch):
