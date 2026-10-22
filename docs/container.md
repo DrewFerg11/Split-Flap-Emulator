@@ -78,6 +78,32 @@ Add a read-only mount from the checked-out `baselines/v1.4.1-golden.yaml` to
 diagnostics/expected failures were observed. Omit it when testing a new firmware
 release.
 
+## Native mode in the image
+
+The image also runs [native mode](native.md). It ships the shim and model sources
+(`/opt/flapsim/native/src`), the pinned MIT-licensed libraries with recorded commits
+(`/opt/flapsim/native/cache`), a C/C++ toolchain and Mosquitto. **It contains no firmware or
+firmware-derived binary.** Mount a firmware checkout and the run builds it inside its own output
+directory, with no network access:
+
+```sh
+git clone --depth 1 --branch v1.4.1 https://github.com/DrewFerg11/Split-Flap-Display fw-src
+mkdir -p out/native-8
+docker run --rm --network none --user "$(id -u):$(id -g)" \
+  --mount "type=bind,source=$(realpath fw-src),target=/firmware-src,readonly" \
+  --mount "type=bind,source=$(realpath out/native-8),target=/out" \
+  ghcr.io/drewferg11/flapsim:<version> run --mode native --firmware-src /firmware-src \
+  --hardware esp32-8-single --scenario release-smoke-8 --var FIRMWARE_VERSION=v1.4.1 \
+  --out /out/run
+```
+
+The checkout must belong to the `--user` (git refuses other owners) and include the tag if the
+version should read as a release (`--depth 1 --branch <tag>` keeps it). `golden`/`git:` sources
+need network access and are meant for source checkouts. CI's container job runs
+`tools.verify_container --mode native` against the candidate: `release-smoke-8` and `mqtt-native-8`
+build the golden source inside the image under `--network none`, as a separate evidence set that
+does not change the publication contract.
+
 ## Build and verify locally
 
 From a clean checkout on Linux amd64 with Docker BuildKit:

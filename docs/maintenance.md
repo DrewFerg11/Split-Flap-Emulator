@@ -139,10 +139,12 @@ Record fresh CI timings and the immutable digest when acceptance passes; do not
 claim the release gate's approximately 15-minute target from these partial runs.
 
 [Emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14)
-tracks a separate intermittent `Wire.cpp` I2C read Error 263 observed before
-the 16-module smoke's HTTP command. Its cause is unknown; do not attribute it
-to firmware #54, allowlist it, or retry until a run happens to pass. Preserve
-the same source, firmware hash, seed, logs and model evidence when investigating.
+tracks the intermittent 16-module I2C timeouts (read Error 263, write code 5). Their
+cause is established: QEMU's single-threaded core scheduling lets ESP-IDF's I2C ISR
+on core 1 be parked mid-handler while the `Wire1` task on core 0 starts its next
+transfer (see [scenarios.md](scenarios.md)). The golden baseline tolerates the lines
+and the drum stalls that write timeouts cause, one per logged timeout. Re-check this
+whenever the QEMU pin changes, and remove the entries once core scheduling is fixed.
 
 ## GPL source availability
 

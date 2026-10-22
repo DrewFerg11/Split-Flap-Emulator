@@ -1,8 +1,10 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #include "Arduino.h"
+#include "WiFi.h"
 #include "host.h"
 #include "vclock.h"
 
+#include <atomic>
 #include <cstdlib>
 #include <mutex>
 #include <thread>
@@ -92,10 +94,36 @@ size_t HardwareSerial::write(const uint8_t *buffer, size_t size) {
     return size;
 }
 
-/* Wall time follows the host clock in this phase; SNTP emulation is not modelled yet. */
+namespace {
+std::atomic<bool> sntp_started{false};
+} // namespace
+
 extern "C" void configTzTime(const char *tz, const char *, const char *, const char *) {
     setenv("TZ", tz, 1);
     tzset();
+    sntp_started = true;
+}
+
+/* The firmware's view of wall time; host code keeps using the real clock functions. */
+extern "C" time_t time(time_t *out) noexcept {
+    using namespace flapsim;
+    const auto &clock = host::config().clock;
+    auto &set = host::rtc_clock_set();
+    if (!set && (clock.sync_at_boot || (sntp_started && WiFi.status() == WL_CONNECTED)))
+        set = true;
+    time_t value;
+    if (!set) {
+        value = time_t(vclock::now_ns() / 1000000000); /* RTC counting since power-on */
+    } else if (clock.fixed) {
+        value = time_t(clock.start + vclock::now_ns() / 1000000000);
+    } else {
+        timespec real;
+        clock_gettime(CLOCK_REALTIME, &real);
+        value = real.tv_sec;
+    }
+    if (out)
+        *out = value;
+    return value;
 }
 
 extern "C" void configTime(long gmt_offset, int daylight_offset, const char *server1,

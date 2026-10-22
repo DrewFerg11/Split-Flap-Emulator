@@ -363,6 +363,21 @@ void http_transport() {
     CHECK(exchange(http_port, {"BREW /echo HTTP/1.1\r\n\r\n"}).find("HTTP/1.1 501") == 0);
 }
 
+/* Unsynchronized ESP32 time counts from power-on; SNTP sets it once a station has joined. */
+void wall_clock() {
+    CHECK(time(nullptr) < 100000);
+    configTzTime("UTC0", "pool.ntp.org");
+    CHECK(time(nullptr) < 100000); /* SNTP started, but no network yet */
+    WiFi.mode(WIFI_STA);
+    WiFi.begin("lab", "secret");
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < 5000)
+        delay(10);
+    CHECK(time(nullptr) > 1700000000);
+    WiFi.disconnect(true);
+    CHECK(time(nullptr) > 1700000000 && flapsim::host::rtc_clock_set()); /* the RTC keeps it */
+}
+
 void sockets() {
     uint16_t port;
     int listener = listening_socket(&port);
@@ -454,8 +469,8 @@ int main(int argc, char **argv) {
     config.littlefs = directory + "/littlefs";
     config.http_fd = listening_socket(&http_port);
     flapsim::host::configure_for_tests(config);
-    for (auto test :
-         {strings, preferences, clock, filesystem, webserver, http_transport, sockets, wire})
+    for (auto test : {strings, preferences, clock, filesystem, webserver, http_transport,
+                      wall_clock, sockets, wire})
         test();
     std::printf("%s (%d failure%s)\n", failures ? "FAIL" : "PASS", failures,
                 failures == 1 ? "" : "s");

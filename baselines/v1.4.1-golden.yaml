@@ -25,25 +25,31 @@ serial:
     regex: '^\[\s*\d+\]\[E\]\[Preferences\.cpp:\d+\] (getString|getBytesLength)\(\): nvs_get_(str|blob) len fail: \w+ INVALID_HANDLE$'
   - issue: DrewFerg11/Split-Flap-Emulator#14
     reason: >-
-      Intermittent I2C read timeout in 16-module dual-bus runs; cause (firmware, QEMU scheduling or
-      model) not yet established.
+      Emulator scheduling artifact in 16-module dual-bus runs. QEMU runs the two cores in turn, so
+      ESP-IDF's I2C ISR on core 1 can be parked between posting DONE to the Wire1 task on core 0
+      and setting the driver idle; the task's next transfer then has its interrupt ignored and
+      times out (here a hall-sensor read: Error 263). Real parallel cores cannot interleave this
+      way. A read loses no coil pattern, so this line excuses no stall.
     regex: '^\[\s*\d+\]\[E\]\[Wire\.cpp:\d+\] requestFrom\(\): i2cRead returned Error 263$'
   - issue: DrewFerg11/Split-Flap-Emulator#14
     reason: >-
-      The write-side form of the same intermittent 16-module dual-bus I2C timeout: the firmware reports
-      Wire endTransmission code 5 (timeout). Seen once in the container smoke-16 run for PR #26 at the
-      same step 6 as the read timeout. Other write codes (e.g. 2, missing module) are not covered.
+      The write-side form of the same emulator scheduling artifact: Wire endTransmission code 5
+      (timeout). Only the address reached the module, so its coil pattern was lost and one drum
+      stall may follow; each such line excuses one stall. Other write codes (e.g. 2, missing module)
+      are not covered.
+    explains_stalls: 1
     regex: '^Error writing data to module \d+, error code: 5$'
   - issue: DrewFerg11/Split-Flap-Display#86
     reason: >-
       Two firmware tasks print to the UART without a shared lock, so request logging gets spliced into
       the otherwise allowed fresh-NVS begin/NOT_FOUND diagnostic. Where the split lands varies run to
-      run. This entry covers the diagnostic's tail: it may start anywhere from its "[ timestamp]" through
-      the "0" of ":50" (e.g. "p:50] begin(): ..."), preceded by the other task's partial output
+      run. This entry covers the diagnostic's tail: it may start anywhere up to "nvs_open failed: NOT_FOUND"
+      (e.g. "p:50] begin(): ..." or "(): nvs_open ..."; arduino-esp32 2.0.17 logs nvs_open failures
+      only from Preferences.cpp:50), preceded by the other task's partial output
       (e.g. request-body JSON). Only a prefix with no brackets and no error keywords is accepted, and an
       unspliced line is left to the normal fresh_nvs policy. The writer/SDK locking path remains to be
       repaired.
-    regex: '^(?!\[\s*\d+\]\[E\])(?![^\[\]]*?(?i:error|failed|panic|abort|exception))[^\[\]]*?(?:(?:\[\s*)?\d{1,10}\]\[E\]\[Preferences\.cpp:50|(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:\])?\[)?E)?\])?\[)?P)?r)?e)?f)?e)?r)?e)?n)?c)?e)?s)?\.)?c)?p)?p)?:)?5)?0)\] begin\(\): nvs_open failed: NOT_FOUND$'
+    regex: '^(?!\[\s*\d+\]\[E\])(?:(?!(?i:error|failed|panic|abort|exception))[^\[\]])*?(?:(?:\[\s*)?\d{1,10}\]\[E\]\[Preferences\.cpp:50\] begin\(\): |(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:(?:\])?\[)?E)?\])?\[)?P)?r)?e)?f)?e)?r)?e)?n)?c)?e)?s)?\.)?c)?p)?p)?:)?5)?0)?\])?\ )?b)?e)?g)?i)?n)?\()?\))?:)?\ )?)nvs_open failed: NOT_FOUND$'
   - issue: DrewFerg11/Split-Flap-Display#86
     reason: >-
       The head form of the same splice: the line starts with the diagnostic up to some character (from

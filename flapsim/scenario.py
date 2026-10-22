@@ -1,6 +1,7 @@
 """Validated, deadline-bound black-box scenarios for the real firmware."""
 
 import copy
+import datetime
 import http.client
 import json
 import re
@@ -9,12 +10,23 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from flapsim.executor import ExecutionFailed, RunContext, positive_timeout
+from flapsim.executor import ExecutionFailed, RunContext, excused, positive_timeout
 from flapsim.state import display_aligned, read_settlement, validate_identity, validate_state
 
 VARIABLE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 MODES = ("qemu", "native")
-STEPS = {"wait_serial", "expect_serial", "wait_display", "http", "assert_no_errors", "sleep_guest"}
+STEPS = {
+    "wait_serial",
+    "expect_serial",
+    "wait_display",
+    "http",
+    "assert_no_errors",
+    "sleep_guest",
+    "mqtt_publish",
+    "wait_mqtt",
+}
+SERVICES = {"mqtt"}
+NVS_NAME = re.compile(r"[A-Za-z0-9_]{1,15}")
 
 
 def reject_constant(value):
@@ -89,7 +101,7 @@ def validate_match(value):
             raise ValueError(f"invalid serial regex: {error}") from error
 
 
-def validate_step(step, hardware):
+def validate_step(step, hardware, services=()):
     if not isinstance(step, dict) or len(step.keys() & STEPS) != 1:
         raise ValueError(f"each step needs exactly one supported action: {sorted(STEPS)}")
     kind = next(iter(step.keys() & STEPS))
@@ -152,8 +164,81 @@ def validate_step(step, hardware):
             range(32, 40)
         ):
             raise ValueError("missing-bus allowance requires the eight default bus-0 addresses")
+    elif kind in {"mqtt_publish", "wait_mqtt"}:
+        if "mqtt" not in services:
+            raise ValueError(f"{kind} requires the scenario to declare services: [mqtt]")
+        if kind == "mqtt_publish":
+            fields(value, {"topic", "payload"}, {"retain"})
+            if not isinstance(value["payload"], str):
+                raise ValueError("MQTT payload must be a string")
+            if "retain" in value and type(value["retain"]) is not bool:
+                raise ValueError("retain must be boolean")
+        else:
+            fields(value, {"topic"}, {"payload", "json", "retained"})
+            if "payload" in value and "json" in value:
+                raise ValueError("wait_mqtt matches either payload or json, not both")
+            if "payload" in value and not isinstance(value["payload"], str):
+                raise ValueError("MQTT payload must be a string")
+            if "retained" in value and type(value["retained"]) is not bool:
+                raise ValueError("retained must be boolean")
+        topic = value["topic"]
+        if not isinstance(topic, str) or not topic or any(c in topic for c in "#+\0"):
+            raise ValueError("MQTT topic must be a nonempty name without wildcards")
     else:
         positive_timeout(value)
+
+
+def native_setup(document):
+    """Native-only device preparation: services, a seeded settings store and the wall clock."""
+    setup = {"services": [], "nvs": {}, "clock": None}
+    if not {"services", "nvs", "clock"} & document.keys():
+        return setup
+    if document.get("modes") != ["native"]:
+        raise ValueError("services, nvs and clock require modes: [native]")
+    services = document.get("services", [])
+    if (
+        not isinstance(services, list)
+        or len(set(services)) != len(services)
+        or any(s not in SERVICES for s in services)
+    ):
+        raise ValueError(f"services must be a list drawn from {sorted(SERVICES)}")
+    setup["services"] = services
+    nvs = document.get("nvs", {})
+    if not isinstance(nvs, dict):
+        raise ValueError("nvs must map namespaces to settings")
+    for space, values in nvs.items():
+        if (
+            not isinstance(space, str)
+            or not NVS_NAME.fullmatch(space)
+            or not isinstance(values, dict)
+        ):
+            raise ValueError("nvs namespaces must be 1-15 character names mapping to settings")
+        for key, value in values.items():
+            if not isinstance(key, str) or not NVS_NAME.fullmatch(key):
+                raise ValueError(f"nvs key {key!r} must be a 1-15 character name")
+            if type(value) is int:
+                if not -(2**31) <= value < 2**31:
+                    raise ValueError(f"nvs integer {key} must fit 32 bits")
+            elif type(value) is not str and type(value) is not float:
+                raise ValueError(f"nvs value {key} must be a string, integer or float")
+    setup["nvs"] = nvs
+    if "clock" in document:
+        clock = document["clock"]
+        fields(clock, {"start"}, {"sync"})
+        try:
+            start = datetime.datetime.fromisoformat(clock["start"])
+        except (TypeError, ValueError) as error:
+            raise ValueError("clock.start must be an ISO 8601 UTC time") from error
+        if start.utcoffset() != datetime.timedelta(0):
+            raise ValueError("clock.start must be in UTC (end with Z)")
+        if clock.get("sync", "boot") not in {"boot", "station"}:
+            raise ValueError("clock.sync must be boot or station")
+        setup["clock"] = {
+            "mode": "fixed",
+            "start": int(start.timestamp()),
+            "sync": clock.get("sync", "boot"),
+        }
+    return setup
 
 
 def serial_match(matcher, text):
@@ -271,6 +356,7 @@ class ScenarioExecutor:
         firmware_source=None,
         known_issues=None,
         mode="qemu",
+        implicit_variables=None,
     ):
         if known_issues is not None:
             if mode == "native":
@@ -281,9 +367,18 @@ class ScenarioExecutor:
         self.known_issues = known_issues
         self.known_serial = {}
         self.known_failure = None
+        self.known_stalls = None
         requested = parse_variables(variables)
+        implicit = implicit_variables or {}
+        if reserved := sorted(implicit.keys() & requested.keys()):
+            raise ValueError(f"--var {reserved[0]} is provided by the runner in this mode")
+        requested = {**implicit, **requested}
         self.document = substitute(document, copy.deepcopy(requested))
-        fields(self.document, {"version", "name", "timeout", "steps"}, {"modes"})
+        fields(
+            self.document,
+            {"version", "name", "timeout", "steps"},
+            {"modes", "services", "nvs", "clock"},
+        )
         modes = self.document.get("modes", list(MODES))
         if (
             not isinstance(modes, list)
@@ -301,8 +396,9 @@ class ScenarioExecutor:
         self.timeout = positive_timeout(self.document["timeout"])
         if not isinstance(self.document["steps"], list) or not self.document["steps"]:
             raise ValueError("scenario steps must be a nonempty list")
+        self.native_setup = native_setup(self.document)
         for step in self.document["steps"]:
-            validate_step(step, hardware)
+            validate_step(step, hardware, self.native_setup["services"])
         try:
             json.dumps(self.document, allow_nan=False)
         except (TypeError, ValueError) as error:
@@ -320,6 +416,7 @@ class ScenarioExecutor:
         ]
         self.serial_cursor = self.error_cursor = self.timeline_offset = 0
         self.display_cursor = 0
+        self.mqtt_cursor = 0
         self.command_baseline = None
         self.last_error_policy = None
 
@@ -334,6 +431,7 @@ class ScenarioExecutor:
                 context.process,
                 deadline,
                 context.interrupt,
+                context.services,
             )
             result.update(status="running", guest_start_ns=self.guest_ns(context.out))
             try:
@@ -400,7 +498,7 @@ class ScenarioExecutor:
             "baseline": self.known_issues.source,
             "firmware_sha256": self.known_issues.firmware_sha256,
             "firmware_source_commit": self.known_issues.firmware_source_commit,
-            "applied": bool(self.known_failure or self.known_serial),
+            "applied": bool(self.known_failure or self.known_serial or self.known_stalls),
             "expected_failure": self.known_failure,
             "expected_failures_not_observed": [
                 e
@@ -410,6 +508,7 @@ class ScenarioExecutor:
             "tolerated_serial": [
                 {"regex": regex, **record} for regex, record in self.known_serial.items()
             ],
+            "tolerated_stalls": self.known_stalls,
         }
 
     @staticmethod
@@ -460,8 +559,13 @@ class ScenarioExecutor:
             if activity is None:
                 raise ExecutionFailed("model diagnostics are not available")
             result["actual"] = activity["counters"]
-            if activity["counters"]["stalls"] or activity["counters"]["anomalies"]:
-                raise ExecutionFailed(f"model faults: {activity['counters']}")
+            self.check_model(activity["counters"], serial[:end], "model faults")
+        elif kind == "mqtt_publish":
+            observer = self.observer(context)
+            observer.publish(value["topic"], value["payload"], value.get("retain", False))
+            result["actual"] = {"published": value}
+        elif kind == "wait_mqtt":
+            self.wait_mqtt(context, value, result)
         else:
             start = self.guest_ns(context.out)
             while start is None:
@@ -473,6 +577,46 @@ class ScenarioExecutor:
                     raise ExecutionFailed("guest clock reset during sleep_guest")
                 context.pause()
             result["actual"] = {"guest_start_ns": start, "guest_end_ns": current}
+
+    @staticmethod
+    def observer(context):
+        observer = (context.services or {}).get("mqtt")
+        if observer is None:
+            raise ExecutionFailed("the MQTT service is not running")
+        return observer
+
+    def wait_mqtt(self, context, value, result):
+        """The first matching message after the previous match; earlier ones stay consumed."""
+        observer = self.observer(context)
+        while True:
+            context.checkpoint()
+            if observer.error:
+                raise ExecutionFailed(f"MQTT observer failed: {observer.error}")
+            messages = observer.snapshot()
+            for message in messages[self.mqtt_cursor :]:
+                if message["topic"] != value["topic"]:
+                    continue
+                if "retained" in value and message["retained"] != value["retained"]:
+                    continue
+                if "payload" in value and message["payload"] != value["payload"]:
+                    continue
+                if "json" in value:
+                    try:
+                        json_subset(
+                            value["json"],
+                            json.loads(message["payload"], parse_constant=reject_constant),
+                        )
+                    except (ValueError, ExecutionFailed):
+                        continue
+                self.mqtt_cursor = message["index"] + 1
+                result["actual"] = {k: message[k] for k in ["topic", "payload", "retained"]}
+                return
+            result["actual"] = [
+                {k: m[k] for k in ["topic", "payload", "retained"]}
+                for m in messages
+                if m["topic"] == value["topic"]
+            ][-5:]
+            context.pause()
 
     def historical_settlements(self, context):
         path = context.out / "timeline.jsonl"
@@ -585,8 +729,18 @@ class ScenarioExecutor:
             self.known_serial,
         )
         state = read_settlement(out, hardware)
-        if state and (state["counters"]["stalls"] or state["counters"]["anomalies"]):
-            raise ExecutionFailed(f"model faults after execution: {state['counters']}")
+        if state:
+            self.check_model(state["counters"], serial, "model faults after execution")
+
+    def check_model(self, counters, serial, message):
+        """Model faults fail the run, except drum stalls the baseline explains: each tolerated
+        serial line with explains_stalls (an I2C timeout that lost a coil write, #14) excuses
+        at most that many stalls. Anomalies are never excused."""
+        if counters["stalls"] or counters["anomalies"]:
+            record = excused(counters, self.known_issues, serial)
+            if record is None:
+                raise ExecutionFailed(f"{message}: {counters}")
+            self.known_stalls = record
 
     def finalize(self, out, manifest):
         from flapsim.report import write_reports

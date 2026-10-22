@@ -81,6 +81,30 @@ The manifest (`status`, `known_issues`), `report.md`, JUnit (`skipped` with the
 issue link) and the Actions job summary all show the baseline prominently.
 Remove entries as their issues are fixed, and delete the file when it is empty.
 
+### Native-only setup and MQTT steps
+
+Native scenarios that declare `modes: [native]` may also prepare the device:
+
+```yaml
+modes: [native]
+services: [mqtt]                 # a supervised local Mosquitto and an observer subscribed to '#'
+clock: {start: "2027-03-28T00:57:40Z", sync: boot}   # fixed wall clock (UTC); sync: boot|station
+nvs:                             # seeded settings store: str -> str, int -> i32, float -> blob
+  config:
+    ssid: flapsim-lab
+    password: lab-password
+    mqtt_server: ${MQTT_HOST}    # provided by the runner, as is ${MQTT_PORT}
+    mqtt_port: ${MQTT_PORT}
+```
+
+Seeding NVS starts from a provisioned device without going through `POST /settings`, which
+the golden firmware's SFD#54 race would usually lose. `mqtt_publish: {topic, payload, retain?}`
+publishes a command, and `wait_mqtt: {topic, payload? | json?, retained?}` waits for the next
+matching message after the previous match (`json` is a subset match); every message is kept in
+`mqtt.jsonl`. Bundled examples: `mqtt-native-8` (Home Assistant discovery, availability,
+inbound `set` → drums, state publishing), `clock-dst-native-8` (Central European Time across the
+spring-forward hour) and `date-rollover-native-8` (day, month and year at New Year).
+
 ### Native-mode baseline
 
 `baselines/v1.4.1-native.yaml` is the native-mode counterpart for the emulator's own native
@@ -250,12 +274,17 @@ sometimes passes, while rebooted Preferences missing-key errors still fail the
 strict error gate. The maintainer owns the firmware fix. The accepted #15 golden baseline now
 records these failures explicitly so they do not block emulator PRs.
 
-The intermittent I2C read Error 263 (and its write-side form, `error code: 5`) in
+The intermittent I2C read Error 263 and write `error code: 5` in
 [emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14)
-is a separate unresolved investigation. A later run without that error is not
-proof of a fix; its checksum-bound golden allowance is tracked by #15. Issue #5
-remains open until genuine complete smoke acceptance
-and the corresponding merges; the implementation PR uses `Refs #5`.
+are an emulator scheduling artifact, not a firmware or model defect. QEMU runs the
+ESP32's two cores in turn on one thread. ESP-IDF's I2C ISR for `Wire1` (core 1) can be
+parked between posting DONE to the `Wire1` task (core 0) and setting the driver idle;
+the task's next transfer then has its interrupt ignored and times out. A write that
+times out loses one coil pattern, which can stall one drum. The golden baseline
+records both lines, and each logged write timeout (`explains_stalls: 1`) excuses at
+most one drum stall in the same run; anomalies, other write codes and stalls beyond
+that count still fail. Scenario reports list tolerated stalls under the known issues.
+A faithful fix needs different core scheduling, tracked in #14.
 
 The checksum-bound golden baseline also records the exact Preferences.begin
 NOT_FOUND timestamp fragment documented in [SFD #86](https://github.com/DrewFerg11/Split-Flap-Display/issues/86).

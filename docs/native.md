@@ -18,13 +18,19 @@ coverage QEMU mode cannot reach.
 
 ## Status
 
-Phase 1 ([#27](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/27)): the build, the shims
-for everything the firmware touches without a network and a bounded verifier. Phase 2 adds host
-sockets (`WiFiClient`), the HTTP transport and `flapsim run --mode native`
-([runner](runner.md#native-mode)); the golden smoke scenarios run natively in CI under
-`baselines/v1.4.1-native.yaml`. The runner also supports the shared authenticated
-[state and mechanics API](control-api.md) with `--control-port`. MQTT and a
-controlled clock follow.
+- Phase 1 ([#27](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/27)): the build, the
+  shims for everything the firmware touches without a network, and a bounded verifier.
+- Phase 2 ([#30](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/30)): host sockets, the
+  HTTP transport and `flapsim run --mode native` ([runner](runner.md#native-mode)); the golden
+  smoke scenarios run natively in CI under `baselines/v1.4.1-native.yaml`.
+- Phase 3 ([#31](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/31)): a supervised
+  Mosquitto broker with MQTT scenario steps, a controlled wall clock and seeded settings
+  ([scenarios](scenarios.md#native-only-setup-and-mqtt-steps)).
+- Phase 4: native mode in the container image ([container](container.md#native-mode-in-the-image))
+  and a non-gating firmware CI job for Split-Flap Display ([firmware CI](firmware-ci.md)).
+
+The native runner also supports the shared authenticated
+[state and mechanics API](control-api.md) with `--control-port`.
 
 ## Build
 
@@ -37,7 +43,13 @@ python native/build.py --firmware-src git:main  # any tag, branch or full commit
 python native/build.py --firmware-src ../Split-Flap-Display  # a local checkout (firmware PRs)
 python native/build.py --test                   # also build and run the shim tests
 python native/build.py --sanitize --test        # address + undefined-behaviour sanitizers
+python native/build.py --export-libraries DIR   # copy the pinned libraries for offline builds
 ```
+
+`FLAPSIM_NATIVE_CACHE` relocates the source cache. An exported library is used offline when
+its `.flapsim-pin` file names the pinned commit. The runner's `--firmware-src` uses
+`FLAPSIM_NATIVE_ROOT` (default: this checkout) and builds into `<out>/native-build`, logging to
+`<out>/native-build.log`.
 
 The output directory (default `build/native/<commit>-<env>`) holds `bin/flapsim-native`,
 `littlefs/` and `build-info.json`. The firmware's compile-time options come from its own
@@ -79,7 +91,8 @@ The binary takes one JSON configuration:
   "speed": 5,
   "random_seed": 1,
   "wifi": {"station": "connect", "connect_delay_ms": 1500, "ip": "127.0.0.1"},
-  "http_fd": 3
+  "http_fd": 3,
+  "clock": {"mode": "fixed", "start": 1806195460, "sync": "boot"}
 }
 ```
 
@@ -145,6 +158,13 @@ connected boot path homing to `OK` before blanking.
   both modes. Station mode associates with any SSID after `connect_delay_ms`, unless `station`
   is `fail`, and then reports `wifi.ip`. Scanning returns one network, `flapsim`. mDNS and OTA
   accept their configuration but do nothing yet.
+- **Wall clock.** The firmware's `time()` is interposed (host code keeps the real clock). Like an
+  ESP32 before SNTP it counts from power-on (1970) until `configTzTime`/`configTime` has started
+  SNTP *and* the station has joined a network, then follows the host's real time
+  (`clock.mode: host`) or a fixed start advancing with guest time (`clock.mode: fixed`, which
+  scenarios use for deterministic midnight/DST tests; `sync: boot` sets it immediately). The
+  synchronized RTC survives emulated software resets. Timezones are applied by the host C library
+  from the firmware's POSIX strings.
 - **Randomness** (`random()`, `esp_random()`) is a deterministic xorshift seeded from
   `random_seed` and the boot number, not a hardware RNG.
 
@@ -159,6 +179,4 @@ connected boot path homing to `OK` before blanking.
   reproduce more or less often than on hardware or in QEMU.
 - `unsigned long` is 64-bit on the host, so `millis()`/`micros()` never wrap; the device's
   32-bit `micros()` wraps after about 71 minutes.
-- Wall time (`time()`, `getLocalTime`) follows the host clock and is not scaled; SNTP and a
-  controlled clock arrive with the date/time phase.
 - The shims must keep up with the firmware's API usage. A missing API fails the build loudly.

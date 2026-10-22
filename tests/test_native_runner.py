@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -326,3 +327,64 @@ def test_native_disabled_control_strips_inherited_descriptor(native_args, monkey
     assert boot["control_type"] is None
     assert "control" not in manifest(native_args)
     assert not (native_args.out / "control-token").exists()
+
+
+def test_firmware_source_is_built_into_the_run_directory(native_args, monkeypatch, tmp_path):
+    root = tmp_path / "native-root"
+    (root / "native").mkdir(parents=True)
+    # A stand-in for native/build.py: writes a fake build where --out points.
+    (root / "native/build.py").write_text(
+        "import sys, pathlib\n"
+        f"sys.path.insert(0, {str(ROOT / 'tests')!r})\n"
+        "from test_native_runner import fake_build\n"
+        "out = pathlib.Path(sys.argv[sys.argv.index('--out') + 1])\n"
+        "print('building', sys.argv[sys.argv.index('--firmware-src') + 1])\n"
+        "fake_build(out)\n"
+    )
+    monkeypatch.setenv("FLAPSIM_NATIVE_ROOT", str(root))
+    native_args.native_build, native_args.firmware_src = None, "/firmware-src"
+    assert run(native_args) == 0, manifest(native_args).get("error")
+    value = manifest(native_args)
+    assert value["native"]["build_dir"] == str((native_args.out / "native-build").resolve())
+    assert "building /firmware-src" in (native_args.out / "native-build.log").read_text()
+
+
+def test_failed_source_builds_are_reported_with_their_log(native_args, monkeypatch, tmp_path):
+    root = tmp_path / "native-root"
+    (root / "native").mkdir(parents=True)
+    (root / "native/build.py").write_text("print('no compiler'); raise SystemExit(1)\n")
+    monkeypatch.setenv("FLAPSIM_NATIVE_ROOT", str(root))
+    native_args.native_build, native_args.firmware_src = None, "golden"
+    with pytest.raises(ValueError, match="native build failed .*native-build.log"):
+        run(native_args)
+    assert "no compiler" in (native_args.out / "native-build.log").read_text()
+    monkeypatch.setenv("FLAPSIM_NATIVE_ROOT", str(tmp_path / "missing"))
+    with pytest.raises(ValueError, match="needs the native sources"):
+        native.build_from_source("golden", tmp_path / "b", tmp_path / "log")
+
+
+def test_source_build_timeout_stops_the_whole_build_tree(monkeypatch, tmp_path):
+    root = tmp_path / "native-root"
+    (root / "native").mkdir(parents=True)
+    pid_file = tmp_path / "grandchild.pid"
+    # Like git or the compiler: a grandchild the build script itself waits on.
+    (root / "native/build.py").write_text(
+        "import pathlib, subprocess, sys\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid))\n"
+        "child.wait()\n"
+    )
+    monkeypatch.setenv("FLAPSIM_NATIVE_ROOT", str(root))
+    with pytest.raises(ValueError, match="native build exceeded 2 s"):
+        native.build_from_source("golden", tmp_path / "b", tmp_path / "log", timeout=2)
+    grandchild = int(pid_file.read_text())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            state = Path(f"/proc/{grandchild}/stat").read_text().rsplit(")", 1)[1].split()[0]
+        except FileNotFoundError:
+            return
+        if state == "Z":
+            return
+        time.sleep(0.05)
+    pytest.fail("the build's grandchild survived the timeout")

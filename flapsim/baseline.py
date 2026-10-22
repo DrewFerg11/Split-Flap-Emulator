@@ -17,6 +17,8 @@ ACTIONS = {
     "http",
     "assert_no_errors",
     "sleep_guest",
+    "mqtt_publish",
+    "wait_mqtt",
 }
 
 
@@ -85,12 +87,16 @@ class KnownIssues:
         self.serial = []
         for index, entry in enumerate(document.get("serial") or []):
             where = f"{source}.serial[{index}]"
-            _fields(entry, where, {"issue", "reason", "regex"})
+            _fields(entry, where, {"issue", "reason", "regex"}, {"explains_stalls"})
+            explains = entry.get("explains_stalls", 0)
+            if type(explains) is not int or explains < 0:
+                raise ValueError(f"{where}.explains_stalls must be a non-negative integer")
             self.serial.append(
                 {
                     "issue": _issue(entry, where),
                     "reason": entry["reason"],
                     "regex": entry["regex"],
+                    "explains_stalls": explains,
                     "compiled": _regex(entry["regex"], f"{where}.regex"),
                 }
             )
@@ -140,6 +146,17 @@ class KnownIssues:
                 f"{self.source} applies only to clean firmware source "
                 f"{self.firmware_source_commit}; got {state}{commit}"
             )
+
+    def excused_stalls(self, serial):
+        """Drum stalls explained by known serial lines: each matching line excuses at most its
+        entry's explains_stalls. Returns the allowance and the issues behind it."""
+        allowance, issues = 0, set()
+        for line in serial.splitlines():
+            entry = self.tolerated_serial(line)
+            if entry and entry["explains_stalls"]:
+                allowance += entry["explains_stalls"]
+                issues.add(entry["issue"])
+        return allowance, sorted(issues)
 
     def tolerated_serial(self, line):
         for entry in self.serial:

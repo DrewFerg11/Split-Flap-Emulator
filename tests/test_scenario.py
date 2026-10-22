@@ -770,6 +770,15 @@ def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context
             '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}\n',
             1,
         ),
+        # Raw serial tail from CI39680498356, golden smoke-16: the head ends inside "begin", and
+        # the tail resumes at "()" after the request body.
+        (
+            "[ 38100][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
+            "[ 38100][E][Preferences.cpp:50] beginReceived text update request\n"
+            '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}\n'
+            "(): nvs_open failed: NOT_FOUND\n",
+            2,
+        ),
     ],
 )
 def test_head_and_late_tail_splices_are_golden_only(context, raw, spliced):
@@ -794,8 +803,8 @@ def test_every_split_point_of_the_diagnostic_is_recognised():
     for cut in range(head_start, len(DIAGNOSTIC) + 1):
         for other in (body, "Received settings update request"):
             assert known.tolerated_serial(DIAGNOSTIC[:cut] + other), (cut, other)
-    # Tails resume anywhere from the timestamp through the "0" of ":50".
-    for cut in range(1, DIAGNOSTIC.index("] begin")):
+    # Tails resume anywhere up to "nvs_open", which only Preferences.cpp:50 logs.
+    for cut in range(1, DIAGNOSTIC.index("nvs_open") + 1):
         assert known.tolerated_serial(DIAGNOSTIC[cut:]), cut
         assert known.tolerated_serial(body + DIAGNOSTIC[cut:]), cut
 
@@ -811,8 +820,9 @@ def test_every_split_point_of_the_diagnostic_is_recognised():
         "[ 9][E][Preferences.cpp:483] putString(): x{}",
         "[ 9][E][Preferences.cpReceived text update request panic",
         "[ 9][E][Wire.cpp:1]{}",
-        " begin(): nvs_open failed: NOT_FOUND",
-        "p:51] begin(): nvs_open failed: NOT_FOUND",
+        "x failed: nvs_open failed: NOT_FOUND",
+        "Exception (): nvs_open failed: NOT_FOUND",
+        "Wifi failed: NOT_FOUND",
         "Exception p:50] begin(): nvs_open failed: NOT_FOUND",
     ],
 )
@@ -943,3 +953,84 @@ def test_reports_mark_known_issue_runs_prominently(tmp_path, monkeypatch):
     assert root.get("failures") == "0" and root.get("skipped") == "2"
     assert "known issue o/r#1" in root.find("testcase/skipped").get("message")
     assert manifest["known_issues"] is known
+
+
+WRITE_TIMEOUT = "Error writing data to module 36, error code: 5"
+READ_TIMEOUT = "[ 27700][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263"
+
+
+def golden_baseline():
+    return load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+
+
+def test_only_logged_write_timeouts_excuse_stalls():
+    known = golden_baseline()
+    assert known.excused_stalls("") == (0, [])
+    assert known.excused_stalls(READ_TIMEOUT + "\n") == (0, [])
+    assert known.excused_stalls(f"{WRITE_TIMEOUT}\nx\n{WRITE_TIMEOUT}\n") == (
+        2,
+        ["DrewFerg11/Split-Flap-Emulator#14"],
+    )
+    assert known.excused_stalls(WRITE_TIMEOUT.replace("code: 5", "code: 2")) == (0, [])
+
+
+@pytest.mark.parametrize("value", [-1, True, "1", 1.0])
+def test_explains_stalls_must_be_a_non_negative_integer(value):
+    entry = {"issue": "o/r#1", "reason": "r", "regex": "^a$", "explains_stalls": value}
+    with pytest.raises(ValueError, match="explains_stalls"):
+        baseline(serial=[entry])
+
+
+def stalled(context, stalls, anomalies=0):
+    state = copy.deepcopy(FIXTURE["states"][1])
+    for counters in [state["counters"], state["modules"][0]["counters"]]:
+        counters.update(stalls=stalls, anomalies=anomalies)
+    write_state(context.out, state)
+
+
+@pytest.mark.parametrize(
+    "lines,stalls,anomalies,tolerated",
+    [
+        ([WRITE_TIMEOUT], 1, 0, True),
+        ([WRITE_TIMEOUT, WRITE_TIMEOUT], 2, 0, True),
+        ([WRITE_TIMEOUT], 2, 0, False),  # more stalls than lost writes
+        ([WRITE_TIMEOUT], 1, 1, False),  # anomalies are never excused
+        ([READ_TIMEOUT], 1, 0, False),  # a lost read moves no coil
+        ([], 1, 0, False),
+    ],
+)
+def test_stalls_are_known_only_when_logged_write_timeouts_explain_them(
+    context, lines, stalls, anomalies, tolerated
+):
+    (context.out / "serial.log").write_text(FIXTURE["serial"] + "".join(f"{x}\n" for x in lines))
+    stalled(context, stalls, anomalies)
+    step = [{"assert_no_errors": {"fresh_nvs": True, "default_missing_bus1": True}}]
+    with pytest.raises(ExecutionFailed, match="model faults|unexpected serial error"):
+        executor(step).execute(context)  # without a baseline, every fault fails
+    engine = executor(step, firmware_sha256=GOLDEN_SHA256, known_issues=golden_baseline())
+    if not tolerated:
+        with pytest.raises(ExecutionFailed, match="model faults"):
+            engine.execute(context)
+        return
+    result = engine.execute(context)
+    record = result["known_issues"]["tolerated_stalls"]
+    assert record == {
+        "stalls": stalls,
+        "allowance": len(lines),
+        "issues": ["DrewFerg11/Split-Flap-Emulator#14"],
+    }
+    assert result["known_issues"]["applied"]
+    engine.verify_final(context.out, context.hardware)
+
+
+def test_boot_executor_excuses_only_explained_stalls(context):
+    (context.out / "serial.log").write_text(FIXTURE["serial"] + WRITE_TIMEOUT + "\n")
+    stalled(context, 1)
+    with pytest.raises(ExecutionFailed, match="model faults"):
+        BootExecutor(2, {}).execute(context)
+    boot = BootExecutor(2, {}, golden_baseline())
+    boot.execute(context)
+    assert boot.tolerated_stalls["stalls"] == 1
+    stalled(context, 2)
+    with pytest.raises(ExecutionFailed, match="model faults"):
+        BootExecutor(2, {}, golden_baseline()).execute(context)

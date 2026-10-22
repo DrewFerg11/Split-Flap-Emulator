@@ -6,10 +6,13 @@ import os
 import re
 import shutil
 import socket
+import struct
+import subprocess
 import sys
 from pathlib import Path
 
 from flapsim.hardware import ROOT, write_model_config
+from flapsim.process import group_exists, stop_group
 
 SPEED_RANGE = (0.25, 50.0)
 DEFAULT_SPEED = 5.0
@@ -23,23 +26,34 @@ def check_speed(value):
     return float(value)
 
 
-def build_from_source(spec, *, jobs=None):
-    """Build `golden`, `git:<ref>` or a local checkout with native/build.py (source tree only)."""
-    script = ROOT / "native/build.py"
-    if not script.is_file():
-        raise ValueError("--firmware-src needs a source checkout; pass a prebuilt --native-build")
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
-    from native import build
+def source_root():
+    """native/ and model/ sources: the checkout, or FLAPSIM_NATIVE_ROOT in the container."""
+    return Path(os.environ.get("FLAPSIM_NATIVE_ROOT", ROOT))
 
-    arguments = ["--firmware-src", spec]
+
+def build_from_source(spec, out, log, *, jobs=None, timeout=1800):
+    """Build `golden`, `git:<ref>` or a local checkout into `out` with native/build.py."""
+    script = source_root() / "native/build.py"
+    if not script.is_file():
+        raise ValueError("--firmware-src needs the native sources; pass a prebuilt --native-build")
+    command = [sys.executable, str(script), "--firmware-src", spec, "--out", str(out)]
     if jobs:
-        arguments += ["--jobs", str(jobs)]
-    parser_args = build.parse_args(arguments)
-    try:
-        return build.build(parser_args)
-    except Exception as error:
-        raise ValueError(f"native build failed: {error}") from error
+        command += ["--jobs", str(jobs)]
+    with open(log, "w") as output:
+        # Its own session, so a timeout or interrupt also stops git and the compiler tree.
+        process = subprocess.Popen(
+            command, stdout=output, stderr=subprocess.STDOUT, start_new_session=True
+        )
+        try:
+            returncode = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            raise ValueError(f"native build exceeded {timeout} s; see {log}") from error
+        finally:
+            if process.poll() is None or group_exists(process):
+                stop_group(process)
+    if returncode != 0:
+        raise ValueError(f"native build failed ({returncode}); see {log}")
+    return out
 
 
 def load_build(path):
@@ -82,7 +96,22 @@ def listener():
     return server
 
 
-def prepare(out, build, hardware, *, trace, speed, http_fd, seed):
+def nvs_document(seed):
+    """A scenario's settings seed in the shim's typed NVS file (str, i32, float32 blob)."""
+    spaces = {}
+    for space, values in seed.items():
+        entries = spaces.setdefault(space, {})
+        for key, value in values.items():
+            if isinstance(value, str):
+                entries[key] = {"type": "str", "value": value}
+            elif isinstance(value, int):
+                entries[key] = {"type": "i32", "value": value}
+            else:
+                entries[key] = {"type": "blob", "value": struct.pack("<f", value).hex()}
+    return {"schema_version": 1, "namespaces": spaces}
+
+
+def prepare(out, build, hardware, *, trace, speed, http_fd, seed, setup=None):
     """Write a fresh native run directory: model config, LittleFS copy and native config."""
     for name in [
         "state.json",
@@ -107,6 +136,11 @@ def prepare(out, build, hardware, *, trace, speed, http_fd, seed):
         "random_seed": seed if seed is not None else 1,
         "http_fd": http_fd,
     }
+    setup = setup or {}
+    if setup.get("clock"):
+        config["clock"] = setup["clock"]
+    if setup.get("nvs"):
+        (out / "nvs.json").write_text(json.dumps(nvs_document(setup["nvs"]), indent=2) + "\n")
     path = out / "native-config.json"
     path.write_text(json.dumps(config, indent=2) + "\n")
     return path

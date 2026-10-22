@@ -1,5 +1,7 @@
 """Installed-resource behavior and publication guards before any registry mutation."""
 
+import argparse
+import contextlib
 import json
 import subprocess
 import threading
@@ -8,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+import tools.verify_container as verify_container
 from flapsim.executor import load_executor
 from flapsim.hardware import load_hardware
 from flapsim.resources import resolve_resource
@@ -36,6 +39,35 @@ def test_container_golden_baseline_is_explicit_and_rejection_stays_strict():
     assert "--known-issues" not in verifier.command("esp32-8-single", "boot", timeout=3)
     with pytest.raises(ValueError):
         verifier.command("esp32-8-single", "version-check", wrong_version=True, known_issues=True)
+
+
+@pytest.mark.parametrize("outcome", ["no-manifest", "timeout"])
+def test_failed_native_container_cases_are_still_recorded(monkeypatch, tmp_path, outcome):
+    verifier = ImageVerifier.__new__(ImageVerifier)
+    verifier.args = argparse.Namespace(native_source=tmp_path, timeout_scale=2)
+    verifier.docker, verifier.cases = ["docker"], []
+    (tmp_path / "case/run").mkdir(parents=True)
+
+    @contextlib.contextmanager
+    def container(name, command, mounts):
+        yield "id", tmp_path / "case"
+
+    def start(command, **kwargs):
+        assert kwargs["timeout"] == 2400
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 2)
+
+    verifier.container = container
+    monkeypatch.setattr(verify_container.subprocess, "run", start)
+    with pytest.raises(RuntimeError, match="native container native-smoke-8 failed"):
+        verifier.execute_native("native-smoke-8", "esp32-8-single", "release-smoke-8")
+    [record] = verifier.cases
+    assert record["case"] == "native-smoke-8" and record["expected_exit"] == 0
+    if outcome == "timeout":
+        assert record["exit_code"] is None and "exceeded 2400 s" in record["error"]
+    else:
+        assert record["exit_code"] == 2 and "no run.json" in record["error"]
 
 
 def candidate():

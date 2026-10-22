@@ -65,7 +65,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build \
-            pkg-config libjson-c-dev
+            pkg-config libjson-c-dev mosquitto
           python -m pip install -e '.[control]'
       - name: Restore pinned firmware and library sources
         uses: actions/cache@v4
@@ -106,11 +106,21 @@ jobs:
               --scenario "scenarios/release-smoke-$1.yaml" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
               --known-issues baselines/v1.4.1-native.yaml --out "runs/native/smoke-$1"
           done
+      - name: Run MQTT and controlled-clock scenarios natively
+        if: matrix.name != 'sanitizers'
+        run: |
+          set -e
+          for scenario in mqtt-native-8 clock-dst-native-8 date-rollover-native-8; do
+            flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
+              --scenario "$scenario" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
+              --known-issues baselines/v1.4.1-native.yaml --out "runs/native/$scenario"
+          done
       - name: Log native scenario outcomes
         if: always() && matrix.name != 'sanitizers'
         run: |
-          python -m tools.summarize_run runs/native/smoke-8/run.json
-          python -m tools.summarize_run runs/native/smoke-16/run.json
+          for run in smoke-8 smoke-16 mqtt-native-8 clock-dst-native-8 date-rollover-native-8; do
+            python -m tools.summarize_run "runs/native/$run/run.json"
+          done
       - name: Upload native evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -204,7 +214,8 @@ jobs:
         run: |
           python -m tools.verify_control \
             --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
-            --hardware "${{ matrix.hardware }}" --out runs/scenario
+            --hardware "${{ matrix.hardware }}" --known-issues baselines/v1.4.1-golden.yaml \
+            --out runs/scenario
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
         run: python -m tools.summarize_run runs/scenario/run.json

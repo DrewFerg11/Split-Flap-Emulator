@@ -203,3 +203,24 @@ def test_native_verifier_tolerates_only_the_linked_preferences_noise():
 def test_verifier_ignores_a_timeline_line_still_being_written(tmp_path):
     (tmp_path / "timeline.jsonl").write_text('{"sequence": 1}\n{"sequence": 2, "mod')
     assert records(tmp_path) == [{"sequence": 1}]
+
+
+def test_exported_libraries_are_used_by_pin_without_git(tmp_path, monkeypatch):
+    manifest = json.loads((build.ROOT / "native/libraries.json").read_text())
+    for library in manifest["libraries"]:
+        slug = build.re.sub(r"[^A-Za-z0-9]+", "-", library["name"]).strip("-").lower()
+        path = tmp_path / f"{slug}-{library['commit']}"
+        path.mkdir()
+        (path / build.PIN).write_text(library["commit"] + "\n")
+
+    def no_fetch(*args, **kwargs):
+        raise AssertionError("pinned exports must not be fetched")
+
+    monkeypatch.setattr(build, "fetch", no_fetch)
+    resolved = build.libraries(tmp_path)
+    assert [r["path"].parent for r in resolved] == [tmp_path] * 3
+    # A pin for another commit is not trusted: the library would be fetched again.
+    first = resolved[0]["path"] / build.PIN
+    first.write_text("0" * 40 + "\n")
+    with pytest.raises(AssertionError, match="must not be fetched"):
+        build.libraries(tmp_path)
