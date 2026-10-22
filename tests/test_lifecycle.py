@@ -225,3 +225,76 @@ def test_qmp_reset_controller_observes_generation_before_acknowledging():
         client.close()
         worker.join(2)
         peer.close()
+
+
+def test_unknown_reset_remains_queryable_after_model_channel_closes(tmp_path):
+    hardware, state = recorded_snapshot()
+    parent, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    server = ControlServer(0, tmp_path, hardware, backend="native")
+    worker = threading.Thread(target=peer_loop, args=(peer, state), kwargs={"lost_ack": True})
+    worker.start()
+    try:
+        server.attach(parent)
+        assert api(server, "/api/emu/reset", b'{"id":1}')[0] == 503
+        code, receipt, _ = api(server, "/api/emu/reset/operations/1")
+        assert code == 200 and receipt["status"] == "unknown"
+        assert api(server, "/api/emu/reset", b'{"id":1}')[0] == 503
+        assert api(server, "/api/emu/reset", b'{"id":2}')[0] == 503
+        assert state["guest_resets"] == 1
+    finally:
+        server.close()
+        worker.join(2)
+        peer.close()
+        assert not worker.is_alive()
+
+
+def test_shutdown_during_admitted_reset_finishes_audit_and_reaps_listener(tmp_path):
+    hardware, state = recorded_snapshot()
+    parent, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    server = ControlServer(0, tmp_path, hardware, backend="qemu")
+    dispatched, release = threading.Event(), threading.Event()
+    results, failures = [], []
+    peer_worker = threading.Thread(target=peer_loop, args=(peer, state))
+    peer_worker.start()
+
+    def trigger():
+        dispatched.set()
+        assert release.wait(2)
+        state["guest_resets"] += 1
+
+    def request_reset():
+        try:
+            results.append(api(server, "/api/emu/reset", b'{"id":1}'))
+        except Exception as error:
+            failures.append(error)
+
+    server.attach(parent, reset=trigger)
+    requester = threading.Thread(target=request_reset)
+    requester.start()
+    assert dispatched.wait(2)
+    closer = threading.Thread(target=server.close)
+    closer.start()
+    try:
+        # Closing detaches the server immediately, then waits for the admitted
+        # request's client lock. New requests cannot start another operation.
+        import time
+
+        deadline = time.monotonic() + 2
+        while server.client is not None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert server.client is None and closer.is_alive()
+    finally:
+        release.set()
+        requester.join(4)
+        closer.join(4)
+        peer_worker.join(2)
+        server.close()
+        peer.close()
+    assert not requester.is_alive() and not closer.is_alive() and not peer_worker.is_alive()
+    assert not failures and results[0][0] == 202
+    assert state["guest_resets"] == 1
+    assert [
+        json.loads(line)["phase"] for line in (tmp_path / "control.jsonl").read_text().splitlines()
+    ] == ["intent", "result"]
+    with socket.socket() as probe:
+        assert probe.connect_ex(("127.0.0.1", server.port)) != 0
