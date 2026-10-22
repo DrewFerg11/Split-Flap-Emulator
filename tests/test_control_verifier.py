@@ -20,7 +20,7 @@ def test_failed_initial_settlement_keeps_motion_evidence_without_pausing(tmp_pat
         )
     )
     (tmp_path / "control-token").write_text("test-only\n")
-    moving = {"live": True, "capabilities": {"reset": False}, "state": {"settled": False}}
+    moving = {"live": True, "capabilities": {"reset": True}, "state": {"settled": False}}
     opener = SimpleNamespace(open=lambda *_args, **_kwargs: io.StringIO(json.dumps(moving)))
     monkeypatch.setattr(verify_control.urllib.request, "build_opener", lambda *_: opener)
 

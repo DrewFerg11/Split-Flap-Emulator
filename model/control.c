@@ -6,7 +6,7 @@
 #include <string.h>
 #include <sys/socket.h>
 
-int fs_control_serve(int fd, int64_t guest_ns) {
+static int serve(int fd, int64_t guest_ns, bool native) {
     char request[2049];
     ssize_t length = recv(fd, request, sizeof(request) - 1, MSG_DONTWAIT | MSG_TRUNC);
     if (length < 0)
@@ -14,6 +14,13 @@ int fs_control_serve(int fd, int64_t guest_ns) {
     if (length == 0)
         return 0;
     static const char expected[] = "FLAPSIM_STATE/1";
+    static const char reset[] = "FLAPSIM_RESET/1";
+    if (native && fs.initialized && !fs.failed && length == sizeof(reset) - 1 &&
+        !memcmp(request, reset, sizeof(reset) - 1)) {
+        const char accepted[] = "{\"status\":\"accepted\"}";
+        ssize_t sent = send(fd, accepted, sizeof(accepted) - 1, MSG_DONTWAIT | MSG_NOSIGNAL);
+        return sent == sizeof(accepted) - 1 ? 2 : 0;
+    }
     char *state = NULL;
     if (length == sizeof(expected) - 1 && !memcmp(request, expected, sizeof(expected) - 1))
         state = fs_model_snapshot(guest_ns);
@@ -29,3 +36,6 @@ int fs_control_serve(int fd, int64_t guest_ns) {
     /* A slow/disconnected consumer disables control, never blocks the firmware. */
     return sent >= 0 && (size_t)sent == size;
 }
+
+int fs_control_serve(int fd, int64_t guest_ns) { return serve(fd, guest_ns, false); }
+int fs_control_serve_native(int fd, int64_t guest_ns) { return serve(fd, guest_ns, true); }

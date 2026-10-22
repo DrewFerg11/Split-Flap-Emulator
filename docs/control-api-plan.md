@@ -323,3 +323,11 @@ with the merged #30 native runner, using the model mutex and retaining the priva
 channel across firmware re-exec. Reset generations now persist in every model
 record, including before any mechanics edit. Lifecycle, faults, speed, streaming and scenario control steps
 remain later work; #20 is not complete.
+
+
+The next lifecycle slice adds public, audited controller reset for QEMU and native
+mode. It observes generation advancement before acknowledgement, retains a
+latest-only runner reset receipt across native re-exec, and never retries an
+uncertain reset. QEMU reports hard-reset fidelity; native reports software re-exec.
+Power switching, speed, deterministic faults, streaming and scenario control
+steps remain unfinished; this slice does not close #20.
