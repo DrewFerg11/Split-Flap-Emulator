@@ -46,6 +46,20 @@ static struct json_object *identity(int64_t guest_ns) {
     }
     total.anomalies = fs.totals.anomalies;
     json_object_object_add(object, "counters", counters(total));
+    /* Injected faults (#19) and how often each has acted, only when any are configured. */
+    struct json_object *faults = NULL;
+    for (int i = 0; i < fs.count; i++) {
+        if (!fs.modules[i].faults.configured)
+            continue;
+        if (!faults)
+            faults = json_object_new_array();
+        struct json_object *entry = fs_faults_json(&fs.modules[i]);
+        integer(entry, "bus", fs.modules[i].bus);
+        integer(entry, "addr", fs.modules[i].addr);
+        json_object_array_add(faults, entry);
+    }
+    if (faults)
+        json_object_object_add(object, "faults", faults);
     return object;
 }
 

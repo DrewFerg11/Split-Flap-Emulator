@@ -23,7 +23,9 @@ from flapsim.scenario import (
     ScenarioExecutor,
     json_subset,
     parse_variables,
+    serial_errors,
     substitute,
+    validate_step,
 )
 from flapsim.state import validate_state
 from tools.verify_boot import GOLDEN
@@ -1064,6 +1066,52 @@ def test_boot_executor_excuses_only_explained_stalls(context):
     stalled(context, 2)
     with pytest.raises(ExecutionFailed, match="model faults"):
         BootExecutor(2, {}, golden_baseline()).execute(context)
+
+
+def test_faulted_modules_excuse_only_their_own_write_failures():
+    hardware = load_hardware("esp32-8-single-module-lost")
+    validate_step({"assert_no_errors": {"faulted_modules": [0x25]}}, hardware)
+    lost = "Error writing data to module 37, error code: 2\n"
+    serial_errors(lost * 3, {"faulted_modules": [37]})
+    for line in [
+        "Error writing data to module 36, error code: 2\n",
+        "Error writing data to module 37, error code: 5\n",
+    ]:
+        with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+            serial_errors(lost + line, {"faulted_modules": [37]})
+    with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+        serial_errors(lost, {})
+
+
+@pytest.mark.parametrize(
+    "policy, message",
+    [
+        ({"faulted_modules": [0x24]}, "injected I2C fault"),
+        ({"faulted_modules": []}, "injected I2C fault"),
+        ({"faulted_modules": [0x25, 0x25]}, "injected I2C fault"),
+        ({"faulted_modules": "0x25"}, "injected I2C fault"),
+        ({"faulted_modules": [0x25], "default_missing_bus1": True}, "cannot be combined"),
+    ],
+)
+def test_invalid_faulted_modules(policy, message):
+    with pytest.raises(ValueError, match=message):
+        validate_step({"assert_no_errors": policy}, load_hardware("esp32-8-single-module-lost"))
+    with pytest.raises(ValueError, match="injected I2C fault"):
+        validate_step(
+            {"assert_no_errors": {"faulted_modules": [0x23]}},
+            load_hardware("esp32-8-single-stuck-sensor"),
+        )
+
+
+def test_report_lists_injected_faults_from_the_newest_model_output(tmp_path):
+    manifest = {"passed": True, "exit_code": 0, "wall_seconds": 1, "scenario": {"name": "f"}}
+    write_reports(tmp_path, manifest, [])
+    assert "Injected faults" not in (tmp_path / "report.md").read_text()
+    faults = [{"sensor": "stuck_inactive", "events": 88, "bus": 0, "addr": 0x23}]
+    (tmp_path / "activity.json").write_text(json.dumps({"faults": faults}))
+    write_reports(tmp_path, manifest, [])
+    report = (tmp_path / "report.md").read_text()
+    assert "Injected faults:\n- bus 0 0x23: sensor stuck_inactive; acted 88 time(s)" in report
 
 
 def settings_device(behaviour):

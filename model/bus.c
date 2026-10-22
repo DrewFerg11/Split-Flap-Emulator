@@ -43,14 +43,24 @@ static int event_inner(uint8_t id, uint8_t address, uint16_t event, int64_t gues
         if (bus->selected >= 0)
             fs_anomaly(&fs.modules[bus->selected], "START while transaction open");
         memset(bus, 0, sizeof(*bus));
+        bus->hidden = -1;
+        /* An injected I2C fault answers the whole transaction as an absent address. */
+        if (index >= 0 && fs_fault_absent(&fs.modules[index], guest_ns)) {
+            bus->hidden = address;
+            index = -1;
+        }
         bus->selected = index;
         bus->direction = kind;
         if (index >= 0) {
             FsModule *module = &fs.modules[index];
-            bus->input = (module->latch & 0x7fff) | (fs_hall(module) ? 0x8000 : 0);
+            /* Only a read samples the sensor, so writes never consume or count sensor faults. */
+            int hall = kind == 0 ? fs_fault_hall(module) : fs_hall(module);
+            bus->input = (module->latch & 0x7fff) | (hall ? 0x8000 : 0);
         }
         return index >= 0 ? 0 : 1;
     }
+    if (bus->hidden == address)
+        index = -1;
     if (index < 0)
         return kind == 6 ? 0xff : 1;
     FsModule *module = &fs.modules[index];
@@ -82,7 +92,7 @@ static int event_inner(uint8_t id, uint8_t address, uint16_t event, int64_t gues
         return 0;
     }
     if (kind == 6 && bus->direction == 0)
-        return fs_pcf_read(bus);
+        return fs_fault_read(module, fs_pcf_read(bus));
     fs_anomaly(module, "invalid event or transaction direction");
     return 1;
 }
@@ -114,7 +124,7 @@ void fs_model_guest_reset(void) {
     fs.guest_resets++;
     for (int b = 0; b < 2; b++) {
         memset(&fs.buses[b], 0, sizeof(fs.buses[b]));
-        fs.buses[b].selected = -1;
+        fs.buses[b].selected = fs.buses[b].hidden = -1;
     }
     /* The ESP32/controller resets; external expander latches and drums do not. */
     fs_emit("guest_reset", false);

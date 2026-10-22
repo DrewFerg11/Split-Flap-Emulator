@@ -274,3 +274,68 @@ def test_calibration_fixture_offsets_match_true_electrical_edges():
         if module["sensor_polarity"] == "active-low":
             edge += module["sensor_window"]
         assert (edge - module["flap_offset"]) % module["steps_per_rotation"] == 730 + offset
+
+
+def test_faults_normalize_with_reproducible_per_module_streams(document):
+    document["buses"][0]["modules"][3] = {"addr": 0x23, "faults": {"sensor": "stuck_inactive"}}
+    document["buses"][0]["modules"][5] = {
+        "addr": 0x25,
+        "faults": {"motor": "slip", "slip": 0.25, "i2c": "disappear", "disappear_at": 1.5},
+    }
+    hardware = normalize_hardware(document, seed=7)
+    faulted = {m["addr"]: m["faults"] for m in hardware["modules"] if "faults" in m}
+    assert faulted.keys() == {0x23, 0x25}
+    assert {k: v for k, v in faulted[0x25].items() if k != "seed"} == {
+        "motor": "slip",
+        "slip": 0.25,
+        "i2c": "disappear",
+        "disappear_at_ns": 1_500_000_000,
+    }
+    assert faulted[0x23]["seed"] != faulted[0x25]["seed"]
+    assert all(0 < f["seed"] <= 0xFFFFFFFF for f in faulted.values())
+    assert hardware == normalize_hardware(document, seed=7)
+    other = normalize_hardware(document, seed=8)
+    assert [m.get("faults", {}).get("seed") for m in other["modules"]] != [
+        m.get("faults", {}).get("seed") for m in hardware["modules"]
+    ]
+    # Faults never change geometry or starts.
+    plain = normalize_hardware(
+        yaml.safe_load((ROOT / "hardware/esp32-8-single.yaml").read_text()), seed=7
+    )
+    strip = [{k: v for k, v in m.items() if k != "faults"} for m in hardware["modules"]]
+    assert strip == plain["modules"]
+
+
+@pytest.mark.parametrize(
+    "faults, message",
+    [
+        ({}, "must name a sensor, motor or i2c fault"),
+        ({"sensor": "melted"}, "faults.sensor must be one of"),
+        ({"motor": "slip"}, "need exactly the parameters ['slip']"),
+        ({"motor": "dead", "slip": 0.5}, "need exactly the parameters []"),
+        ({"sensor": "noisy", "sensor_noise": 0}, "probability in (0, 1]"),
+        ({"i2c": "nack", "nack": 1.5}, "probability in (0, 1]"),
+        ({"i2c": "corrupt", "corrupt": True}, "probability in (0, 1]"),
+        ({"i2c": "disappear", "disappear_at": 0}, "guest seconds > 0"),
+        ({"i2c": "disappear", "disappear_at": 1e-10}, "guest seconds > 0"),
+        ({"i2c": "disappear", "disappear_at": float("inf")}, "guest seconds > 0"),
+        ({"i2c": "disappear", "disappear_at": 1e10}, "guest seconds > 0"),
+        ({"i2c": "disappear", "disappear_at": 2e299}, "guest seconds > 0"),
+        ({"i2c": "disappear", "disappear_at": float("nan")}, "guest seconds > 0"),
+        ({"sensor": "inverted", "colour": "red"}, "colour"),
+    ],
+)
+def test_invalid_faults(document, faults, message):
+    document["buses"][0]["modules"][0] = {"addr": 0x20, "faults": faults}
+    with pytest.raises(ValueError) as error:
+        normalize_hardware(document, seed=7)
+    assert message in str(error.value)
+
+
+def test_fault_fixtures_load():
+    stuck = load_hardware("esp32-8-single-stuck-sensor")
+    lost = load_hardware("esp32-8-single-module-lost")
+    assert [m["faults"]["sensor"] for m in stuck["modules"] if "faults" in m] == ["stuck_inactive"]
+    assert [m["faults"]["disappear_at_ns"] for m in lost["modules"] if "faults" in m] == [
+        90_000_000_000
+    ]

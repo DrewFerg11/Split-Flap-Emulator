@@ -186,6 +186,62 @@ preserving expander latches, motor phase/energy, angles and counters. A new
 process initializes from its normalized configuration. QEMU's BQL serializes
 the integration callbacks; direct core API users must serialize their calls.
 
+## Injected faults
+
+A module mapping can add `faults`. Each module takes at most one fault of each
+kind (sensor, motor, I²C). This lets a scenario check how the firmware behaves
+when the hardware misbehaves. Each fault parameter is required when its fault
+is chosen and rejected otherwise.
+
+| Kind | Value | Parameter | Effect |
+|---|---|---|---|
+| `sensor` | `stuck_active` / `stuck_inactive` | — | The firmware always reads the magnet as present / absent |
+| `sensor` | `inverted` | — | The firmware reads the opposite of the physical sensor |
+| `sensor` | `noisy` | `sensor_noise` (0, 1] | Each input sample flips with this probability |
+| `motor` | `dead` | — | The rotor never moves; coil writes still succeed |
+| `motor` | `slip` | `slip` (0, 1] | Each step is lost with this probability |
+| `i2c` | `missing` | — | The address never ACKs (absent from boot onwards) |
+| `i2c` | `disappear` | `disappear_at` guest seconds > 0 | The address stops ACKing at that guest time |
+| `i2c` | `nack` | `nack` (0, 1] | Each transaction is NACKed with this probability |
+| `i2c` | `corrupt` | `corrupt` (0, 1] | Each read byte has one random bit flipped with this probability |
+
+```yaml
+modules:
+  - {addr: 0x23, faults: {sensor: stuck_inactive}}
+  - {addr: 0x25, faults: {i2c: disappear, disappear_at: 90}}
+  - {addr: 0x26, faults: {motor: slip, slip: 0.05, i2c: nack, nack: 0.01}}
+```
+
+Faults act only on what the firmware sees. The snapshot keeps reporting the
+physical angle, displayed flap and electrical `hall`, so a run's output shows
+both what really happened and what the firmware was told. Sensor faults apply
+to the firmware's reads only; a write transaction never samples the sensor. A
+faulted NACK behaves exactly like an absent address and does not count as a
+model anomaly.
+
+**Randomness.** Each faulted module has its own xorshift32 stream. The stream
+is seeded with the mechanical seed XOR `0x5bd1e995` XOR `(bus << 8 | addr)`;
+if that comes out as zero, `0x5bd1e995` is used instead. The seed is recorded
+as `faults.seed` in the normalized module. Only firmware transactions advance
+the stream. Snapshots and other modules never touch it, so the same seed and
+the same firmware traffic inject the same faults. `disappear_at` is stored as
+`disappear_at_ns`. Like drums and latches, a new process starts its fault state
+from the normalized configuration: after a native crash resume or power restart
+each stream starts again from its seed and `events` from zero.
+
+**Evidence.** When any module has faults, the identity block in state,
+activity and timeline output gains a top-level `faults` list. Each entry has
+`bus`, `addr`, the configured kinds, and `events`, the number of times the fault
+has changed something the firmware saw.
+
+The `esp32-8-single-stuck-sensor` and `esp32-8-single-module-lost` fixtures,
+with the `fault-stuck-sensor-8` and `fault-module-lost-8` scenarios, check the
+firmware's response to a sensor that never sees its magnet and to a module that
+drops off the bus mid-run.
+
+Changing faults mid-run needs the control API (#20). Power faults (brown-out,
+supply sag) are not modeled yet.
+
 ## Output and freshness contract
 
 `state.json` is atomically replaced through a same-directory temporary file on

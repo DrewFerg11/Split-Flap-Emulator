@@ -159,9 +159,27 @@ def validate_step(step, hardware, services=()):
             if key in value and (type(value[key]) is not int or not low <= value[key] <= high):
                 raise ValueError(f"settings_stress {key} must be an integer in {low}–{high}")
     elif kind == "assert_no_errors":
-        fields(value, set(), {"fresh_nvs", "default_missing_bus1"})
-        if any(type(v) is not bool for v in value.values()):
+        fields(value, set(), {"fresh_nvs", "default_missing_bus1", "faulted_modules"})
+        if any(type(v) is not bool for k, v in value.items() if k != "faulted_modules"):
             raise ValueError("error policy flags must be boolean")
+        if "faulted_modules" in value:
+            # Firmware module numbers are I2C addresses, so only modules configured with an
+            # injected I2C fault (#19) may have their write failures excused.
+            faulted = {m["addr"] for m in hardware["modules"] if m.get("faults", {}).get("i2c")}
+            modules = value["faulted_modules"]
+            if (
+                not isinstance(modules, list)
+                or not modules
+                or any(type(m) is not int for m in modules)
+                or len(set(modules)) != len(modules)
+                or not set(modules) <= faulted
+            ):
+                raise ValueError(
+                    "faulted_modules must list distinct addresses of modules with an injected "
+                    f"I2C fault ({sorted(faulted)})"
+                )
+            if value.get("default_missing_bus1"):
+                raise ValueError("faulted_modules cannot be combined with default_missing_bus1")
         if value.get("default_missing_bus1") and any(m["bus"] == 1 for m in hardware["modules"]):
             raise ValueError(
                 "default missing-bus allowance applies only to eight physical bus-0 modules"
@@ -289,6 +307,8 @@ def serial_errors(text, policy, known=None, observed=None):
         ):
             continue
         match = re.fullmatch(r"Error writing data to module (\d+), error code: 2", line)
+        if match and int(match[1]) in policy.get("faulted_modules", ()):
+            continue
         if policy.get("default_missing_bus1") and match:
             missing.append(int(match[1]))
         elif known and (entry := known.tolerated_serial(line)):
@@ -837,7 +857,11 @@ class ScenarioExecutor:
         serial = serial[: serial.rfind("\n") + 1]
         serial_errors(
             serial[self.error_cursor :],
-            {"fresh_nvs": (self.last_error_policy or {}).get("fresh_nvs", False)},
+            {
+                key: value
+                for key, value in (self.last_error_policy or {}).items()
+                if key in {"fresh_nvs", "faulted_modules"}
+            },
             self.known_issues,
             self.known_serial,
         )

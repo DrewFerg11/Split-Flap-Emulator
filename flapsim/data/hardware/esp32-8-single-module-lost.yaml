@@ -1,0 +1,21 @@
+# Fault fixture (#19): module 0x25 stops answering on I2C 90 guest seconds into the run, after the single-bus reboot.
+chip: esp32
+buses:
+  - id: 0
+    modules:
+      - 0x20
+      - 0x21
+      - 0x22
+      - 0x23
+      - 0x24
+      - {addr: 0x25, faults: {i2c: disappear, disappear_at: 90}}
+      - 0x26
+      - 0x27
+  - id: 1
+    modules: []
+drum:
+  steps_per_rotation: 2048
+  flaps: ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  magnet_position: 730
+  sensor_window: 40
+start_angles: {seed: 7}
