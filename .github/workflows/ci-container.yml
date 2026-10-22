@@ -12,9 +12,19 @@ permissions:
 
 jobs:
   image:
-    name: Container smoke and lifecycle
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    name: Container smoke and lifecycle (${{ matrix.arch }})
+    # Each platform builds and passes the full verification on its own native runner (#23);
+    # releases publish only these exact images. ubuntu-24.04-arm is free for public repos.
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,14 +42,14 @@ jobs:
         with:
           context: .
           load: true
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           tags: flapsim:candidate
           build-args: |
             BUILD_JOBS=4
             SOURCE_REVISION=${{ github.sha }}
             EMULATOR_VERSION=${{ steps.package.outputs.version }}
-          cache-from: type=gha,scope=flapsim-linux-amd64
-          cache-to: type=gha,scope=flapsim-linux-amd64,mode=max
+          cache-from: type=gha,scope=flapsim-linux-${{ matrix.arch }}
+          cache-to: type=gha,scope=flapsim-linux-${{ matrix.arch }},mode=max
       - name: Verify installed image resources, both real smoke layouts, timeout and stop
         run: |
           python -m tools.verify_container --image flapsim:candidate --out runs/container \
@@ -63,7 +73,7 @@ jobs:
         if: success() && inputs.export_image
         uses: actions/upload-artifact@v4
         with:
-          name: verified-container-candidate
+          name: verified-container-candidate-${{ matrix.arch }}
           retention-days: 2
           compression-level: 0
           path: |
@@ -82,7 +92,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: container-verification-evidence
+          name: container-verification-evidence-${{ matrix.arch }}
           retention-days: 14
           if-no-files-found: warn
           path: |

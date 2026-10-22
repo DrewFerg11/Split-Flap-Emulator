@@ -72,12 +72,14 @@ configuration/toolchain caches must not be reused. Delete the affected Actions
 cache or the disposable local build tree if a build is interrupted or corrupt;
 do not bypass source checks to salvage it.
 
-Docker uses BuildKit's `gha` cache, scope `flapsim-linux-amd64`. Base/dependency
+Docker uses BuildKit's `gha` cache, one scope per platform (`flapsim-linux-amd64`,
+`flapsim-linux-arm64`). Base/dependency
 layers precede native sources; Python/resources and revision labels follow the
 native build so a CLI-only change does not rebuild QEMU. Pin/model/build-script
 changes invalidate the native layer. Use `docker build --no-cache` for a clean
 diagnostic. Disk-heavy source archives and the exact verified image archive can
-require several GiB. There is no tested arm64 or multi-architecture image.
+require several GiB, once per platform. arm64 builds and runs on GitHub's native
+`ubuntu-24.04-arm` runners, which are free for public repositories only.
 
 For early exits inspect `qemu.log`, `serial.log`, `run.json`, `build-info.json`
 and Meson/configure diagnostics. Permission failures usually mean the external
@@ -213,4 +215,19 @@ One-time environment settings (Settings → Environments → `release`):
 To release: push the tag (`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`),
 open the run, choose **Review deployments → Approve**, then take the digest from the
 publish job's summary or its `container-publication-result` artifact.
+
+### Docker Hub mirror
+
+Off unless configured, as in numbers-go-up. To enable it:
+
+1. Create the Docker Hub repository (e.g. `drewferg11/split-flap-emulator`) and a
+   personal access token with **Read, Write, Delete** scope (Delete is needed only to
+   update the description).
+2. In the `release` environment, add the secrets `DOCKERHUB_USERNAME` and
+   `DOCKERHUB_TOKEN`.
+3. Add the repository variable `DOCKERHUB_IMAGE` = `drewferg11/split-flap-emulator`.
+
+`authorize` fails before anything is built if the variable is set but either secret is
+missing, or if the name is not `<namespace>/<name>` in lowercase. Unset the variable to
+publish to GHCR only.
 

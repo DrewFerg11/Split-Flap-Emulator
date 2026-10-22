@@ -3,7 +3,9 @@
 The image is `ghcr.io/drewferg11/split-flap-emulator`; the command inside it is
 `flapsim`, so `docker run <image> run ...` is `flapsim run ...`.
 
-Only Linux amd64 is supported and verified by the workflows. The runtime is
+Linux amd64 and arm64 (for example a Raspberry Pi or an ARM home-lab host) are
+supported. Each platform is built and fully verified on its own native runner, and a
+release publishes both under one tag and one digest; Docker picks the right one. The runtime is
 Debian bookworm-slim, runs as UID/GID 10001 by default, and has `flapsim` as its
 entrypoint. Firmware stays external; no firmware binary is baked into the image.
 Installed wheels include the hardware and scenario YAML, so commands work from
@@ -150,9 +152,13 @@ through the `release` environment ([setup](maintenance.md#release-approval)); no
 is built or published before that. A manual dispatch must select a version tag and
 verifies only; it cannot push. No PR publishes.
 
-The reusable verification workflow builds once, loads the candidate locally,
-verifies that exact image ID, then exports it and its proof only on success.
-The publication job downloads/loads the same archive; it does not rebuild.
+The reusable verification workflow builds once per platform, on `ubuntu-24.04`
+(amd64) and `ubuntu-24.04-arm` (arm64), loads each candidate locally, verifies that
+exact image ID, then exports it and its proof only on success. The publication job
+downloads and loads those same archives; it does not rebuild. It pushes each as
+`X.Y.Z-amd64` / `X.Y.Z-arm64`, then joins them with `docker buildx imagetools create`
+into one multi-platform index tagged `X.Y.Z`. That index digest is the reference to pin;
+it covers both platforms.
 Only that job has `packages: write`. It rejects incomplete, scaled, mismatched,
 failed or incorrectly versioned proofs before registry writes. Existing version
 tags are refused, including reruns; registry authorization/network failures fail
@@ -161,7 +167,13 @@ workflow policy; a digest is the immutable reference for consumers.
 
 A stable `vX.Y.Z` updates `latest` only when no higher stable version is already
 published. Prereleases, such as `v0.1.0-dev.0`, never update `latest`. Publication
-runs serialize. The result artifact records image ID, source SHA, version,
+runs serialize.
+
+When the `DOCKERHUB_IMAGE` repository variable is set (for example
+`drewferg11/split-flap-emulator`), the same index is also tagged on Docker Hub in the
+same `imagetools create` command, and publication fails unless the Docker Hub tags
+resolve to the GHCR digest. The README is synced to the Docker Hub description (a
+failure there only warns). Setup: [maintenance](maintenance.md#docker-hub-mirror). The result artifact records image ID, source SHA, version,
 registry digest and immutable reference. There is currently no result because
 the strict firmware gates are blocked. After those gates pass and packaging is
 merged, a trusted release and recorded digest are still required to complete

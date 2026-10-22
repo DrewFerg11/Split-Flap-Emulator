@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from tools.publish_image import promote
+from tools.publish_image import ARCHITECTURES, promote
 from tools.verify_boot import GOLDEN, ROOT
 
 
@@ -47,7 +47,11 @@ def validate_workflows(root):
     assert jobs["publish"]["permissions"]["packages"] == "write"
     verify = yaml.safe_load((root / ".github/workflows/ci-container.yml").read_text())
     assert verify["permissions"] == {"contents": "read"}
-    steps = verify["jobs"]["image"]["steps"]
+    image = verify["jobs"]["image"]
+    platforms = image["strategy"]["matrix"]["include"]
+    assert sorted(p["arch"] for p in platforms) == sorted(ARCHITECTURES), "verify every platform"
+    assert image["strategy"].get("fail-fast") is False
+    steps = image["steps"]
     verify_index = next(
         i for i, s in enumerate(steps) if "tools.verify_container" in s.get("run", "")
     )
@@ -98,7 +102,12 @@ def verify(args):
     forbidden = ForbiddenPublication()
     try:
         promote(
-            proof, info, args.expected_source or "unrecorded", "9.9.9", False, forbidden, forbidden
+            {info["Architecture"]: (proof, info)},
+            args.expected_source or "unrecorded",
+            "9.9.9",
+            False,
+            forbidden,
+            forbidden,
         )
     except ValueError:
         pass

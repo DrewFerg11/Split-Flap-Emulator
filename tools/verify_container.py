@@ -20,6 +20,10 @@ from flapsim.executor import positive_timeout
 from flapsim.runner import QEMU_COMMIT
 from tools.verify_boot import GOLDEN, ROOT, checked_firmware
 
+# The published platforms (tools.publish_image.ARCHITECTURES; the publish job installs only
+# packaging, so it cannot import this module).
+ARCHITECTURES = ("amd64", "arm64")
+
 RESOURCE_CHECK = """
 import json, pathlib, tarfile
 from importlib.metadata import version
@@ -64,8 +68,8 @@ class ImageVerifier:
         self.args, self.out = args, out
         self.docker = ["docker"] + (["--host", args.docker_host] if args.docker_host else [])
         info = json.loads(self.call(["image", "inspect", args.image]))[0]
-        if info["Architecture"] != "amd64" or info["Os"] != "linux":
-            raise ValueError("only Linux amd64 container verification is supported")
+        if info["Architecture"] not in ARCHITECTURES or info["Os"] != "linux":
+            raise ValueError(f"only Linux {'/'.join(ARCHITECTURES)} images can be verified")
         if info["Config"]["Entrypoint"] != ["flapsim"]:
             raise ValueError("runtime entrypoint must be flapsim")
         self.image = info["Id"]
