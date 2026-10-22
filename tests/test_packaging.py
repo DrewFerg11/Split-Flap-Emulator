@@ -250,11 +250,12 @@ def test_a_release_needs_exactly_one_verified_candidate_per_platform(mutation):
     assert not registry.commands and not registry.checks
 
 
-@pytest.mark.parametrize("where", ["ghcr", "platform", "mirror"])
+@pytest.mark.parametrize("where", ["ghcr", "amd64", "arm64", "mirror"])
 def test_existing_immutable_version_refuses_overwrite(where):
     registry = ControlledRegistry(existing=where == "ghcr", mirror_existing=where == "mirror")
-    if where == "platform":
-        registry.pushed["1.2.3-amd64"] = DIGEST
+    if where in ARCHITECTURES:
+        # Any platform tag, including the last one checked, refuses before anything is pushed.
+        registry.pushed[f"1.2.3-{where}"] = DIGEST
     with pytest.raises(RuntimeError, match="already exists"):
         promote(
             candidates(),

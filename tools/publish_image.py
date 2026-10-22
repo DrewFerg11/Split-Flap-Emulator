@@ -194,11 +194,13 @@ def promote(candidates, revision, version, stable, registry, docker, mirror=None
             raise RuntimeError(
                 f"immutable version {version} already exists in {image}; choose a new release tag"
             )
+    # Check every platform tag before pushing any, so a refusal never leaves a partial release.
+    for architecture in ARCHITECTURES:
+        if registry.digest(f"{version}-{architecture}") is not None:
+            raise RuntimeError(f"immutable platform image {version}-{architecture} already exists")
     platforms = {}
     for architecture in ARCHITECTURES:
         tag = f"{version}-{architecture}"
-        if registry.digest(tag) is not None:
-            raise RuntimeError(f"immutable platform image {tag} already exists")
         docker(["tag", candidates[architecture][1]["Id"], f"{IMAGE}:{tag}"])
         docker(["push", f"{IMAGE}:{tag}"])
         platforms[architecture] = registry.digest(tag)
