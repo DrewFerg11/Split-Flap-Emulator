@@ -189,6 +189,59 @@ void clock() {
     vclock::set_speed(1.0);
 }
 
+void dynamic_clock() {
+    using namespace flapsim;
+    using namespace std::chrono;
+    for (bool condition_wait : {false, true}) {
+        for (bool accelerate : {false, true}) {
+            vclock::set_speed(accelerate ? 0.25 : 1.0);
+            std::atomic<bool> entered{false};
+            int64_t guest_elapsed = 0;
+            auto start = steady_clock::now();
+            std::thread waiter([&] {
+                int64_t before = vclock::now_ns();
+                entered = true;
+                if (condition_wait) {
+                    std::mutex mutex;
+                    std::condition_variable condition;
+                    std::unique_lock<std::mutex> lock(mutex);
+                    CHECK(!vclock::wait_for(condition, lock, 100000000, [] { return false; }));
+                } else {
+                    vclock::sleep_ns(100000000);
+                }
+                guest_elapsed = vclock::now_ns() - before;
+            });
+            while (!entered)
+                std::this_thread::yield();
+            std::this_thread::sleep_for(milliseconds(10));
+            vclock::set_speed(accelerate ? 50.0 : 0.25);
+            waiter.join();
+            auto elapsed = duration_cast<milliseconds>(steady_clock::now() - start).count();
+            CHECK(guest_elapsed >= 100000000);
+            CHECK(accelerate ? elapsed < 300 : elapsed >= 250);
+        }
+    }
+    std::atomic<bool> done{false}, backwards{false};
+    std::vector<std::thread> readers;
+    for (int i = 0; i < 4; i++)
+        readers.emplace_back([&] {
+            int64_t last = vclock::now_ns();
+            while (!done) {
+                int64_t next = vclock::now_ns();
+                if (next < last)
+                    backwards = true;
+                last = next;
+            }
+        });
+    for (int i = 0; i < 10000; i++)
+        vclock::set_speed(i % 2 ? 0.25 : 50.0);
+    done = true;
+    for (auto &reader : readers)
+        reader.join();
+    CHECK(!backwards);
+    vclock::set_speed(1.0);
+}
+
 void filesystem() {
     size_t cursor = 0;
     serial_since(cursor);
@@ -402,11 +455,16 @@ void sockets() {
             std::this_thread::sleep_for(std::chrono::seconds(2));
             return false;
         });
-        flapsim::vclock::set_speed(50.0);
         for (int attempt = 0; attempt < 2; attempt++) {
+            flapsim::vclock::set_speed(0.25);
+            std::thread accelerate([] {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                flapsim::vclock::set_speed(50.0);
+            });
             auto before = std::chrono::steady_clock::now();
             WiFiClient stalled;
             CHECK(!stalled.connect("slow.example", port, 100));
+            accelerate.join();
             auto waited = std::chrono::steady_clock::now() - before;
             CHECK(waited >= std::chrono::milliseconds(250) &&
                   waited < std::chrono::milliseconds(1500));
@@ -429,9 +487,14 @@ void sockets() {
         CHECK(flooding.connect(loopback, port));
         int idle = ::accept(listener, nullptr, nullptr);
         std::vector<uint8_t> payload(16 << 20, 'x');
-        flapsim::vclock::set_speed(50.0);
+        flapsim::vclock::set_speed(0.25);
+        std::thread accelerate([] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            flapsim::vclock::set_speed(50.0);
+        });
         auto before = std::chrono::steady_clock::now();
         size_t written = flooding.write(payload.data(), payload.size());
+        accelerate.join();
         auto waited = std::chrono::steady_clock::now() - before;
         flapsim::vclock::set_speed(1.0);
         CHECK(written > 0 && written < payload.size());
@@ -469,8 +532,8 @@ int main(int argc, char **argv) {
     config.littlefs = directory + "/littlefs";
     config.http_fd = listening_socket(&http_port);
     flapsim::host::configure_for_tests(config);
-    for (auto test : {strings, preferences, clock, filesystem, webserver, http_transport,
-                      wall_clock, sockets, wire})
+    for (auto test : {strings, preferences, clock, dynamic_clock, filesystem, webserver,
+                      http_transport, wall_clock, sockets, wire})
         test();
     std::printf("%s (%d failure%s)\n", failures ? "FAIL" : "PASS", failures,
                 failures == 1 ? "" : "s");

@@ -1,6 +1,8 @@
 """Controller power approximation, independent of external module power."""
 
+import math
 import socket
+import struct
 import threading
 import time
 
@@ -96,7 +98,7 @@ class NativePower:
                     raise ValueError("invalid native resume identity")
                 parts = reply["resume"].split(":")
                 if (
-                    len(parts) != 4
+                    len(parts) not in {4, 5}
                     or not all(p.isascii() and p.isdecimal() for p in parts)
                     or not 2 <= int(parts[0]) <= 2**32 - 1
                     or parts[1] != "1"
@@ -104,6 +106,13 @@ class NativePower:
                     or parts[3] not in {"0", "1"}
                 ):
                     raise ValueError("invalid native resume identity")
+                if len(parts) == 5:
+                    bits = int(parts[4])
+                    if bits > 2**64 - 1:
+                        raise ValueError("invalid native resume rate")
+                    speed = struct.unpack("d", struct.pack("Q", bits))[0]
+                    if not math.isfinite(speed) or not 0.25 <= speed <= 50:
+                        raise ValueError("invalid native resume rate")
                 if self.current.wait(timeout=1) != 0:
                     raise ValueError("native checkpoint process failed")
                 stop_group(self.current)

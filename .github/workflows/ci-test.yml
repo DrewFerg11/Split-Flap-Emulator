@@ -96,6 +96,14 @@ jobs:
             python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
               --case control --timeout ${{ matrix.timeout }} --out "runs/native/control-$hardware"
           done
+      - name: Verify runtime speed and rate preservation through reset and power
+        run: |
+          for hardware in esp32-8-single esp32-16-dual; do
+            python -m tools.verify_speed --native-build build/native/golden --hardware "$hardware" \
+              --out "runs/native/speed-$hardware"
+          done
+          python -m tools.verify_speed --native-build build/native/golden --slow-timeout \
+            --out runs/native/speed-slow-timeout
       - name: Verify controller power and checkpoint resume on both layouts
         run: |
           set -e
