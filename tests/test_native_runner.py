@@ -220,7 +220,7 @@ def test_native_baseline_carries_the_golden_firmware_defect_entries():
     def splices(baseline):
         return [e["regex"] for e in baseline.serial if e["issue"].endswith("#86")]
 
-    assert len(splices(golden)) == 2 and splices(native) == splices(golden)
+    assert len(splices(golden)) == 3 and splices(native) == splices(golden)
     key = ("release-smoke-16", 11, "assert_no_errors")
     shared = [
         [e["error"] for e in b.failures if (e["scenario"], e["step"], e["action"]) == key]
