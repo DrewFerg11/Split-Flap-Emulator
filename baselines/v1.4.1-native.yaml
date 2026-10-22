@@ -104,6 +104,15 @@ expected_failures:
       regex: '^unexpected serial error: \[\s*\d+\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
   - issue: DrewFerg11/Split-Flap-Display#54
     reason: >-
+      Item 1 race under stress: with a settings write racing concurrent reads, v1.4.1 either loses
+      the write (the old name reads back) or a read returns the compiled defaults.
+    scenario: settings-race-8
+    step: 5
+    action: settings_stress
+    error:
+      regex: '^round \d+: (GET /settings returned name .+ \(raced read\)|name is .+ after POST .+ succeeded \(lost write\))$'
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
       Item 1 race, first-boot flow: POST /settings returns success but the web task's writes are
       dropped, so the reboot keeps the 16-module default layout and never shows WIFI ERR.
     scenario: first-boot-8
