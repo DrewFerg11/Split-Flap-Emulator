@@ -320,6 +320,8 @@ def test_faults_normalize_with_reproducible_per_module_streams(document):
         ({"i2c": "disappear", "disappear_at": 1e-10}, "guest seconds > 0"),
         ({"i2c": "disappear", "disappear_at": float("inf")}, "guest seconds > 0"),
         ({"i2c": "disappear", "disappear_at": 1e10}, "guest seconds > 0"),
+        ({"i2c": "disappear", "disappear_at": 2e299}, "guest seconds > 0"),
+        ({"i2c": "disappear", "disappear_at": float("nan")}, "guest seconds > 0"),
         ({"sensor": "inverted", "colour": "red"}, "colour"),
     ],
 )
