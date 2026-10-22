@@ -19,6 +19,7 @@ ACTIONS = {
     "sleep_guest",
     "mqtt_publish",
     "wait_mqtt",
+    "settings_stress",
 }
 
 

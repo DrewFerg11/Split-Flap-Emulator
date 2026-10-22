@@ -1034,3 +1034,79 @@ def test_boot_executor_excuses_only_explained_stalls(context):
     stalled(context, 2)
     with pytest.raises(ExecutionFailed, match="model faults"):
         BootExecutor(2, {}, golden_baseline()).execute(context)
+
+
+def settings_device(behaviour):
+    """A fake /settings endpoint: `ok`, `raced` (reads during a write see defaults) or `lost`."""
+    state = {"name": "My Display", "writing": threading.Event()}
+
+    class Handler(BaseHTTPRequestHandler):
+        def reply(self, document):
+            body = json.dumps(document).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if behaviour == "raced" and state["writing"].is_set():
+                return self.reply({"name": "My Display"})
+            self.reply({"name": state["name"]})
+
+        def do_POST(self):
+            name = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["name"]
+            state["writing"].set()
+            time.sleep(0.05)
+            if behaviour != "lost" or name == "stress-1":
+                state["name"] = name
+            state["writing"].clear()
+            self.reply({"type": "success"})
+
+        def log_message(self, *args):
+            pass
+
+    return ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+
+
+@pytest.mark.parametrize(
+    "behaviour, error",
+    [
+        ("ok", None),
+        ("raced", r"round 2: GET /settings returned name 'My Display', expected 'stress-1' or"),
+        ("lost", r"round 2: name is 'stress-1' after POST 'stress-2' succeeded \(lost write\)"),
+    ],
+)
+def test_settings_stress_detects_raced_reads_and_lost_writes(context, behaviour, error):
+    device = settings_device(behaviour)
+    thread = threading.Thread(target=device.serve_forever, daemon=True)
+    thread.start()
+    try:
+        context.endpoint = f"http://127.0.0.1:{device.server_port}"
+        context.deadline = time.monotonic() + 30
+        engine = executor([{"settings_stress": {"rounds": 3, "readers": 4}}])
+        if error is None:
+            engine.execute(context)
+            assert engine.results[0]["actual"] == {"rounds": 3, "reads": 12}
+        else:
+            with pytest.raises(ExecutionFailed, match=error):
+                engine.execute(context)
+    finally:
+        device.shutdown()
+        device.server_close()
+        thread.join(2)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        {},
+        {"rounds": 0},
+        {"rounds": 501},
+        {"rounds": True},
+        {"rounds": 3, "readers": 17},
+        {"rounds": 3, "x": 1},
+    ],
+)
+def test_settings_stress_parameters_are_validated(value):
+    with pytest.raises(ValueError):
+        executor([{"settings_stress": value}])

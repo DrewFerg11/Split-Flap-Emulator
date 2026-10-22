@@ -1,0 +1,17 @@
+version: 1
+name: settings-race-8
+timeout: 600
+# Settings race stress (SFD#54, #24): 30 rounds, each a POST /settings name change raced
+# against four concurrent GET /settings, then a read-back. Raced reads return compiled
+# defaults; lost writes leave the old name.
+steps:
+  - wait_serial: "=== Split Flap Display ==="
+    timeout: 120
+  - wait_serial: "AP IP Address: http://192.168.4.1"
+    timeout: 60
+  - wait_display: {text: XXXXXXXX}
+    timeout: 120
+  - assert_no_errors: {fresh_nvs: true, default_missing_bus1: true}
+  - settings_stress: {rounds: 30, readers: 4}
+    timeout: 300
+  - assert_no_errors: {}

@@ -1,0 +1,27 @@
+version: 1
+name: clock-soak-native-8
+timeout: 3600
+# Long soak (#24): three guest hours of time mode, one display update a minute (180 moves).
+# Run it with --speed 50: one guest hour then takes about 72 wall seconds on fixed firmware.
+# Step timeouts (wall seconds) leave room for slower builds; v1.4.1's NOT_FOUND log flood
+# (SFD#84) cuts its effective speed to about 8x. Native only.
+modes: [native]
+clock: {start: "2027-06-15T08:58:50Z", sync: boot}
+nvs:
+  config:
+    mode: 3
+    timeFormat: "{HH}{MM}"
+    wire1Addresses: ""
+    wire1Offsets: ""
+steps:
+  - wait_display: {text: "  0859  "}
+    timeout: 120
+  - wait_display: {text: "  0900  "}
+    timeout: 60
+  - wait_display: {text: "  1000  "}
+    timeout: 900
+  - wait_display: {text: "  1100  "}
+    timeout: 900
+  - wait_display: {text: "  1200  "}
+    timeout: 900
+  - assert_no_errors: {}

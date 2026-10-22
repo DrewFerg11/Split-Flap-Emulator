@@ -224,6 +224,20 @@ settings, sends HELLO, and verifies exact centered ` HELLO  `.
 rows ` HELLO  ` / ` WORLD  `, followed by the explicit idempotent repeat.
 `homing-random.yaml` asserts the intermediate all-blank settlement and zero
 stalls/anomalies before completing startup X. CI runs three recorded seeds.
+`settings-race-8.yaml` stresses the settings store
+([SFD#54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54), #24) with the
+`settings_stress` step: each of `rounds` (1–500) sends one `POST /settings` with a new
+`name` (`stress-<round>`) while `readers` (0–16, default 4) `GET /settings` run at the same
+time, then reads the name back. A concurrent read that sees anything but the previous or
+the new name is a raced read; a read-back without the new name is a lost write. Either
+fails the step with the round and the values seen. v1.4.1 loses the first write in native
+mode, so golden runs record it as a #54 expected failure; firmware with the fix passes
+all 30 rounds.
+`clock-soak-native-8.yaml` (native only) runs time mode for three guest hours, 180 display
+updates, and then asserts no errors and no model faults. Run it with `--speed 50`: fixed
+firmware takes about 3.5 wall minutes. It isn't in the golden CI lane because v1.4.1's
+`NOT_FOUND` log flood ([SFD#84](https://github.com/DrewFerg11/Split-Flap-Display/issues/84))
+slows that build to roughly 8×; it is meant for checking firmware changes.
 
 ## Evidence and validation
 
