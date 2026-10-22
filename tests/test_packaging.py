@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import hashlib
 import json
+import re
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,6 +20,7 @@ from flapsim.resources import resolve_resource
 from tools.publish_image import (
     ARCHITECTURES,
     IMAGE,
+    MIRROR_PATTERN,
     REQUIRED_CASES,
     Registry,
     load_candidate,
@@ -402,6 +404,30 @@ def test_release_jobs_cannot_bypass_owner_approval(mutate, message):
     mutate(publish["jobs"])
     with pytest.raises(AssertionError, match=message):
         check_release_approval(publish)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "owner/name",
+        "Owner/name",
+        "owner/nAme-x",
+        "owner.baz-bar",
+        "drewferg11/split-flap-emulator",
+        "a/b",
+        "a//b",
+        "a/b/c",
+        "-a/b",
+    ],
+)
+def test_authorize_preflight_accepts_the_same_mirrors_as_the_publisher(name):
+    # The authorize job checks vars.DOCKERHUB_IMAGE before approval; publish_image checks
+    # it again before pushing. A name only one of them accepts would fail after approval.
+    workflow = Path(__file__).resolve().parents[1] / ".github/workflows/release.yml"
+    preflight = re.search(r'"\$DOCKERHUB_IMAGE" =~ (\S+) \]\]', workflow.read_text())
+    assert preflight, "authorize no longer checks DOCKERHUB_IMAGE"
+    expected = bool(re.fullmatch(MIRROR_PATTERN, "docker.io/" + name))
+    assert bool(re.fullmatch(preflight.group(1), name)) == expected
 
 
 def test_only_clean_checked_out_commits_on_main_can_be_published(tmp_path, monkeypatch):

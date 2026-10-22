@@ -92,12 +92,16 @@ jobs:
         env:
           RELEASE_EVENT: ${{ github.event_name }}
           RELEASE_TAG: ${{ github.ref_name }}
+          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
         run: |
+          # Same mirror flag as the publish step, so its validation runs before anything is built.
+          mirror=()
+          if [ -n "$DOCKERHUB_IMAGE" ]; then mirror=(--mirror "docker.io/$DOCKERHUB_IMAGE"); fi
           if test "$RELEASE_EVENT" = push; then
-            python -m tools.publish_image --validate-only --revision "$GITHUB_SHA" \
+            python -m tools.publish_image --validate-only --revision "$GITHUB_SHA" "${mirror[@]}" \
               --tag "$RELEASE_TAG" --out runs/release-validation.json
           else
-            python -m tools.publish_image --validate-only --revision "$GITHUB_SHA" \
+            python -m tools.publish_image --validate-only --revision "$GITHUB_SHA" "${mirror[@]}" \
               --out runs/release-validation.json
           fi
 
@@ -148,6 +152,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - name: Promote verified bits and record immutable reference
+        id: promote
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
@@ -161,12 +166,14 @@ jobs:
             --candidate runs/candidates/verified-container-candidate-arm64 "${mirror[@]}" \
             --revision "$GITHUB_SHA" --tag "$RELEASE_TAG" --out runs/publication.json
           cat runs/publication.json >> "$GITHUB_STEP_SUMMARY"
+          # The description sync below follows this decision instead of re-deriving it.
+          echo "mirror=${DOCKERHUB_IMAGE:+docker.io/$DOCKERHUB_IMAGE}" >> "$GITHUB_OUTPUT"
       # Best effort: the image is already published and digest-checked. A token without the
       # "Read, Write, Delete" scope cannot update the description; that only warns.
       - name: Sync the Docker Hub description from the README
-        if: vars.DOCKERHUB_IMAGE != ''
+        if: steps.promote.outputs.mirror != ''
         env:
-          DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+          MIRROR: ${{ steps.promote.outputs.mirror }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
@@ -178,7 +185,7 @@ jobs:
           jq -n --rawfile full README.md \
             '{full_description: $full, description: "Split-Flap Display firmware emulator (QEMU and native)"}' \
             > runs/dockerhub-description.json
-          code=$(curl -sS -X PATCH "https://hub.docker.com/v2/repositories/${DOCKERHUB_IMAGE}/" \
+          code=$(curl -sS -X PATCH "https://hub.docker.com/v2/repositories/${MIRROR#docker.io/}/" \
             -H "Authorization: JWT $JWT" -H 'Content-Type: application/json' \
             --data @runs/dockerhub-description.json -o /dev/null -w '%{http_code}')
           if [ "$code" != 200 ]; then
