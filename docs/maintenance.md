@@ -212,12 +212,13 @@ One-time environment settings (Settings → Environments → `release`):
 - **Deployment branches and tags:** selected tags only, rule `v*.*.*`.
 - **Allow administrators to bypass:** off.
 
-To release: first merge a change that sets `version` in `pyproject.toml` to the new
-version, renames `## [Unreleased]` in [`CHANGELOG.md`](../CHANGELOG.md) to the new version and date
-(adding a fresh empty `## [Unreleased]`), and checks [stability](stability.md) still matches the release
-(the `validate` job rejects a tag that does not match it, and the `publish` job
-refuses a version that is already published, but only after both architectures have been
-built and verified), then push the tag
+The version is not stored in the repository: setuptools-scm derives it from the git tag, so
+there is no version to bump. To release: first merge a change that renames `## [Unreleased]` in
+[`CHANGELOG.md`](../CHANGELOG.md) to the new version and date (adding a fresh empty
+`## [Unreleased]`) and checks [stability](stability.md) still matches the release (the `validate`
+job rejects a tag that is not a clean `vX.Y.Z` or `vX.Y.Z-rc.N` resolution of the checkout, and
+the `publish` job refuses a version that is already published, but only after both architectures
+have been built and verified), then push the tag
 (`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`), open the run, choose
 **Review deployments → Approve**, then take the digest from the publish job's summary or
 its `container-publication-result` artifact.
@@ -258,8 +259,8 @@ Repository settings (cannot be checked from the repository itself):
 Repository state:
 
 - [ ] `main` CI is green at the commit to be tagged, and that commit is on `origin/main`.
-- [ ] `pyproject.toml` `version` equals the tag without the `v`. A prerelease tag such as
-      `v0.2.0-rc.1` matches version `0.2.0rc1`. Use a prerelease for a dry run: it never
+- [ ] The tag is on that commit. setuptools-scm derives the version from it: `v0.2.0-rc.1` gives
+      `0.2.0rc1`, and an untagged build gives a `.devN+g<sha>` version that `validate` rejects. Use a prerelease for a dry run: it never
       moves `latest`, whereas a stable tag does when no higher stable version exists.
 - [ ] The version is not already published in GHCR or on Docker Hub. Nothing before the
       `publish` job checks this, so a duplicate wastes a full verification run. Versions are

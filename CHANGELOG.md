@@ -6,8 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-Merged to `main` after the `v0.1.0` tag (`3ba32a9`) and not yet released. The version in
-`pyproject.toml` is still `0.1.0`; it changes in the release PR.
+Merged to `main` after the `v0.1.0` tag (`3ba32a9`) and not yet released.
 
 ### Added
 
@@ -26,9 +25,11 @@ Merged to `main` after the `v0.1.0` tag (`3ba32a9`) and not yet released. The ve
 ### Changed
 
 - Long-running scenarios moved from PR checks to a nightly workflow (#68).
+- The package version is now derived from the git tag at build time (setuptools-scm) instead of
+  `pyproject.toml`, so a release no longer needs a version-bump PR.
 - Docs reorganised: process and planning docs moved to `docs/history/`, a two-part index in
   `docs/README.md` separates using from maintaining flapsim, README compares QEMU and native modes,
-  and the release steps include the version bump (#41, #45, #55, #66, #67, #71).
+  and the release steps are documented (#41, #45, #55, #66, #67, #71).
 
 ### Fixed
 

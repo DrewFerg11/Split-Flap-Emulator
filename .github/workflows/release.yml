@@ -87,7 +87,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m pip install 'packaging>=25,<27'
+      - run: python -m pip install 'packaging>=25,<27' 'setuptools-scm>=8'
       - name: Require a commit on main; tags must match the package version
         env:
           RELEASE_EVENT: ${{ github.event_name }}
@@ -129,7 +129,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m pip install 'packaging>=25,<27'
+      - run: python -m pip install 'packaging>=25,<27' 'setuptools-scm>=8'
       - uses: actions/download-artifact@v4
         with:
           pattern: verified-container-candidate-*

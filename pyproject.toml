@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools>=77", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "flapsim"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Run unmodified Split-Flap Display firmware on virtual ESP32 hardware"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -13,10 +13,15 @@ dependencies = ["PyYAML>=6,<7"]
 
 [project.optional-dependencies]
 control = ["starlette>=0.47,<1", "uvicorn>=0.35,<1"]
-dev = ["pytest>=8,<10", "ruff==0.17.1", "packaging>=25,<27"]
+dev = ["pytest>=8,<10", "ruff==0.17.1", "packaging>=25,<27", "setuptools-scm>=8"]
 
 [project.scripts]
 flapsim = "flapsim.cli:main"
+
+[tool.setuptools_scm]
+# The version comes from the git tag (vX.Y.Z or vX.Y.Z-rc.N), never from this file. Builds without
+# git metadata (the container build, which excludes .git) set SETUPTOOLS_SCM_PRETEND_VERSION_FOR_FLAPSIM.
+fallback_version = "0+unknown"
 
 [tool.setuptools.packages.find]
 include = ["flapsim*"]
