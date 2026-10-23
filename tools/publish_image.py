@@ -7,13 +7,13 @@ import json
 import os
 import re
 import subprocess
-import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
 from packaging.version import Version
+from setuptools_scm import get_version
 
 REPOSITORY = "drewferg11/split-flap-emulator"
 IMAGE = "ghcr.io/" + REPOSITORY
@@ -53,8 +53,9 @@ def validate_checkout(revision, tag=None):
     subprocess.run(["git", "merge-base", "--is-ancestor", revision, "origin/main"], check=True)
     if subprocess.check_output(["git", "status", "--porcelain"], text=True).strip():
         raise ValueError("publication checkout has uncommitted source changes")
-    project = tomllib.loads(Path("pyproject.toml").read_text())
-    package_version = project["project"]["version"]
+    # The version is derived from the git tag (setuptools-scm); a tag that did not resolve to
+    # itself, such as a checkout without the tag, yields a dev/local version and is rejected below.
+    package_version = get_version(root=".")
     return release_version(tag, package_version) if tag else (package_version, False)
 
 

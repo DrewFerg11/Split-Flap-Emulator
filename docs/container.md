@@ -119,7 +119,7 @@ python3 -m venv .venv
 python -m pip install -e '.[dev]'
 python -m tools.verify_model --fetch-only
 source_revision=$(git rev-parse HEAD)
-package_version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')
+package_version=$(python -m setuptools_scm)
 docker build --build-arg BUILD_JOBS=4 \
   --build-arg SOURCE_REVISION="$source_revision" \
   --build-arg EMULATOR_VERSION="$package_version" -t flapsim:candidate .
@@ -149,8 +149,8 @@ builds are not claimed to be bit-for-bit reproducible.
 ## Trusted publication
 
 `release.yml` accepts trusted `v*` tags whose commit belongs to `origin/main`
-and whose SemVer version matches `pyproject.toml` (PEP 440 prerelease equivalence
-is checked). Every run first waits in the `authorize` job for the owner's approval
+and whose SemVer version is the version setuptools-scm derives from that tag (PEP 440
+prerelease equivalence is checked, and a tag the checkout does not resolve to is rejected). Every run first waits in the `authorize` job for the owner's approval
 through the `release` environment ([setup](maintenance.md#release-approval)); nothing
 is built or published before that. A manual dispatch must select a version tag and
 verifies only; it cannot push. No PR publishes.

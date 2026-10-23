@@ -435,7 +435,7 @@ def test_only_clean_checked_out_commits_on_main_can_be_published(tmp_path, monke
         return subprocess.check_output(["git", *arguments], cwd=tmp_path, text=True).strip()
 
     git("init", "-b", "main")
-    (tmp_path / "pyproject.toml").write_text('[project]\nversion = "1.2.3"\n')
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "fixture"\n')
     git("add", "pyproject.toml")
     git(
         "-c",
@@ -449,7 +449,23 @@ def test_only_clean_checked_out_commits_on_main_can_be_published(tmp_path, monke
     revision = git("rev-parse", "HEAD")
     git("update-ref", "refs/remotes/origin/main", revision)
     monkeypatch.chdir(tmp_path)
+    # The version is the tag itself, so an untagged checkout cannot be released under any tag.
+    with pytest.raises(ValueError, match="does not match package version"):
+        validate_checkout(revision, "v1.2.3")
+    git(
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "tag",
+        "-a",
+        "v1.2.3",
+        "-m",
+        "release",
+    )
     assert validate_checkout(revision, "v1.2.3") == ("1.2.3", True)
+    with pytest.raises(ValueError, match="does not match package version"):
+        validate_checkout(revision, "v1.2.4")
     (tmp_path / "uncommitted").write_text("change")
     with pytest.raises(ValueError, match="uncommitted"):
         validate_checkout(revision, "v1.2.3")

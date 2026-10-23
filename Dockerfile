@@ -20,6 +20,10 @@ RUN --mount=type=secret,id=ca_bundle \
     && tar --exclude-vcs --exclude='__pycache__' -cJf /source-archives/qemu.tar.xz \
       -C build/qemu/src .
 ARG SOURCE_REVISION=unrecorded
+# .git is not in the build context, so setuptools-scm cannot read the tag: the caller passes the
+# version it resolved from the checkout.
+ARG EMULATOR_VERSION=0+unrecorded
+ENV SETUPTOOLS_SCM_PRETEND_VERSION_FOR_FLAPSIM=$EMULATOR_VERSION
 COPY . .
 RUN --mount=type=secret,id=ca_bundle \
     if [ -f /run/secrets/ca_bundle ]; then \
@@ -29,7 +33,7 @@ RUN --mount=type=secret,id=ca_bundle \
     && /build-venv/bin/pip wheel --wheel-dir /wheels '.[control]' \
     && tar --exclude-vcs --exclude=build --exclude='*.egg-info' --exclude='__pycache__' \
       -cJf /source-archives/flapsim.tar.xz . \
-    && python3 tools/build_provenance.py --revision "$SOURCE_REVISION" \
+    && python3 tools/build_provenance.py --revision "$SOURCE_REVISION" --version "$EMULATOR_VERSION" \
       --out /source-archives/provenance.json
 # Native mode: shim/model sources and the pinned MIT libraries for offline firmware builds. No
 # firmware is built or shipped here; users mount a firmware checkout (see docs/container.md).
@@ -52,7 +56,7 @@ RUN --mount=type=secret,id=ca_bundle \
     && mkdir -p /work \
     && chown 10001:10001 /work
 ARG SOURCE_REVISION=unrecorded
-ARG EMULATOR_VERSION=unrecorded
+ARG EMULATOR_VERSION=0+unrecorded
 LABEL org.opencontainers.image.source="https://github.com/DrewFerg11/Split-Flap-Emulator" \
       org.opencontainers.image.revision="$SOURCE_REVISION" \
       org.opencontainers.image.version="$EMULATOR_VERSION" \
