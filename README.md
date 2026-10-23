@@ -1,14 +1,32 @@
-# Split-Flap-Emulator
+<p align="center">
+  <img src="docs/images/poc-homing.gif" width="800" alt="Real Split-Flap Display firmware homing 8 virtual modules" />
+</p>
+
+<h1 align="center">Split-Flap-Emulator</h1>
+
+<p align="center">
+  <a href="https://github.com/DrewFerg11/Split-Flap-Emulator/tags"><img alt="Latest version" src="https://img.shields.io/github/v/tag/DrewFerg11/Split-Flap-Emulator?sort=semver&label=version" /></a>
+  <a href="https://github.com/DrewFerg11/Split-Flap-Emulator/actions/workflows/ci-test.yml"><img alt="CI / Test" src="https://img.shields.io/github/actions/workflow/status/DrewFerg11/Split-Flap-Emulator/ci-test.yml?branch=main&label=test" /></a>
+  <a href="https://github.com/DrewFerg11/Split-Flap-Emulator/actions/workflows/release.yml"><img alt="Release / Tag" src="https://img.shields.io/github/actions/workflow/status/DrewFerg11/Split-Flap-Emulator/release.yml?label=release" /></a>
+  <a href="https://github.com/DrewFerg11/Split-Flap-Emulator/pkgs/container/split-flap-emulator"><img alt="Container: ghcr.io" src="https://img.shields.io/badge/container-ghcr.io-blue?logo=docker&logoColor=white" /></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/DrewFerg11/Split-Flap-Emulator/commits/main"><img alt="Last commit" src="https://img.shields.io/github/last-commit/DrewFerg11/Split-Flap-Emulator" /></a>
+  <a href="./LICENSE"><img alt="License: GPL-2.0" src="https://img.shields.io/github/license/DrewFerg11/Split-Flap-Emulator" /></a>
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue" />
+  <img alt="Modes: QEMU and native" src="https://img.shields.io/badge/modes-qemu%20%7C%20native-informational" />
+  <a href="https://github.com/DrewFerg11/Split-Flap-Display"><img alt="Firmware: Split-Flap Display" src="https://img.shields.io/badge/firmware-Split--Flap%20Display-orange" /></a>
+</p>
+
+---
 
 Run the real [Split-Flap Display](https://github.com/DrewFerg11/Split-Flap-Display) firmware without the hardware.
-The emulator runs release builds on an emulated ESP32, with virtual I²C modules, stepper motors, character drums and
-hall sensors in place of the real display. Release builds can then be tested automatically in CI or watched on a
-virtual display.
+Virtual I²C modules, stepper motors, character drums and hall sensors stand in for the physical display, so
+firmware can be tested automatically in CI or watched on a virtual display.
 
 The Docker image is `ghcr.io/drewferg11/split-flap-emulator`; the command inside it (and the Python package) is
 `flapsim`.
-
-![Real v1.4.0 firmware homing 8 virtual modules](docs/images/poc-homing.gif)
 
 ## Two ways to run it
 
