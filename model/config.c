@@ -97,7 +97,7 @@ static char *load(const char *config_path, const char *mode) {
     fs_model_close();
     memset(&fs, 0, sizeof(fs));
     for (int b = 0; b < 2; b++)
-        fs.buses[b].selected = -1;
+        fs.buses[b].selected = fs.buses[b].hidden = -1;
     struct json_object *config = config_path ? json_object_from_file(config_path) : NULL;
     if (!config || !json_object_is_type(config, json_type_object)) {
         fs_fail("cannot read normalized model JSON: %s", config_path ? config_path : "(unset)");
@@ -153,14 +153,10 @@ static char *load(const char *config_path, const char *mode) {
                 fs_fail("magnet_position exceeds module steps_per_rotation");
             if (module->window > module->steps)
                 fs_fail("sensor_window exceeds module steps_per_rotation");
-            struct json_object *faults;
-            if (json_object_object_get_ex(entry, "faults", &faults)) {
-                if (!fs_parse_faults(faults, module, true))
-                    fs_fail("normalized module faults are invalid");
-                if (module->hall_fault || module->dead_motor || module->absent)
-                    fs.faults_enabled = true;
-            }
             module->angle = number(entry, "angle", 0, module->steps - 1);
+            fs_parse_faults(entry, module);
+            if (module->faults.configured)
+                fs.faults_enabled = true;
             module->phase = -1;
             module->latch = 0xffe1;
             if (i &&

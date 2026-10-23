@@ -12,10 +12,10 @@ from flapsim.hardware import normalize_hardware
     [
         None,
         {},
-        {"hall": None},
+        {"sensor": None},
         {"motor": "slip"},
-        {"present": 1},
-        {"hall": "inverted"},
+        {"i2c": 1},
+        {"sensor": "inverted"},
         {"read_corruption": True},
     ],
 )
@@ -39,11 +39,12 @@ def test_fault_config_is_literal_resolved_and_does_not_change_mechanical_draws()
         "start_angles": "random",
     }
     normal = normalize_hardware(document, seed=7)
-    document["buses"][0]["modules"][0] = {"addr": 32, "faults": {"present": False}}
+    document["buses"][0]["modules"][0] = {"addr": 32, "faults": {"i2c": "missing"}}
     faulted = normalize_hardware(document, seed=7)
-    assert faulted["modules"][0].pop("faults") == {**DEFAULT_FAULTS, "present": False}
+    configured = faulted["modules"][0].pop("faults")
+    assert configured["i2c"] == "missing" and 0 < configured["seed"] <= 0xFFFFFFFF
     assert faulted == normal
-    assert resolved_faults({}) == DEFAULT_FAULTS
+    assert resolved_faults({}) == {**DEFAULT_FAULTS, "seed": 0, "configured": False}
 
 
 def test_reset_uart_fragment_requires_pinned_banner_known_prefix_and_observed_reset():

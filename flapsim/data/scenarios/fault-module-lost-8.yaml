@@ -1,0 +1,43 @@
+version: 1
+name: fault-module-lost-8
+timeout: 600
+# Fault injection (#19), with --hardware esp32-8-single-module-lost: module 0x25 stops
+# answering on I2C 90 guest seconds in. The firmware must log the failed writes and keep
+# driving the other seven modules.
+steps:
+  - wait_serial: "=== Split Flap Display ==="
+    timeout: 120
+  - wait_serial: "AP IP Address: http://192.168.4.1"
+    timeout: 60
+  - wait_display: {text: XXXXXXXX}
+    timeout: 180
+  - assert_no_errors: {fresh_nvs: true, default_missing_bus1: true}
+  - http:
+      method: POST
+      path: /settings
+      body: {wire1Addresses: "", wire1Offsets: ""}
+      status: 200
+      json: {type: success}
+    timeout: 60
+  - wait_serial: "Reset reason: software reset"
+    timeout: 120
+  - wait_serial: "Homing"
+    timeout: 60
+  - wait_display: {text: "WIFI ERR"}
+    timeout: 180
+  - assert_no_errors: {fresh_nvs: true}
+  # Past the fault time (90 s), whatever guest time the reboot reached.
+  - sleep_guest: 90
+  - http:
+      method: POST
+      path: /text
+      body: {mode: single, words: [HELLO], center: true}
+      status: 200
+      json: {type: success}
+    timeout: 30
+  - wait_serial: "Error writing data to module 37, error code: 2"
+    timeout: 60
+  - wait_display: {text: " HELL.  "}
+    timeout: 120
+  # The lost module's write failures are the only errors allowed (firmware numbers it 37).
+  - assert_no_errors: {fresh_nvs: true, faulted_modules: [0x25]}

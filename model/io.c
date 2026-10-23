@@ -50,6 +50,9 @@ static struct json_object *identity(int64_t guest_ns) {
     }
     total.anomalies = fs.totals.anomalies;
     json_object_object_add(object, "counters", counters(total));
+    struct json_object *faults = fs_fault_summary();
+    if (faults)
+        json_object_object_add(object, "faults", faults);
     return object;
 }
 
@@ -114,6 +117,8 @@ static struct json_object *snapshot(int64_t guest_ns, bool mechanics) {
             struct json_object *effects = json_object_new_object();
             integer(effects, "blocked_steps", module->blocked_steps);
             integer(effects, "nacks", module->nacks);
+            integer(effects, "rng", module->faults.rng);
+            integer(effects, "events", module->faults.events);
             json_object_object_add(entry, "fault_counters", effects);
         }
         if (mechanics || fs.mechanics_revision) {

@@ -4,8 +4,6 @@
 int fs_hall(const FsModule *module) {
     bool present =
         (module->angle - module->magnet + module->steps) % module->steps < module->window;
-    if (module->hall_fault)
-        present = module->hall_fault == 1;
     return present != module->active_low;
 }
 

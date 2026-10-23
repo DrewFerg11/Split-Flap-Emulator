@@ -32,13 +32,16 @@ void fs_stepper_write(FsModule *module, uint16_t output) {
     }
     if (module->phase >= 0) {
         int delta = (phase - module->phase + 4) % 4;
-        if ((delta == 1 || delta == 3) && module->dead_motor) {
+        /* A dead or slipping motor (#19): the coils change but the rotor doesn't follow. */
+        if ((delta == 1 || delta == 3) && fs_fault_blocks_step(module)) {
             module->blocked_steps++;
             if (!module->observed_block) {
                 module->observed_block = true;
                 fs.fault_event_pending = true;
             }
-        } else if (delta == 1) {
+            delta = 0;
+        }
+        if (delta == 1) {
             module->angle = (module->angle + 1) % module->steps;
             module->counters.forward++;
         } else if (delta == 3) {

@@ -155,3 +155,35 @@ expected_failures:
     action: assert_no_errors
     error:
       regex: '^unexpected serial error: \[\s*\d+\]\[E\]\[Preferences\.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND$'
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race, as in release-smoke-8 step 10: the pre-reboot single-bus settings write is lost, so
+      the reboot keeps sixteen modules and never shows the WIFI ERR text (here with the faulted module).
+    scenario: fault-stuck-sensor-8
+    step: 8
+    action: wait_display
+    error: timeout
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race, as in release-smoke-8 step 14: POST /text returns success but the mode write is
+      lost, so the drums never move.
+    scenario: fault-stuck-sensor-8
+    step: 10
+    action: wait_display
+    error: timeout
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race, as in release-smoke-8 step 10: the pre-reboot single-bus settings write is lost, so
+      the reboot keeps sixteen modules and never shows WIFI ERR.
+    scenario: fault-module-lost-8
+    step: 8
+    action: wait_display
+    error: timeout
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1 race, as in release-smoke-8 step 14: POST /text returns success but the mode write is
+      lost, so the drums never move.
+    scenario: fault-module-lost-8
+    step: 13
+    action: wait_display
+    error: timeout

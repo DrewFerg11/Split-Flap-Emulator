@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from flapsim.faults import resolved_faults, validate_faults
+from flapsim.faults import KINDS, PARAMETERS
 from flapsim.resources import resolve_resource
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +17,52 @@ MECHANICAL_SALTS = {
     "sensor_window": 0x7E95761E,
     "sensor_polarity": 0x9E3779B9,
 }
+
+
+FAULT_SALT = 0x5BD1E995
+FAULT_KINDS = {name: choices - {"ok"} for name, choices in KINDS.items()}
+# Startup YAML uses seconds; resolved evidence records integer nanoseconds.
+FAULT_PARAMETERS = {**PARAMETERS, "disappear": "disappear_at"}
+
+
+def probability(value, name):
+    if type(value) not in (int, float) or isinstance(value, bool) or not 0 < value <= 1:
+        raise ValueError(f"{name} must be a probability in (0, 1]")
+    return float(value)
+
+
+def normalize_faults(value, where, seed):
+    """Per-module injected faults (#19): at most one sensor, motor and I2C fault each."""
+    mapping(value, f"{where} faults", set(), {*FAULT_KINDS, *FAULT_PARAMETERS.values()})
+    if not value.keys() & FAULT_KINDS.keys():
+        raise ValueError(f"{where} faults must name a sensor, motor or i2c fault")
+    normalized = {}
+    for kind, choices in FAULT_KINDS.items():
+        if kind in value:
+            if type(value[kind]) is not str or value[kind] not in choices:
+                raise ValueError(f"{where} faults.{kind} must be one of {sorted(choices)}")
+            normalized[kind] = value[kind]
+    wanted = {FAULT_PARAMETERS[f] for f in normalized.values() if f in FAULT_PARAMETERS}
+    given = value.keys() & set(FAULT_PARAMETERS.values())
+    if wanted != given:
+        raise ValueError(
+            f"{where} faults need exactly the parameters {sorted(wanted)}, got {sorted(given)}"
+        )
+    for name in given:
+        if name == "disappear_at":
+            seconds = value[name]
+            # Checked after rounding: the model needs a positive int64 nanosecond time.
+            if (
+                type(seconds) not in (int, float)
+                or not 0 < seconds < 2**63 / 1_000_000_000
+                or not 0 < round(seconds * 1_000_000_000) < 2**63
+            ):
+                raise ValueError(f"{where} faults.disappear_at must be guest seconds > 0")
+            normalized["disappear_at_ns"] = round(seconds * 1_000_000_000)
+        else:
+            normalized[name] = probability(value[name], f"{where} faults.{name}")
+    normalized["seed"] = seed
+    return normalized
 
 
 class HardwareLoader(yaml.SafeLoader):
@@ -147,11 +193,9 @@ def normalize_hardware(document, *, seed=None):
             overrides = {}
             address = entry
             if isinstance(entry, dict):
-                mapping(entry, "module", {"addr"}, set(MECHANICAL_SALTS) | {"faults"})
+                mapping(entry, "module", {"addr"}, {*MECHANICAL_SALTS, "faults"})
                 address = entry["addr"]
                 overrides = {k: v for k, v in entry.items() if k != "addr"}
-                if "faults" in overrides:
-                    validate_faults(overrides["faults"], partial=True)
             integer(address, f"bus {bus_id} module address", 0x08, 0x77)
             if bus_id == 0 and address == 0x48:
                 raise ValueError(
@@ -195,6 +239,8 @@ def normalize_hardware(document, *, seed=None):
     )
     modules = []
     for i, (bus_id, address, overrides) in enumerate(identities):
+        overrides = dict(overrides)
+        faults = overrides.pop("faults", None)
         try:
             ranges, polarity = mechanical_spec({**drum, **overrides})
         except ValueError as error:
@@ -211,16 +257,19 @@ def normalize_hardware(document, *, seed=None):
         if polarity == "random":
             polarity = "active-low" if draws["sensor_polarity"][i] & 1 else "active-high"
         angle = starts[i] % geometry["steps_per_rotation"] if starts is not None else angles[i]
-        modules.append(
-            {
-                "bus": bus_id,
-                "addr": address,
-                "angle": angle,
-                **geometry,
-                "sensor_polarity": polarity,
-                **({"faults": resolved_faults(overrides)} if "faults" in overrides else {}),
-            }
-        )
+        module = {
+            "bus": bus_id,
+            "addr": address,
+            "angle": angle,
+            **geometry,
+            "sensor_polarity": polarity,
+        }
+        if faults is not None:
+            # A nonzero per-module stream, reproducible from the run seed.
+            stream = (mechanical_seed ^ FAULT_SALT ^ (bus_id << 8 | address)) & 0xFFFFFFFF
+            where = f"module bus {bus_id} addr 0x{address:02x}"
+            module["faults"] = normalize_faults(faults, where, stream or FAULT_SALT)
+        modules.append(module)
     return {
         "schema_version": 1,
         "chip": "esp32",

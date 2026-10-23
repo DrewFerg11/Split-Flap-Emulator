@@ -1,0 +1,37 @@
+version: 1
+name: fault-stuck-sensor-8
+timeout: 600
+# Fault injection (#19), with --hardware esp32-8-single-stuck-sensor: module 0x23's hall
+# sensor never sees the magnet, so it can't home and lands anywhere ('.'). The firmware must
+# keep going and every other module must still display correctly.
+steps:
+  - wait_serial: "=== Split Flap Display ==="
+    timeout: 120
+  - wait_serial: "AP IP Address: http://192.168.4.1"
+    timeout: 60
+  - wait_display: {text: "XXX.XXXX"}
+    timeout: 180
+  - assert_no_errors: {fresh_nvs: true, default_missing_bus1: true}
+  - http:
+      method: POST
+      path: /settings
+      body: {wire1Addresses: "", wire1Offsets: ""}
+      status: 200
+      json: {type: success}
+    timeout: 60
+  - wait_serial: "Reset reason: software reset"
+    timeout: 120
+  - wait_serial: "Homing"
+    timeout: 60
+  - wait_display: {text: "WIF. ERR"}
+    timeout: 180
+  - http:
+      method: POST
+      path: /text
+      body: {mode: single, words: [HELLO], center: true}
+      status: 200
+      json: {type: success}
+    timeout: 30
+  - wait_display: {text: " HE.LO  "}
+    timeout: 120
+  - assert_no_errors: {fresh_nvs: true}

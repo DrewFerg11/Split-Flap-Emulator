@@ -15,10 +15,10 @@ from flapsim.state import display_aligned
 from tools.verify_native import KnownSerial
 
 CASES = {
-    "hall-active": {"hall": "stuck_active"},
-    "hall-inactive": {"hall": "stuck_inactive"},
+    "hall-active": {"sensor": "stuck_active"},
+    "hall-inactive": {"sensor": "stuck_inactive"},
     "motor-dead": {"motor": "dead"},
-    "absent": {"present": False},
+    "absent": {"i2c": "missing"},
 }
 
 
@@ -146,10 +146,8 @@ class FaultProbe:
             elif self.case == "absent":
                 observed = effects["nacks"] > 0 and target["latch"] == frozen_latch
             else:
-                level = (self.case == "hall-active") != (
-                    target["mechanics"]["sensor_polarity"] == "active-low"
-                )
-                observed = target["hall"] == level and target["counters"]["reads"] > 0
+                # The snapshot is physical truth; events count a changed firmware read.
+                observed = effects["events"] > 0 and target["counters"]["reads"] > 0
             if healthy and observed:
                 if state["counters"]["stalls"] or state["counters"]["anomalies"]:
                     raise RuntimeError("unexpected model faults alongside injection")

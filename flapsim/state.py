@@ -4,7 +4,14 @@ import json
 import math
 from pathlib import Path
 
-from flapsim.faults import DEFAULT_FAULTS, resolved_faults, validate_fault_identity, validate_faults
+from flapsim.faults import (
+    DEFAULT_FAULTS,
+    resolved_faults,
+    validate_effective_faults,
+    validate_fault_identity,
+    validate_faults,
+    validate_summary,
+)
 
 MAX_CONTROL_ID = 2**53 - 1
 MECHANICS = {
@@ -164,8 +171,6 @@ def validate_state(state, hardware, *, require_settled=True):
     if faults_enabled:
         if state["initial_faults"] != initial_faults:
             raise ValueError("model initial faults do not match hardware")
-    elif any(f != DEFAULT_FAULTS for f in initial_faults):
-        raise ValueError("missing configured fault evidence")
     text, rows = "", ["", ""]
     for actual, expected in zip(modules, hardware["modules"], strict=True):
         if not isinstance(actual, dict) or any(
@@ -186,11 +191,15 @@ def validate_state(state, hardware, *, require_settled=True):
         faults = dict(DEFAULT_FAULTS)
         if faults_enabled:
             faults = validate_faults(actual.get("faults"))
+            validate_effective_faults(initial_faults[len(text)], faults)
             effects = actual.get("fault_counters")
             if (
                 not isinstance(effects, dict)
-                or set(effects) != {"blocked_steps", "nacks"}
-                or any(type(n) is not int or n < 0 for n in effects.values())
+                or set(effects) != {"blocked_steps", "nacks", "rng", "events"}
+                or any(type(n) is not int or not 0 <= n < 2**63 for n in effects.values())
+                or effects.get("rng", 2**32) >= 2**32
+                or bool(effects["rng"]) != bool(faults["seed"])
+                or effects["events"] < effects["blocked_steps"] + effects["nacks"]
             ):
                 raise ValueError("invalid observed fault counters")
         elif "faults" in actual or "fault_counters" in actual:
@@ -221,12 +230,15 @@ def validate_state(state, hardware, *, require_settled=True):
         actual.update(flap_position=position, flap_error=error)
         if revision or faults_enabled:
             present = ((angle - mechanics["magnet_position"]) % steps) < mechanics["sensor_window"]
-            if faults["hall"] != "normal":
-                present = faults["hall"] == "stuck_active"
             if actual["hall"] != (present != (mechanics["sensor_polarity"] == "active-low")):
                 raise ValueError("model hall does not match effective mechanics")
         text += char
         rows[expected["bus"]] += char
+    validate_summary(
+        state,
+        [m["faults"] for m in modules] if faults_enabled else initial_faults,
+        versioned=faults_enabled,
+    )
     if state.get("text") != text or state.get("rows") != rows:
         raise ValueError("model text/row data does not match module order")
     if any(sum(m["counters"][k] for m in modules) != state["counters"][k] for k in COUNTERS):

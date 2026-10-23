@@ -424,19 +424,19 @@ speed change. Its `capabilities.speed` remains false.
 `POST /api/emu/modules/0/32/mech` also accepts a strict nested fault patch:
 
 ```json
-{"id":1,"expected_revision":0,"patch":{"faults":{"hall":"stuck_inactive"}}}
+{"id":1,"expected_revision":0,"patch":{"faults":{"sensor":"stuck_inactive"}}}
 ```
 
 Faults and geometry share revisions, command IDs, audit ordering, latest receipts
-and reset/power persistence. Send only fields to change; `normal` / `present: true`
+and reset/power persistence. Send only fields to change; `ok`
 repair a fault without clearing its observed counters. An absent module remains
 addressable by the control API so it can be restored.
 
 | Field | Values | Physical meaning |
 |---|---|---|
-| `hall` | `normal`, `stuck_active`, `stuck_inactive` | Force physical detection before applying configured sensor polarity; active-low still has a low electrical bit for active detection |
-| `motor` | `normal`, `dead` | Coils and driver phase update, but valid steps do not move the drum while dead |
-| `present` | `true`, `false` | I²C ACK/NACK presence; disconnecting leaves the external latch, coils and drum angle preserved |
+| `sensor` | `ok`, `stuck_active`, `stuck_inactive` | Override the detection returned to firmware before applying configured polarity; snapshots retain the physical Hall level |
+| `motor` | `ok`, `dead` | Coils and driver phase update, but valid steps do not move the drum while dead |
+| `i2c` | `ok`, `missing` | I²C ACK/NACK presence; disconnecting leaves the external latch, coils and drum angle preserved |
 
 Fault-only patches may apply during motion, between acknowledged I²C transactions.
 An active two-byte read/write returns `409 model_busy`; no input is changed halfway
@@ -446,17 +446,24 @@ Mixed geometry/fault patches retain the existing all-motors-off requirement.
 Invalid or busy changes apply nothing and do not consume IDs/revisions. New changes
 while the controller is off are rejected as before.
 
-The same literal registry is accepted in each YAML module mapping, for example
-`{addr: 32, faults: {motor: dead}}`. Unspecified fields resolve to `hall: normal`,
-`motor: normal`, `present: true`. Faults do not consume random geometry/angle draws.
-Noise, inversion, probabilistic slip, NACK bursts, read corruption, electrical
-power loss and brownouts remain unsupported under #19; `fault_support` lists the
-available literals, and `capabilities.set_fault` advertises this subset.
+The names and physics come from #19's shared fault model. Startup YAML, for example
+`{addr: 32, faults: {motor: dead}}`, also supports noisy/inverted sensors, slip,
+disappearance, NACKs and corrupt reads with their required parameters; see
+[hardware model](hardware-model.md#injected-faults). Runtime patches accept only
+the deterministic literals above. They preserve other configured modes and their
+random stream, while repairing a mode clears its now-unused parameter. Faults
+never consume geometry/angle draws. Electrical power loss and brownouts remain
+unsupported. `fault_support` and `capabilities.set_fault` describe runtime support.
 
-Healthy legacy recordings are unchanged. Once a non-normal startup fault or any
+Healthy legacy recordings are unchanged. Once a startup fault or any
 runtime fault command is used, `faults_version: 1` and immutable `initial_faults`
 identify the extension in state/activity/timeline evidence. Each full module
-snapshot includes resolved `faults` and `fault_counters` (`blocked_steps`, `nacks`).
+snapshot includes resolved `faults` (modes, parameters, seed and configured flag)
+and `fault_counters` (`blocked_steps`, `nacks`, PRNG `rng`, and total `events`).
+The existing top-level #19 `faults` summary is retained and checked against these
+records. New native recordings restore the exact random-stream position and effect
+counts; older #19 summary-only recordings remain readable and retain their legacy
+reseed-on-resume behavior.
 The first blocked step/NACK after a change or resume emits `fault_observed`;
 subsequent samples/settlements retain cumulative effects without per-step flooding.
 `faults_changed` records an admitted edit; a moving edit does not fabricate a

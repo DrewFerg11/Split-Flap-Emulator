@@ -14,7 +14,18 @@ from flapsim.hardware import normalize_hardware, write_model_config
 from flapsim.state import read_settlement, validate_state
 
 ROOT = Path(__file__).resolve().parents[1]
-CORE = ["bus", "config", "control", "drum", "io", "mechanics", "pcf8575", "resume", "stepper"]
+CORE = [
+    "bus",
+    "config",
+    "control",
+    "drum",
+    "faults",
+    "io",
+    "mechanics",
+    "pcf8575",
+    "resume",
+    "stepper",
+]
 COILS = [0xFFE7, 0xFFF3, 0xFFF9, 0xFFED]
 OFF = 0xFFE1
 
@@ -1171,6 +1182,204 @@ def test_native_resume_accepts_legacy_records_without_reset_generation(make_mode
     assert model.control({"sensor_window": 20})["guest_resets"] == 1
 
 
+def faulted(make_model, faults, **kwargs):
+    return make_model(module_overrides={0: {"faults": faults}}, **kwargs)
+
+
+def fault_record(model, index=0):
+    """The live fault record, from the activity file the next tick rewrites."""
+    model.tick()
+    return model.activity()["faults"][index]
+
+
+def turn(model, steps, addr=32):
+    for step in range(steps):
+        model.write(COILS[(step + 1) % 4], addr=addr)
+    model.write(OFF, addr=addr)
+
+
+def read_cycle(model):
+    acked = model.event(0) == 0
+    low, high = model.event(6), model.event(6)
+    model.event(4)
+    model.event(3)
+    return acked, low | high << 8
+
+
+@pytest.mark.parametrize(
+    "fault, at_magnet, away",
+    [
+        ("stuck_active", True, True),
+        ("stuck_inactive", False, False),
+        ("inverted", False, True),
+    ],
+)
+def test_sensor_faults_change_what_firmware_reads_not_the_physical_sensor(
+    make_model, fault, at_magnet, away
+):
+    for angle, expected in [(730, at_magnet), (0, away)]:
+        model = faulted(make_model, {"sensor": fault}, angles=(angle,))
+        assert bool(model.read() & 0x8000) is expected
+        assert model.state()["modules"][0]["hall"] is (angle == 730)
+        assert fault_record(model) == {
+            "sensor": fault,
+            "events": int(expected != (angle == 730)),
+            "bus": 0,
+            "addr": 32,
+        }
+        model.lib.fs_model_close()
+
+
+def test_only_reads_sample_a_faulted_sensor(make_model):
+    def levels(writes):
+        model = faulted(make_model, {"sensor": "noisy", "sensor_noise": 0.3}, angles=(0,))
+        values = []
+        for _ in range(100):
+            for _ in range(writes):
+                model.write(OFF)
+            values.append(bool(model.read() & 0x8000))
+        events = fault_record(model)["events"]
+        model.lib.fs_model_close()
+        return values, events
+
+    # Coil writes between reads neither shift the noise stream nor count as fault events.
+    assert levels(3) == levels(0)
+    model = faulted(make_model, {"sensor": "stuck_active"}, angles=(0,))
+    for _ in range(5):
+        model.write(OFF)
+    assert fault_record(model)["events"] == 0
+    model.read()
+    assert fault_record(model)["events"] == 1
+
+
+def test_noisy_sensor_flips_some_reads_reproducibly(make_model):
+    def levels():
+        model = faulted(make_model, {"sensor": "noisy", "sensor_noise": 0.3}, angles=(0,))
+        values = [bool(model.read() & 0x8000) for _ in range(200)]
+        events = fault_record(model)["events"]
+        model.lib.fs_model_close()
+        return values, events
+
+    first, events = levels()
+    assert 30 < events < 90 and events == sum(first)  # Physically inactive: flips read high.
+    assert levels() == (first, events)
+
+
+def test_dead_motor_energizes_without_turning(make_model):
+    model = faulted(make_model, {"motor": "dead"}, angles=(5,))
+    turn(model, 8)
+    module = model.state()["modules"][0]
+    assert module["angle"] == 5
+    assert module["counters"]["forward"] == 0 and module["counters"]["stalls"] == 0
+    assert module["counters"]["writes"] == 9
+    assert fault_record(model)["events"] == 7  # The first energize only sets the phase.
+
+
+def test_slipping_motor_misses_some_steps(make_model):
+    model = faulted(make_model, {"motor": "slip", "slip": 0.25}, angles=(0,))
+    turn(model, 401)
+    module = model.state()["modules"][0]
+    missed = fault_record(model)["events"]
+    assert 60 < missed < 140
+    assert module["angle"] == module["counters"]["forward"] == 400 - missed
+
+
+def test_missing_module_answers_like_an_absent_address(make_model):
+    model = faulted(make_model, {"i2c": "missing"})
+    assert model.event(1) != 0
+    assert model.event(0xE705) != 0
+    model.event(3)
+    assert read_cycle(model) == (False, 0xFFFF)
+    record = fault_record(model)
+    state = model.activity()
+    assert state["counters"]["anomalies"] == 0 and state["counters"]["writes"] == 0
+    assert record == {"i2c": "missing", "events": 2, "bus": 0, "addr": 32}
+
+
+def test_module_disappears_at_the_configured_guest_time(make_model):
+    model = faulted(make_model, {"i2c": "disappear", "disappear_at": 0.5})
+    model.write(COILS[0])
+    model.now = 500_000_000
+    assert model.event(1) != 0
+    model.event(3)
+    assert model.activity()["counters"]["writes"] == 1
+    assert fault_record(model)["events"] == 1
+
+
+def test_nack_bursts_and_read_corruption_are_reproducible(make_model):
+    def run(faults):
+        model = faulted(make_model, faults, angles=(0,))
+        results = [read_cycle(model) for _ in range(100)]
+        events = fault_record(model)["events"]
+        assert model.activity()["counters"]["anomalies"] == 0
+        model.lib.fs_model_close()
+        return results, events
+
+    nacks, events = run({"i2c": "nack", "nack": 0.2})
+    assert sum(not acked for acked, _ in nacks) == events and 5 < events < 40
+    assert all(value == 0xFFFF for acked, value in nacks if not acked)
+    assert run({"i2c": "nack", "nack": 0.2})[0] == nacks
+    reads, events = run({"i2c": "corrupt", "corrupt": 0.5})
+    changed = sum(value != 0x7FE1 for _, value in reads)
+    assert changed > 20 and events >= changed
+    assert all(bin(value ^ 0x7FE1).count("1") <= 2 for _, value in reads)
+
+
+def test_healthy_runs_report_no_faults_and_faulted_runs_list_only_faulted_modules(make_model):
+    model = make_model(angles=(0, 0), buses=(0, 0))
+    model.tick()
+    assert "faults" not in model.activity() and "faults" not in model.state()
+    model.lib.fs_model_close()
+    model = make_model(
+        angles=(0, 0), buses=(0, 0), module_overrides={1: {"faults": {"motor": "dead"}}}
+    )
+    model.tick()
+    assert model.activity()["faults"] == [{"motor": "dead", "events": 0, "bus": 0, "addr": 33}]
+    assert model.state()["faults"] == model.activity()["faults"]
+
+
+@pytest.mark.parametrize(
+    "faults",
+    [
+        {},
+        {"sensor": "melted"},
+        {"sensor": "noisy"},
+        {"sensor": "stuck_active", "sensor_noise": 0.1},
+        {"motor": "slip", "slip": 0},
+        {"motor": "slip", "slip": 1.5},
+        {"i2c": "disappear"},
+        {"i2c": "disappear", "disappear_at": -1},
+        {"i2c": "nack", "nack": True},
+        {"power": "cycle"},
+    ],
+)
+def test_bad_fault_configuration_is_rejected(faults):
+    document = {
+        "chip": "esp32",
+        "buses": [{"id": 0, "modules": [{"addr": 32, "faults": faults}]}],
+        "drum": {
+            "steps_per_rotation": 2048,
+            "magnet_position": 730,
+            "sensor_window": 40,
+            "flaps": " A",
+        },
+        "start_angles": [0],
+    }
+    with pytest.raises(ValueError):
+        normalize_hardware(document)
+
+
+def test_model_rejects_unknown_fault_parameters_beside_a_valid_fault(make_model):
+    model = faulted(make_model, {"sensor": "stuck_active"})
+    config = json.loads(model.config.read_text())
+    module = config["modules"][0]
+    module["faults"]["power"] = "cycle"
+    model.lib.fs_model_close()
+    model.config.write_text(json.dumps(config))
+    assert model.lib.fs_model_init(str(model.config).encode()) != 0
+    assert b"faults.power" in model.lib.fs_model_error()
+
+
 def test_native_power_checkpoint_preserves_moving_state_and_resumes_once(make_model):
     model = make_model(angles=(100, 200), buses=(0, 0))
     model.control({"sensor_window": 41})
@@ -1199,16 +1408,16 @@ def test_native_power_checkpoint_preserves_moving_state_and_resumes_once(make_mo
 
 @pytest.mark.parametrize("polarity", ["active-high", "active-low"])
 @pytest.mark.parametrize("hall,detected", [("stuck_active", True), ("stuck_inactive", False)])
-def test_literal_hall_faults_apply_to_physical_detection_and_survive_resume(
+def test_runtime_sensor_faults_change_reads_preserve_physical_hall_and_survive_resume(
     make_model, polarity, hall, detected
 ):
     model = make_model(polarity=polarity, angles=(0,))
-    result = model.control({"faults": {"hall": hall}})
-    assert result["modules"][0]["hall"] is (detected != (polarity == "active-low"))
-    assert bool(model.read() & 0x8000) is result["modules"][0]["hall"]
+    result = model.control({"faults": {"sensor": hall}})
+    assert result["modules"][0]["hall"] is (polarity == "active-low")
+    assert bool(model.read() & 0x8000) is (detected != (polarity == "active-low"))
     assert resume(model, model.now) == 0
-    after = model.control({"faults": {"hall": hall}})
-    assert after["modules"][0]["faults"]["hall"] == hall
+    after = model.control({"faults": {"sensor": hall}})
+    assert after["modules"][0]["faults"]["sensor"] == hall
     validate_state(after, json.loads(model.config.read_text()))
 
 
@@ -1230,7 +1439,7 @@ def test_dead_motor_can_be_changed_during_motion_and_never_moves_or_invents_stal
     assert state["modules"][1]["angle"] == 101
     assert any(r["event"] == "fault_observed" for r in model.timeline())
     assert resume(model, model.now) == 0
-    restored = model.control({"faults": {"motor": "normal"}}, identifier=2, revision=1)
+    restored = model.control({"faults": {"motor": "ok"}}, identifier=2, revision=1)
     assert restored["modules"][0]["fault_counters"]["blocked_steps"] == 4
     model.write(COILS[0])
     model.write(COILS[1])
@@ -1243,15 +1452,15 @@ def test_absent_module_nacks_without_changing_latches_and_is_still_addressable_b
 ):
     model = make_model(angles=(100,))
     model.write(COILS[0])
-    before = model.control({"faults": {"present": False}})
+    before = model.control({"faults": {"i2c": "missing"}})
     assert model.event(1) == 1
     model.event(3)
-    after = model.control({"faults": {"present": False}})
+    after = model.control({"faults": {"i2c": "missing"}})
     assert after["modules"][0]["latch"] == before["modules"][0]["latch"]
     assert after["modules"][0]["fault_counters"]["nacks"] == 1
     assert after["modules"][0]["counters"]["anomalies"] == 0
     assert resume(model, model.now) == 0
-    restored = model.control({"faults": {"present": True}}, identifier=2, revision=1)
+    restored = model.control({"faults": {"i2c": "ok"}}, identifier=2, revision=1)
     assert restored["modules"][0]["fault_counters"]["nacks"] == 1
     assert model.event(1) == 0
     model.event(3)
@@ -1259,19 +1468,28 @@ def test_absent_module_nacks_without_changing_latches_and_is_still_addressable_b
 
 @pytest.mark.parametrize(
     "patch",
-    [{}, {"hall": "noisy"}, {"motor": "slip"}, {"present": 0}, {"unknown": True}, {"hall": True}],
+    [
+        {},
+        {"sensor": "noisy"},
+        {"motor": "slip"},
+        {"present": 0},
+        {"unknown": True},
+        {"sensor": True},
+    ],
 )
 def test_invalid_fault_patch_is_atomic_and_does_not_consume_revision(make_model, patch):
     model = make_model()
     assert model.control({"faults": patch}) == {"error": "invalid_mechanics"}
     assert "faults_version" not in model.state()
-    assert model.control({"faults": {"hall": "stuck_active"}})["mechanics_revision"] == 1
+    assert model.control({"faults": {"sensor": "stuck_active"}})["mechanics_revision"] == 1
 
 
 def test_faults_are_available_in_startup_config_and_validated_in_resume(make_model):
-    model = make_model(module_overrides={0: {"faults": {"hall": "stuck_active", "present": False}}})
+    model = make_model(
+        module_overrides={0: {"faults": {"sensor": "stuck_active", "i2c": "missing"}}}
+    )
     state = model.state()
-    assert state["faults_version"] == 1 and state["modules"][0]["hall"]
+    assert state["faults_version"] == 1 and not state["modules"][0]["hall"]
     validate_state(state, json.loads(model.config.read_text()))
     assert model.event(1) == 1
     model.event(3)
@@ -1279,7 +1497,7 @@ def test_faults_are_available_in_startup_config_and_validated_in_resume(make_mod
     state = model.timeline()[-1]
     assert state["modules"][0]["fault_counters"]["nacks"] == 1
     model.lib.fs_model_close()
-    state["modules"][0]["faults"]["hall"] = "noisy"
+    state["modules"][0]["faults"]["sensor"] = "noisy"
     (model.out / "timeline.jsonl").write_text(json.dumps(state) + "\n")
     assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0
 
@@ -1288,15 +1506,15 @@ def test_faults_never_change_a_latched_read_but_can_recover_after_address_nack(m
     model = make_model()
     assert model.event(0) == 0
     model.event(6)
-    assert model.control({"faults": {"hall": "stuck_active"}}) == {"error": "model_busy"}
+    assert model.control({"faults": {"sensor": "stuck_active"}}) == {"error": "model_busy"}
     assert model.event(6) & 0x80 == 0
     model.event(4)
     model.event(3)
-    assert model.control({"faults": {"present": False}})["mechanics_revision"] == 1
+    assert model.control({"faults": {"i2c": "missing"}})["mechanics_revision"] == 1
     assert model.event(1) == 1
     # No bytes latched on an address NACK: recovery does not need a STOP callback.
     assert (
-        model.control({"faults": {"present": True}}, identifier=2, revision=1)["mechanics_revision"]
+        model.control({"faults": {"i2c": "ok"}}, identifier=2, revision=1)["mechanics_revision"]
         == 2
     )
     model.event(3)
@@ -1306,28 +1524,29 @@ def test_faults_never_change_a_latched_read_but_can_recover_after_address_nack(m
 
 def test_http_faults_share_mechanics_receipts_and_strict_validation(model_http):
     model, server = model_http
-    for faults in [{}, {"present": 1}, {"motor": "slip"}, {"hall": "noisy"}]:
+    physical_hall = model.state()["modules"][0]["hall"]
+    for faults in [{}, {"i2c": 1}, {"motor": "slip"}, {"sensor": "noisy"}]:
         command = {"id": 1, "expected_revision": 0, "patch": {"faults": faults}}
         assert http_control(server, data=json.dumps(command).encode())[0] == 422
-    command = {"id": 1, "expected_revision": 0, "patch": {"faults": {"hall": "stuck_active"}}}
+    command = {"id": 1, "expected_revision": 0, "patch": {"faults": {"sensor": "stuck_active"}}}
     code, result = http_control(server, data=json.dumps(command).encode())
     assert code == 202
     assert result["capabilities"]["set_fault"]
-    assert result["fault_support"]["hall"] == ["normal", "stuck_active", "stuck_inactive"]
+    assert result["fault_support"]["sensor"] == ["ok", "stuck_active", "stuck_inactive"]
     assert (
         http_control(server, data=json.dumps(command).encode())[1]["operation"]
         == result["operation"]
     )
     current = http_control(server, path="/api/emu/state")[1]["state"]
-    assert current["modules"][0]["hall"]
-    assert current["modules"][0]["faults"]["hall"] == "stuck_active"
+    assert current["modules"][0]["hall"] == physical_hall
+    assert current["modules"][0]["faults"]["sensor"] == "stuck_active"
     assert len([r for r in model.timeline() if r["event"] == "faults_changed"]) == 1
 
 
 @pytest.mark.parametrize("problem", ["version", "missing", "counter", "initial", "receipt"])
 def test_fault_reader_rejects_malformed_or_inconsistent_evidence(make_model, problem):
     model = make_model()
-    state = model.control({"faults": {"hall": "stuck_active"}})
+    state = model.control({"faults": {"sensor": "stuck_active"}})
     if problem == "version":
         state["faults_version"] = True
     elif problem == "missing":
@@ -1337,7 +1556,7 @@ def test_fault_reader_rejects_malformed_or_inconsistent_evidence(make_model, pro
     elif problem == "initial":
         state["initial_faults"][0]["motor"] = "dead"
     elif problem == "receipt":
-        state["last_operation"]["command"]["patch"]["faults"]["hall"] = "normal"
+        state["last_operation"]["command"]["patch"]["faults"]["sensor"] = "ok"
     with pytest.raises(ValueError):
         validate_state(state, json.loads(model.config.read_text()))
 
@@ -1363,10 +1582,10 @@ def test_geometry_and_fault_changes_are_atomic_and_keep_geometry_idle_rules(make
 @pytest.mark.parametrize("problem", ["hall", "version", "counter", "initial", "receipt"])
 def test_native_resume_rejects_inconsistent_fault_history(make_model, problem):
     model = make_model()
-    record = model.control({"faults": {"hall": "stuck_active"}})
+    record = model.control({"faults": {"sensor": "stuck_active"}})
     model.lib.fs_model_close()
     if problem == "hall":
-        record["modules"][0]["hall"] = False
+        record["modules"][0]["hall"] = True
     elif problem == "version":
         record["faults_version"] = True
     elif problem == "counter":
@@ -1374,7 +1593,98 @@ def test_native_resume_rejects_inconsistent_fault_history(make_model, problem):
     elif problem == "initial":
         record["initial_faults"][0]["motor"] = "dead"
     elif problem == "receipt":
-        record["last_operation"]["command"]["patch"]["faults"]["hall"] = "normal"
+        record["last_operation"]["command"]["patch"]["faults"]["sensor"] = "ok"
     record["event"] = "faults_changed"
+    (model.out / "timeline.jsonl").write_text(json.dumps(record) + "\n")
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0
+
+
+def test_stochastic_startup_faults_and_runtime_repair_keep_stream_across_resume(make_model):
+    def run(restart):
+        model = faulted(
+            make_model,
+            {
+                "sensor": "noisy",
+                "sensor_noise": 0.5,
+                "motor": "slip",
+                "slip": 0.4,
+                "i2c": "corrupt",
+                "corrupt": 0.3,
+            },
+        )
+        readings = []
+        for step in range(20):
+            model.write(COILS[step % 4])
+            readings.append(model.read())
+        applied = model.control({"faults": {"motor": "dead"}})
+        before = applied["modules"][0]
+        assert before["faults"]["sensor_noise"] == 0.5
+        assert before["faults"]["corrupt"] == 0.3
+        assert "slip" not in before["faults"]
+        if restart:
+            assert resume(model, model.now) == 0
+            restored = model.timeline()[-1]["modules"][0]
+            assert restored == before
+        for step in range(20, 40):
+            model.write(COILS[step % 4])
+            readings.append(model.read())
+        repaired = model.control({"faults": {"motor": "ok"}}, identifier=2, revision=1)
+        assert repaired["modules"][0]["angle"] == before["angle"]
+        for step in range(40, 60):
+            model.write(COILS[step % 4])
+            readings.append(model.read())
+        model.write(OFF)
+        final = model.state()
+        validate_state(final, json.loads(model.config.read_text()))
+        assert final["modules"][0]["fault_counters"]["blocked_steps"] >= 20
+        model.lib.fs_model_close()
+        return readings, final["modules"], final["faults"]
+
+    assert run(False) == run(True)
+
+
+def test_legacy_19_fault_summary_is_readable_and_resumes_with_legacy_reseed(make_model):
+    model = faulted(make_model, {"sensor": "noisy", "sensor_noise": 0.5})
+    for _ in range(10):
+        model.read()
+    record = model.control({"sensor_window": 40})
+    record["event"] = "mechanics_changed"
+    del record["faults_version"], record["initial_faults"]
+    for module in record["modules"]:
+        del module["faults"], module["fault_counters"]
+    validate_state(record, json.loads(model.config.read_text()))
+    model.lib.fs_model_close()
+    (model.out / "timeline.jsonl").write_text(json.dumps(record) + "\n")
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) == 0
+    restored = model.timeline()[-1]
+    effects = restored["modules"][0]["fault_counters"]
+    assert effects["events"] == 0
+    assert effects["rng"] == restored["initial_faults"][0]["seed"]
+    validate_state(restored, json.loads(model.config.read_text()))
+
+
+@pytest.mark.parametrize(
+    "problem", ["seed", "rng", "probability", "summary", "configured", "effects"]
+)
+def test_versioned_fault_resume_binds_stochastic_config_and_summary(make_model, problem):
+    model = faulted(make_model, {"sensor": "noisy", "sensor_noise": 0.5})
+    model.read()
+    record = model.control({"faults": {"motor": "dead"}})
+    if problem == "seed":
+        record["modules"][0]["faults"]["seed"] += 1
+    elif problem == "rng":
+        record["modules"][0]["fault_counters"]["rng"] = 0
+    elif problem == "probability":
+        record["modules"][0]["faults"]["sensor_noise"] = 0.25
+    elif problem == "summary":
+        record["faults"][0]["events"] += 1
+    elif problem == "effects":
+        effects = record["modules"][0]["fault_counters"]
+        effects["blocked_steps"] = effects["events"] + 1
+    else:
+        record["modules"][0]["faults"]["configured"] = False
+    with pytest.raises(ValueError):
+        validate_state(record, json.loads(model.config.read_text()))
+    model.lib.fs_model_close()
     (model.out / "timeline.jsonl").write_text(json.dumps(record) + "\n")
     assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0
