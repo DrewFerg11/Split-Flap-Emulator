@@ -5,9 +5,9 @@ const FlapUI = (() => {
   const SVG = "http://www.w3.org/2000/svg";
   const BETWEEN = 0.25; // landing error (in flap pitches) beyond which a tile is between flaps
   const COLUMNS = ["module", "char", "angle", "error", "hall", "coils", "energized", "steps",
-    "stalls", "anomalies", "mechanics"];
+    "stalls", "anomalies", "faults", "mechanics"];
   const HEADINGS = ["Module", "Shows", "Angle", "Flap error", "Hall", "Coils", "Energized",
-    "Steps (fwd/back)", "Stalls", "Anomalies", "Mechanics"];
+    "Steps (fwd/back)", "Stalls", "Anomalies", "Faults", "Mechanics"];
 
   function el(tag, cls, text) {
     const e = document.createElement(tag);
@@ -186,6 +186,13 @@ const FlapUI = (() => {
         c.stalls.className = counters.stalls ? "bad" : "";
         c.anomalies.textContent = counters.anomalies;
         c.anomalies.className = counters.anomalies ? "bad" : "";
+        // Injected faults (#19): only modes that are not "ok", then how often they acted.
+        const injected = Object.entries(m.faults || {})
+          .filter(([kind, mode]) => ["sensor", "motor", "i2c"].includes(kind) && mode !== "ok")
+          .map(([kind, mode]) => kind + " " + mode);
+        const acted = m.fault_counters && m.fault_counters.events;
+        if (acted) injected.push(acted + " event" + (acted === 1 ? "" : "s"));
+        c.faults.textContent = injected.join(", ");
         c.mechanics.textContent = [
           mech.steps_per_rotation !== undefined && mech.steps_per_rotation + " steps",
           mech.magnet_position !== undefined && "magnet " + mech.magnet_position,

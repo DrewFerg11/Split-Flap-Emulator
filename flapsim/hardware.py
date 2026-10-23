@@ -6,6 +6,7 @@ from pathlib import Path
 
 import yaml
 
+from flapsim.faults import KINDS, PARAMETERS
 from flapsim.resources import resolve_resource
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,19 +20,9 @@ MECHANICAL_SALTS = {
 
 
 FAULT_SALT = 0x5BD1E995
-FAULT_KINDS = {
-    "sensor": {"stuck_active", "stuck_inactive", "inverted", "noisy"},
-    "motor": {"dead", "slip"},
-    "i2c": {"missing", "disappear", "nack", "corrupt"},
-}
-# The parameter each fault kind needs, and its kind. Probabilities are in (0, 1].
-FAULT_PARAMETERS = {
-    "noisy": "sensor_noise",
-    "slip": "slip",
-    "disappear": "disappear_at",
-    "nack": "nack",
-    "corrupt": "corrupt",
-}
+FAULT_KINDS = {name: choices - {"ok"} for name, choices in KINDS.items()}
+# Startup YAML uses seconds; resolved evidence records integer nanoseconds.
+FAULT_PARAMETERS = {**PARAMETERS, "disappear": "disappear_at"}
 
 
 def probability(value, name):
@@ -48,7 +39,7 @@ def normalize_faults(value, where, seed):
     normalized = {}
     for kind, choices in FAULT_KINDS.items():
         if kind in value:
-            if value[kind] not in choices:
+            if type(value[kind]) is not str or value[kind] not in choices:
                 raise ValueError(f"{where} faults.{kind} must be one of {sorted(choices)}")
             normalized[kind] = value[kind]
     wanted = {FAULT_PARAMETERS[f] for f in normalized.values() if f in FAULT_PARAMETERS}

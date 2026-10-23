@@ -22,7 +22,7 @@ coverage QEMU mode cannot reach.
   shims for everything the firmware touches without a network, and a bounded verifier.
 - Phase 2 ([#30](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/30)): host sockets, the
   HTTP transport and `flapsim run --mode native` ([runner](runner.md#native-mode)); the golden
-  smoke scenarios run natively in CI under `baselines/v1.4.1-native.yaml`.
+  smoke scenarios run natively in CI (PR checks) under `baselines/v1.4.1-native.yaml`.
 - Phase 3 ([#31](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/31)): a supervised
   Mosquitto broker with MQTT scenario steps, a controlled wall clock and seeded settings
   ([scenarios](scenarios.md#native-only-setup-and-mqtt-steps)).
@@ -101,6 +101,10 @@ it). `model_config` is the normalized hardware JSON that QEMU mode also uses
 (`flapsim.hardware.write_model_config`). Outputs (`state.json`, `activity.json`,
 `timeline.jsonl`) have the same schema in both modes. `serial_input` is optional: it is
 usually a FIFO, read without blocking, and carries Improv frames or other UART input.
+
+CI lanes: PR checks run the build, shim tests, boot/improv/control/speed/power probes, smoke,
+MQTT, clock, first-boot and fault scenarios. The `CI / Nightly` workflow (daily and
+`workflow_dispatch`) runs the long `settings-race-8` and `clock-soak-native-8` scenarios.
 
 Bounded verification, as CI runs it:
 

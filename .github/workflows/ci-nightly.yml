@@ -1,0 +1,97 @@
+name: CI / Nightly
+
+# Slow, soak-style and redundant coverage that PR checks (ci-test.yml) deliberately skip.
+# A failed scheduled run is the signal; there is no other notification plumbing.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-long:
+    name: Native long scenarios
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
+        with:
+          run-shim-tests: 'false'
+      - name: Stress the settings race and soak time mode natively
+        run: |
+          set -e
+          flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
+            --scenario settings-race-8 --seed 7 \
+            --known-issues baselines/v1.4.1-native.yaml --out runs/native/settings-race-8
+          flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
+            --scenario clock-soak-native-8 --seed 7 --speed 50 \
+            --known-issues baselines/v1.4.1-native.yaml --out runs/native/clock-soak-native-8
+      - name: Log native scenario outcomes
+        if: always()
+        run: |
+          for run in settings-race-8 clock-soak-native-8; do
+            python -m tools.summarize_run "runs/native/$run/run.json"
+          done
+      - name: Upload native evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-native-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            runs-native-build.log
+            build/native/golden/build-info.json
+            runs/native/**/*.json
+            runs/native/**/*.jsonl
+            runs/native/**/*.log
+            runs/native/**/*.md
+            runs/native/**/*.xml
+            runs/native/**/*.html
+
+  qemu-homing:
+    name: Golden scenario (homing-${{ matrix.seed }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # Seed 7 stays on every PR (ci-test.yml).
+        seed: [19, 42]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/qemu-setup
+      - name: Run real-firmware golden scenario
+        run: |
+          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+            --hardware esp32-8-single --scenario scenarios/homing-random.yaml \
+            --seed "${{ matrix.seed }}" --var FIRMWARE_VERSION=v1.4.1 \
+            --known-issues baselines/v1.4.1-golden.yaml \
+            --out runs/scenario
+      - name: Log available scenario outcome
+        if: always()
+        run: python -m tools.summarize_run runs/scenario/run.json
+      - name: Upload available diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-qemu-evidence-homing-${{ matrix.seed }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            runs/**/*.log
+            runs/**/*.json
+            runs/**/*.jsonl
+            runs/**/*.md
+            runs/**/*.xml
+            runs/**/*.html
+            build/toolchain.txt
+            build/runner-specs.txt
+            build/qemu/install/build-info.json

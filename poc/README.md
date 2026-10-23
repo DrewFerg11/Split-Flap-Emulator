@@ -1,7 +1,7 @@
 # POC (frozen reference)
 
 This is the proof-of-concept code from October 2026. It is **not** the product. It is kept so the MVP can refer to
-working behaviour. See [`../docs/poc-findings-and-mvp-plan.md`](../docs/poc-findings-and-mvp-plan.md) for results
+working behaviour. See [`../docs/history/poc-findings-and-mvp-plan.md`](../docs/history/poc-findings-and-mvp-plan.md) for results
 and the plan.
 
 ## Reproduce (Linux, ~10 min)

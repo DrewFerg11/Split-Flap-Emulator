@@ -1,6 +1,6 @@
 # Emulator maintenance
 
-The maintainer merges the ordered [PR queue](implementation-queue.md). Keep
+The maintainer merges PRs. Keep
 issues open until their acceptance evidence and merge requirements are met.
 The strict golden smoke blocker is [firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54):
 GET `/settings` can return defaults after a confirmed persisted reconfiguration,
@@ -92,8 +92,8 @@ reaped children; unexpected cleanup failures are emulator defects to track.
 
 ## Workflows, evidence and protection
 
-PR/main CI keeps fast checks, both real boot/smoke layouts, all seeded homing
-jobs and independent asserted strict/wrong-version negatives. The container job
+PR/main CI keeps fast checks, both real boot/smoke layouts, the seed-7 homing
+job and independent asserted strict/wrong-version negatives. The container job
 depends on those gates. Golden scenarios use the accepted checksum-bound baseline
 from #15; matched issues remain visible, while unmatched failures prevent image
 verification/publication. Container golden checks mount that same baseline
@@ -104,8 +104,7 @@ publication. Version-tag runs add the publication step only after verification.
 
 Suggested required checks for this phase are `Fast checks`,
 `Golden scenario (smoke-8)`, `Golden scenario (smoke-16)`,
-`Golden scenario (homing-7)`, `Golden scenario (homing-19)`,
-`Golden scenario (homing-42)`, `Golden scenario (negative-versions)`, and the reusable
+`Golden scenario (homing-7)`, `Golden scenario (negative-versions)`, and the reusable
 `Verified runtime image / Container smoke and lifecycle` job. Earlier phases
 use `Pinned QEMU build and boot` layout jobs. Confirm exact displayed names
 in a current Actions run before configuring branch protection; this work does
@@ -182,6 +181,7 @@ Workflows follow the same `Category / Purpose` display-name convention as
 |---|---|---|
 | `ci-test.yml` | `CI / Test` | Fast checks, golden scenarios and image-verification dependency |
 | `ci-container.yml` | `CI / Container` | Reusable exact-image smoke/lifecycle/publication-rejection checks |
+| `ci-nightly.yml` | `CI / Nightly` | Scheduled soak and extra-seed scenarios kept off PR checks |
 | `release.yml` | `Release / Tag` | Trusted tag validation and verified GHCR publication |
 
 The firmware companion also uses `Release / Tag`. Job IDs/check names and trust

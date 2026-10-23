@@ -49,7 +49,7 @@ jobs:
   native:
     name: Native firmware (${{ matrix.name }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -58,25 +58,9 @@ jobs:
           - {name: sanitizers, build_flags: --sanitize, timeout: 300}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/native-setup
         with:
-          python-version: '3.11'
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build \
-            pkg-config libjson-c-dev mosquitto
-          python -m pip install -e '.[control]'
-      - name: Restore pinned firmware and library sources
-        uses: actions/cache@v4
-        with:
-          path: build/native/cache
-          key: native-sources-${{ hashFiles('native/libraries.json', 'tools/golden_firmware.json') }}
-      - name: Build the pinned golden source against the shims and run the shim tests
-        run: |
-          set -o pipefail
-          python native/build.py --jobs 4 --test ${{ matrix.build_flags }} --out build/native/golden \
-            2>&1 | tee runs-native-build.log
+          build-flags: ${{ matrix.build_flags }}
       # Uncalibrated firmware lands near, not on, X on the realistic presets (#29), so the
       # strict boot-at-X check covers the ideal-geometry layouts.
       - name: Boot the ideal layouts and reboot through Improv provisioning
@@ -95,6 +79,14 @@ jobs:
           for hardware in esp32-8-single esp32-16-dual; do
             python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
               --case control --timeout ${{ matrix.timeout }} --out "runs/native/control-$hardware"
+          done
+      - name: Verify deterministic faults, unaffected modules and recovery
+        run: |
+          for hardware in esp32-8-single esp32-16-dual; do
+            for fault_case in hall-active hall-inactive motor-dead absent; do
+              python -m tools.verify_faults --mode native --native-build build/native/golden \
+                --hardware "$hardware" --case "$fault_case" --out "runs/native/fault-$hardware-$fault_case"
+            done
           done
       - name: Verify runtime speed and rate preservation through reset and power
         run: |
@@ -136,16 +128,6 @@ jobs:
               --scenario "$scenario" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
               --known-issues baselines/v1.4.1-native.yaml --out "runs/native/$scenario"
           done
-      - name: Stress the settings race and soak time mode natively
-        if: matrix.name != 'sanitizers'
-        run: |
-          set -e
-          flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
-            --scenario settings-race-8 --seed 7 \
-            --known-issues baselines/v1.4.1-native.yaml --out runs/native/settings-race-8
-          flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
-            --scenario clock-soak-native-8 --seed 7 --speed 50 \
-            --known-issues baselines/v1.4.1-native.yaml --out runs/native/clock-soak-native-8
       - name: Run the first-boot scenarios natively on both layouts
         if: matrix.name != 'sanitizers'
         run: |
@@ -170,8 +152,7 @@ jobs:
         if: always() && matrix.name != 'sanitizers'
         run: |
           for run in smoke-8 smoke-16 mqtt-native-8 clock-dst-native-8 date-rollover-native-8 \
-                     first-boot-8 first-boot-16 fault-stuck-sensor-8 fault-module-lost-8 \
-                     settings-race-8 clock-soak-native-8; do
+                     first-boot-8 first-boot-16 fault-stuck-sensor-8 fault-module-lost-8; do
             python -m tools.summarize_run "runs/native/$run/run.json"
           done
       - name: Upload native evidence
@@ -202,54 +183,13 @@ jobs:
           - {name: smoke-8, hardware: esp32-8-single, scenario: release-smoke-8, seed: 7}
           - {name: smoke-16, hardware: esp32-16-dual, scenario: release-smoke-16, seed: 7}
           - {name: homing-7, hardware: esp32-8-single, scenario: homing-random, seed: 7}
-          - {name: homing-19, hardware: esp32-8-single, scenario: homing-random, seed: 19}
-          - {name: homing-42, hardware: esp32-8-single, scenario: homing-random, seed: 42}
           - {name: negative-versions, hardware: esp32-8-single, scenario: version-check, seed: 7}
           - {name: calibration-8, hardware: esp32-8-single-calibration, scenario: calibration-8, seed: 7}
           - {name: control-8, hardware: esp32-8-single, scenario: boot, seed: 7}
           - {name: control-16, hardware: esp32-16-dual, scenario: boot, seed: 7}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - name: Install QEMU build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential git ninja-build \
-            libglib2.0-dev libgcrypt20-dev libslirp-dev libpixman-1-dev \
-            python3-venv flex bison pkg-config libjson-c-dev
-      - name: Record toolchain for cache identity
-        id: toolchain
-        shell: bash
-        run: |
-          mkdir -p build runs
-          {
-            cc --version
-            ld --version
-            python --version
-            ninja --version
-            pkg-config --modversion glib-2.0 libgcrypt slirp pixman-1 json-c
-            dpkg-query -W build-essential libc6-dev
-          } > build/toolchain.txt
-          lscpu > build/runner-specs.txt
-          echo "digest=$(sha256sum build/toolchain.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
-      - name: Restore compatible QEMU build cache
-        uses: actions/cache@v4
-        with:
-          path: build/qemu
-          key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/workflows/ci-test.yml') }}-${{ hashFiles('qemu/*.c', 'qemu/*.h', 'model/*.c', 'model/*.h') }}
-          restore-keys: |
-            qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/workflows/ci-test.yml') }}-
-      - name: Build pinned integration
-        shell: bash
-        run: |
-          set -o pipefail
-          timeout --kill-after=30s 18m qemu/build.sh --jobs 4 2>&1 | tee runs/qemu-build.log
-      - name: Install Python configuration loader
-        run: python -m pip install -e '.[control]'
-      - name: Fetch checksum-verified golden firmware
-        run: python -m tools.verify_model --fetch-only
+      - uses: ./.github/actions/qemu-setup
       - name: Run real-firmware golden scenario
         if: matrix.name != 'negative-versions' && !startsWith(matrix.name, 'control-')
         run: |
@@ -275,6 +215,11 @@ jobs:
           python -m tools.verify_power --mode qemu \
             --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
             --hardware "${{ matrix.hardware }}" --out runs/power
+      - name: Verify a disconnected module, unaffected drums and fault recovery
+        if: matrix.name == 'control-16'
+        run: |
+          python -m tools.verify_faults --mode qemu --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+            --hardware esp32-16-dual --case absent --out runs/fault-control-16
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
         run: python -m tools.summarize_run runs/scenario/run.json
