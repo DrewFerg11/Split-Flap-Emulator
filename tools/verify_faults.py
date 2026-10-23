@@ -62,6 +62,11 @@ def interrupted_reset_lines(text, observed_resets):
     return "\n".join(lines), fragments
 
 
+def unexcused_faults(counters, stall_allowance):
+    """Anomalies are never excused; stalls only up to what the known-issues baseline explains."""
+    return bool(counters["anomalies"]) or counters["stalls"] > stall_allowance
+
+
 class FaultProbe:
     timeout = 600
     document = {"version": 1, "mode": "fault-probe", "timeout": 600}
@@ -85,6 +90,13 @@ class FaultProbe:
         self.out = context.out
         native = manifest["mode"] == "native"
         self.native = native
+
+        def stall_allowance():
+            # Known emulator scheduling artifacts (#14) can lose a coil pattern: one stall each.
+            if self.known is None or not (context.out / "serial.log").exists():
+                return 0
+            serial = (context.out / "serial.log").read_text(errors="replace")
+            return self.known.excused_stalls(serial)[0]
 
         def record():
             (context.out / "fault-verification.json").write_text(
@@ -163,7 +175,7 @@ class FaultProbe:
                 # The snapshot is physical truth; events count a changed firmware read.
                 observed = effects["events"] > 0 and target["counters"]["reads"] > 0
             if healthy and observed:
-                if state["counters"]["stalls"] or state["counters"]["anomalies"]:
+                if unexcused_faults(state["counters"], stall_allowance()):
                     raise RuntimeError("unexpected model faults alongside injection")
                 break
             context.pause()
@@ -211,7 +223,7 @@ class FaultProbe:
                 and state["sequence"] > recovery["sequence"]
                 and display_aligned(state, text)
             ):
-                if state["counters"]["stalls"] or state["counters"]["anomalies"]:
+                if unexcused_faults(state["counters"], stall_allowance()):
                     raise RuntimeError("unexpected model faults during recovery")
                 break
             context.pause()

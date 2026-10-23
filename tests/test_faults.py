@@ -108,3 +108,20 @@ def test_golden_baseline_tolerates_the_emulator_wire1_timeout_read_only():
         serial_errors(
             "[ 52001][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 1", {}, known
         )
+
+
+def test_stalls_are_excused_only_as_far_as_the_golden_baseline_explains_them():
+    from flapsim.baseline import load_known_issues
+    from tools.verify_faults import unexcused_faults
+
+    known = load_known_issues("baselines/v1.4.1-golden.yaml")
+    serial = (
+        "Error writing data to module 33, error code: 5\n"
+        "Error writing data to module 34, error code: 2"
+    )
+    allowance = known.excused_stalls(serial)[0]
+    assert allowance == 1
+    assert not unexcused_faults({"stalls": 1, "anomalies": 0}, allowance)
+    assert unexcused_faults({"stalls": 2, "anomalies": 0}, allowance)
+    assert unexcused_faults({"stalls": 0, "anomalies": 1}, allowance)
+    assert unexcused_faults({"stalls": 1, "anomalies": 0}, 0)
