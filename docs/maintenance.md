@@ -213,7 +213,9 @@ One-time environment settings (Settings → Environments → `release`):
 - **Allow administrators to bypass:** off.
 
 To release: first merge a change that sets `version` in `pyproject.toml` to the new
-version (the `validate` job rejects a tag that does not match it, and the `publish` job
+version, renames `## [Unreleased]` in [`CHANGELOG.md`](../CHANGELOG.md) to the new version and date
+(adding a fresh empty `## [Unreleased]`), and checks [stability](stability.md) still matches the release
+(the `validate` job rejects a tag that does not match it, and the `publish` job
 refuses a version that is already published, but only after both architectures have been
 built and verified), then push the tag
 (`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`), open the run, choose

@@ -73,3 +73,62 @@ def test_reset_uart_fragment_requires_pinned_banner_known_prefix_and_observed_re
         assert preserved == bad and not fragments
         with pytest.raises(RuntimeError):
             serial_errors(preserved, {}, KnownSerial())
+
+
+def test_reset_uart_fragment_may_end_its_line_before_later_boot_output_or_the_capture():
+    from tools.verify_faults import interrupted_reset_lines
+
+    banner = "ets Jul 29 2019 12:21:46"
+    fragment = "[ 39140][E][Preference"
+    # The tear can land anywhere after the "[E][" tag, e.g. "Preferen" (55713) or just "[E][".
+    for cut in ["[ 55713][E][Preferen", "[ 55713][E][P", "[ 55713][E]["]:
+        kept, fragments = interrupted_reset_lines(f"{cut}\n{banner}", 1)
+        assert cut not in kept and [f["fragment"] for f in fragments] == [cut]
+    for text in [f"{fragment}\n{banner}\nrst:0xc", f"{fragment}\n\n{banner}", fragment]:
+        kept, fragments = interrupted_reset_lines(text, 1)
+        assert fragment not in kept
+        assert [f["fragment"] for f in fragments] == [fragment]
+    assert interrupted_reset_lines(f"{fragment}\n{banner}", 1)[1][0]["followed_by"] == banner
+    # Followed by other output, it is not a reset tear and stays an error.
+    other_output = f"{fragment}\nrst:0xc"
+    assert interrupted_reset_lines(other_output, 1) == (other_output, [])
+    # Beyond the observed resets, or not a prefix of the known diagnostic, it stays an error.
+    with pytest.raises(RuntimeError):
+        interrupted_reset_lines(f"{fragment}\n{banner}", 0)
+    with pytest.raises(RuntimeError):
+        interrupted_reset_lines(f"{fragment}\n{banner}\n{fragment}", 1)
+    other = (
+        "[ 39140][E][Wire.cpp:3] fail\n[ 39140][E][Preferences.cpp:50] begin(): nvs_open failed: X"
+    )
+    kept, fragments = interrupted_reset_lines(other, 3)
+    assert kept == other and not fragments
+
+
+def test_golden_baseline_tolerates_the_emulator_wire1_timeout_read_only():
+    from flapsim.baseline import load_known_issues
+    from flapsim.scenario import ExecutionFailed, serial_errors
+
+    known = load_known_issues("baselines/v1.4.1-golden.yaml")
+    read = "[ 52001][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263"
+    serial_errors(read, {"fresh_nvs": True}, known)
+    with pytest.raises(ExecutionFailed):
+        serial_errors(
+            "[ 52001][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 1", {}, known
+        )
+
+
+def test_stalls_are_excused_only_as_far_as_the_golden_baseline_explains_them():
+    from flapsim.baseline import load_known_issues
+    from tools.verify_faults import unexcused_faults
+
+    known = load_known_issues("baselines/v1.4.1-golden.yaml")
+    serial = (
+        "Error writing data to module 33, error code: 5\n"
+        "Error writing data to module 34, error code: 2"
+    )
+    allowance = known.excused_stalls(serial)[0]
+    assert allowance == 1
+    assert not unexcused_faults({"stalls": 1, "anomalies": 0}, allowance)
+    assert unexcused_faults({"stalls": 2, "anomalies": 0}, allowance)
+    assert unexcused_faults({"stalls": 0, "anomalies": 1}, allowance)
+    assert unexcused_faults({"stalls": 1, "anomalies": 0}, 0)
