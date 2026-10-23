@@ -27,7 +27,13 @@ runs:
         key: native-sources-${{ hashFiles('native/libraries.json', 'tools/golden_firmware.json') }}
     - name: Build the pinned golden source against the shims
       shell: bash
+      env:
+        RUN_SHIM_TESTS: ${{ inputs.run-shim-tests }}
+        BUILD_FLAGS: ${{ inputs.build-flags }}
       run: |
         set -o pipefail
-        python native/build.py --jobs 4 ${{ inputs.run-shim-tests == 'true' && '--test' || '' }} \
-          ${{ inputs.build-flags }} --out build/native/golden 2>&1 | tee runs-native-build.log
+        test_flag=()
+        if [ "$RUN_SHIM_TESTS" = true ]; then test_flag=(--test); fi
+        # BUILD_FLAGS is intentionally unquoted so an empty value adds no argument.
+        python native/build.py --jobs 4 "${test_flag[@]}" $BUILD_FLAGS --out build/native/golden \
+          2>&1 | tee runs-native-build.log
