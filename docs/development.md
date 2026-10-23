@@ -122,3 +122,18 @@ are bounded; superseded runs cancel. Available build, serial and verification
 logs and model timeline/state are retained for 14 days even on failure. Firmware/flash binaries are not
 uploaded. CI has read-only repository permissions and is independent of the
 firmware repository's future trusted release gate.
+
+## Emulation pitfalls
+
+Lessons from building the emulator that still apply when writing scenarios or tooling:
+
+- **Define "settled" carefully.** A move has finished only when **all** modules have de-energized their coils, ideally followed by a short quiet period. Snapshotting when the first module releases its coils can catch other rows mid-move.
+- **Wait for the right serial markers.** `AP IP Address` is printed again on MQTT reconnects, not only at boot; use `Reset reason: software reset` to detect reboots. `AP IP Address` also contains the substring `IP Address`, so anchor regexes (`(?m)^IP Address`).
+- **The firmware is busy during startup.** HTTP requests sent during homing can take more than 20 s to be answered under emulation. Wait for the startup display before driving it.
+- **Use per-run host ports.** A leftover QEMU holding `hostfwd` ports makes the next one fail with "Could not set up host forwarding rule".
+- **Do not `pkill -f` a pattern** that also appears in your own command line.
+- **A model reset is not a firmware reset.** Drum state survives a guest reboot, as on real hardware.
+- **One transient I²C error latches `hasErrored`**, permanently disabling hall reads (and so homing) for that module. Fault-injection tests should expect that.
+- Do not assert on exact timestamps: emulated timing is repeatable but not bit-for-bit deterministic. Assert on settled states.
+
+Earlier findings are in [`history/poc-findings-and-mvp-plan.md`](history/poc-findings-and-mvp-plan.md).

@@ -1,6 +1,6 @@
 # Emulator maintenance
 
-The maintainer merges the ordered [PR queue](implementation-queue.md). Keep
+The maintainer merges PRs. Keep
 issues open until their acceptance evidence and merge requirements are met.
 The strict golden smoke blocker is [firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54):
 GET `/settings` can return defaults after a confirmed persisted reconfiguration,
