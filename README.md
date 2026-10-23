@@ -25,9 +25,6 @@ Run the real [Split-Flap Display](https://github.com/DrewFerg11/Split-Flap-Displ
 Virtual I²C modules, stepper motors, character drums and hall sensors stand in for the physical display, so
 firmware can be tested automatically in CI or watched on a virtual display.
 
-The Docker image is `ghcr.io/drewferg11/split-flap-emulator`; the command inside it (and the Python package) is
-`flapsim`.
-
 ## Two ways to run it
 
 The emulator has two modes. Both drive the same virtual hardware (PCF8575 expanders, steppers, drums and hall
@@ -58,6 +55,9 @@ flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin --hardware
 flapsim run --mode native --firmware-src golden --hardware esp32-8-single \
   --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.1 --out runs/native-8
 ```
+
+The container image `ghcr.io/drewferg11/split-flap-emulator` runs the same commands: `docker run <image> run ...`
+is `flapsim run ...` ([container docs](docs/container.md)).
 
 Details: [runner](docs/runner.md), [native mode](docs/native.md), [QEMU integration ADR](docs/adr/0001-qemu-integration.md),
 [native mode ADR](docs/adr/0002-native-mode.md).
