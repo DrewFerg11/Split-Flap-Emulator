@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from flapsim.baseline import load_known_issues
 from flapsim.faults import DEFAULT_FAULTS
 from flapsim.runner import run
 from flapsim.scenario import serial_errors
@@ -25,26 +26,36 @@ CASES = {
 def interrupted_reset_lines(text, observed_resets):
     """Keep reset-interrupted UART fragments as evidence, not complete diagnostics.
 
-    Only the known Preferences begin diagnostic's literal prefix, immediately
-    joined to the pinned ESP32 ROM banner, can be classified this way. Complete
-    errors and other prefixes remain subject to the ordinary serial checks.
+    Only the known Preferences begin diagnostic's literal prefix, joined to the
+    pinned ESP32 ROM banner, can be classified this way. The ROM banner may
+    share the fragment's line or start the next non-empty line (or the capture
+    may end after the fragment). Complete errors and other prefixes remain
+    subject to the ordinary serial checks.
     """
     canonical = "Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
     banner = "ets Jul 29 2019 12:21:46"
     fragments, lines = [], []
-    for line in text.splitlines():
+    source = text.splitlines()
+
+    def interrupted(prefix):
+        match = re.fullmatch(r"\[\s*\d+\]\[E\]\[(Preference.*)", prefix)
+        return bool(match) and len(match[1]) < len(canonical) and canonical.startswith(match[1])
+
+    def record(fragment):
+        fragments.append({"kind": "reset_interrupted_diagnostic", "fragment": fragment})
+        if len(fragments) > observed_resets:
+            raise RuntimeError("more interrupted diagnostics than observed controller resets")
+
+    for index, line in enumerate(source):
         before, separator, after = line.partition(banner)
-        match = re.fullmatch(r"\[\s*\d+\]\[E\]\[(Preference.*)", before)
-        if (
-            separator
-            and match
-            and len(match[1]) < len(canonical)
-            and canonical.startswith(match[1])
-        ):
-            fragments.append({"kind": "reset_interrupted_diagnostic", "fragment": before})
-            if len(fragments) > observed_resets:
-                raise RuntimeError("more interrupted diagnostics than observed controller resets")
+        if separator and interrupted(before):
+            record(before)
             line = banner + after
+        elif not separator and interrupted(line):
+            following = next((x for x in source[index + 1 :] if x.strip()), None)
+            if following is None or following.startswith(banner):
+                record(line)
+                continue
         lines.append(line)
     return "\n".join(lines), fragments
 
@@ -53,8 +64,9 @@ class FaultProbe:
     timeout = 600
     document = {"version": 1, "mode": "fault-probe", "timeout": 600}
 
-    def __init__(self, case, mode, hardware):
+    def __init__(self, case, mode, hardware, known=None):
         self.case = case
+        self.known = known
         self.evidence = {"case": case, "complete": False}
         if mode == "native":
             # Match the real configured topology, so every additional NACK is attributable.
@@ -226,7 +238,7 @@ class FaultProbe:
             ):
                 raise RuntimeError("missing/excess firmware NACK evidence")
             text = "\n".join(line for line in text.splitlines() if line != expected)
-        serial_errors(text, {"fresh_nvs": True}, KnownSerial())
+        serial_errors(text, {"fresh_nvs": True}, self.known or KnownSerial())
         if not self.evidence["complete"]:
             raise RuntimeError("incomplete fault proof")
 
@@ -239,6 +251,11 @@ def main():
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--qemu-prefix", type=Path, default=Path("build/qemu/install"))
     parser.add_argument("--hardware", default="esp32-16-dual")
+    parser.add_argument(
+        "--known-issues",
+        type=Path,
+        help="baseline whose known firmware serial diagnostics are tolerated (QEMU golden runs)",
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     args.firmware_src = None
@@ -253,7 +270,12 @@ def main():
     try:
         code = run(
             args,
-            executor=FaultProbe(args.case, args.mode, args.hardware),
+            executor=FaultProbe(
+                args.case,
+                args.mode,
+                args.hardware,
+                load_known_issues(args.known_issues) if args.known_issues else None,
+            ),
             interrupt=lambda: received[0] if received else None,
         )
     finally:

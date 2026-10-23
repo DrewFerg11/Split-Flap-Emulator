@@ -73,3 +73,33 @@ def test_reset_uart_fragment_requires_pinned_banner_known_prefix_and_observed_re
         assert preserved == bad and not fragments
         with pytest.raises(RuntimeError):
             serial_errors(preserved, {}, KnownSerial())
+
+
+def test_reset_uart_fragment_may_end_its_line_before_the_banner_or_the_capture():
+    from tools.verify_faults import interrupted_reset_lines
+
+    banner = "ets Jul 29 2019 12:21:46"
+    fragment = "[ 39140][E][Preference"
+    for text in [f"{fragment}\n{banner}\nrst:0xc", f"{fragment}\n\n{banner}", fragment]:
+        kept, fragments = interrupted_reset_lines(text, 1)
+        assert fragment not in kept
+        assert [f["fragment"] for f in fragments] == [fragment]
+    # Followed by anything else, or beyond the observed resets, it stays an error.
+    other = f"{fragment}\nHELLO\n{banner}"
+    kept, fragments = interrupted_reset_lines(other, 3)
+    assert kept == other and not fragments
+    with pytest.raises(RuntimeError):
+        interrupted_reset_lines(f"{fragment}\n{banner}", 0)
+
+
+def test_golden_baseline_tolerates_the_emulator_wire1_timeout_read_only():
+    from flapsim.baseline import load_known_issues
+    from flapsim.scenario import ExecutionFailed, serial_errors
+
+    known = load_known_issues("baselines/v1.4.1-golden.yaml")
+    read = "[ 52001][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263"
+    serial_errors(read, {"fresh_nvs": True}, known)
+    with pytest.raises(ExecutionFailed):
+        serial_errors(
+            "[ 52001][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 1", {}, known
+        )
