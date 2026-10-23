@@ -1,0 +1,39 @@
+name: Native firmware setup
+description: Install native build dependencies, restore pinned sources and build the golden firmware against the shims.
+inputs:
+  build-flags:
+    description: Extra native/build.py flags (for example --sanitize).
+    default: ''
+  run-shim-tests:
+    description: Pass --test to native/build.py.
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install native build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build \
+          pkg-config libjson-c-dev mosquitto
+        python -m pip install -e '.[control]'
+    - name: Restore pinned firmware and library sources
+      uses: actions/cache@v4
+      with:
+        path: build/native/cache
+        key: native-sources-${{ hashFiles('native/libraries.json', 'tools/golden_firmware.json') }}
+    - name: Build the pinned golden source against the shims
+      shell: bash
+      env:
+        RUN_SHIM_TESTS: ${{ inputs.run-shim-tests }}
+        BUILD_FLAGS: ${{ inputs.build-flags }}
+      run: |
+        set -o pipefail
+        test_flag=()
+        if [ "$RUN_SHIM_TESTS" = true ]; then test_flag=(--test); fi
+        # BUILD_FLAGS is intentionally unquoted so an empty value adds no argument.
+        python native/build.py --jobs 4 "${test_flag[@]}" $BUILD_FLAGS --out build/native/golden \
+          2>&1 | tee runs-native-build.log

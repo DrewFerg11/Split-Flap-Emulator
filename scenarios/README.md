@@ -6,7 +6,7 @@
 - `release-smoke-16.yaml`: startup and centered dual-row HELLO / WORLD, including
   an explicit idempotent repeat.
 - `homing-random.yaml`: recorded seeded start, historical blank homing settlement,
-  then X startup; CI runs seeds 7, 19 and 42 independently.
+  then X startup; PRs run seed 7; the nightly workflow runs seeds 19 and 42.
 - `mqtt-native-8.yaml` (native only): provisioned Wi-Fi and broker; Home Assistant
   discovery, availability, MQTT `set` → drums and state publishing.
 - `clock-dst-native-8.yaml` / `date-rollover-native-8.yaml` (native only): time mode

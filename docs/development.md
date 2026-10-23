@@ -103,6 +103,11 @@ output directory, or deliberately remove the old generated run.
 Boot verification does not assert versions; the Phase 4 scenarios add strict
 serial/HTTP version assertions.
 
+The slow, soak-style scenarios (native `settings-race-8` and `clock-soak-native-8`, homing
+seeds 19 and 42) run in the scheduled `CI / Nightly` workflow, which can also be started
+with `workflow_dispatch`; a failed nightly run is the signal. Shared build steps live in
+`.github/actions/native-setup` and `.github/actions/qemu-setup`.
+
 CI runs independent `Fast checks` and a `Pinned QEMU build and boot` matrix
 (explicit suffixes `esp32-8-single` / `esp32-16-dual`) on PRs, main pushes and
 manual runs. Both layouts retain diagnostics even if one fails. Cache keys include the QEMU pin, build scripts,
