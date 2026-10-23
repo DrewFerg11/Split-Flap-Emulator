@@ -224,3 +224,47 @@ def test_exported_libraries_are_used_by_pin_without_git(tmp_path, monkeypatch):
     first.write_text("0" * 40 + "\n")
     with pytest.raises(AssertionError, match="must not be fetched"):
         build.libraries(tmp_path)
+
+
+def test_live_timeline_does_not_parse_a_suffix_appended_after_a_partial_read(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    path = tmp_path / "timeline.jsonl"
+    path.write_text('{"sequence":1}\n{"sequence":')
+    original_open = Path.open
+    appended = False
+
+    class AppendingReader:
+        def __init__(self):
+            self.stream = original_open(path)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.stream.close()
+
+        def append_after_read(self, data):
+            nonlocal appended
+            if not appended and data.endswith('{"sequence":'):
+                with original_open(path, "a") as writer:
+                    writer.write("2}\n")
+                appended = True
+            return data
+
+        def read(self):
+            return self.append_after_read(self.stream.read())
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            line = self.stream.readline()
+            if not line:
+                raise StopIteration
+            return self.append_after_read(line)
+
+    monkeypatch.setattr(Path, "open", lambda self, *args, **kwargs: AppendingReader())
+    assert records(tmp_path) == [{"sequence": 1}]
+    assert appended
+    assert records(tmp_path) == [{"sequence": 1}, {"sequence": 2}]

@@ -347,3 +347,17 @@ The clock tests race readers against re-anchors and check existing accelerated a
 decelerated deadlines; real public probes measure clock rates and lifecycle
 persistence on both layouts. QEMU reports its startup timing and rejects live-rate
 changes. Faults, streaming and scenario controls remain future slices.
+
+
+The deterministic-fault slice adds shared literal configuration/runtime/reader
+validation for hall stuck active/inactive, dead motor and I²C presence. Fault-only
+changes use the mechanics dispatcher at transaction boundaries during motion;
+geometry retains its idle guard. Fault evidence has an additive versioned overlay
+and separate observed-effect counters, retained across reset and power. Native
+probes cover every supported fault on both layouts; QEMU verifies a disconnected
+module, unaffected drums and recovery. The slice now uses #47's canonical
+`sensor`/`motor`/`i2c` fault engine and physical Hall snapshots. Stochastic startup
+faults preserve their immutable parameters, seeds and exact stream/effect state
+across versioned resume, including alongside deterministic runtime edits. Legacy
+#19 summary recordings retain their documented reseed behavior. Runtime stochastic
+mutation, electrical faults, streaming and declarative scenario controls remain open.

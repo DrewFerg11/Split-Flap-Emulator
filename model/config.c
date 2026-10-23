@@ -155,6 +155,8 @@ static char *load(const char *config_path, const char *mode) {
                 fs_fail("sensor_window exceeds module steps_per_rotation");
             module->angle = number(entry, "angle", 0, module->steps - 1);
             fs_parse_faults(entry, module);
+            if (module->faults.configured)
+                fs.faults_enabled = true;
             module->phase = -1;
             module->latch = 0xffe1;
             if (i &&

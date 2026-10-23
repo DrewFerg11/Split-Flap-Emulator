@@ -23,6 +23,10 @@ static struct json_object *identity(int64_t guest_ns) {
     struct json_object *object = json_object_new_object();
     integer(object, "schema_version", 1);
     integer(object, "guest_resets", fs.guest_resets);
+    if (fs.faults_enabled) {
+        integer(object, "faults_version", 1);
+        json_object_object_add(object, "initial_faults", fs_initial_faults());
+    }
     if (fs.mechanics_revision) {
         integer(object, "mechanics_version", 1);
         json_object_object_add(object, "initial_flaps", json_object_new_string(fs.flaps));
@@ -46,18 +50,7 @@ static struct json_object *identity(int64_t guest_ns) {
     }
     total.anomalies = fs.totals.anomalies;
     json_object_object_add(object, "counters", counters(total));
-    /* Injected faults (#19) and how often each has acted, only when any are configured. */
-    struct json_object *faults = NULL;
-    for (int i = 0; i < fs.count; i++) {
-        if (!fs.modules[i].faults.configured)
-            continue;
-        if (!faults)
-            faults = json_object_new_array();
-        struct json_object *entry = fs_faults_json(&fs.modules[i]);
-        integer(entry, "bus", fs.modules[i].bus);
-        integer(entry, "addr", fs.modules[i].addr);
-        json_object_array_add(faults, entry);
-    }
+    struct json_object *faults = fs_fault_summary();
     if (faults)
         json_object_object_add(object, "faults", faults);
     return object;
@@ -119,6 +112,15 @@ static struct json_object *snapshot(int64_t guest_ns, bool mechanics) {
         json_object_object_add(entry, "hall", json_object_new_boolean(fs_hall(module)));
         json_object_object_add(entry, "energized", json_object_new_boolean(module->energized));
         json_object_object_add(entry, "counters", counters(module->counters));
+        if (fs.faults_enabled) {
+            json_object_object_add(entry, "faults", fs_faults(module));
+            struct json_object *effects = json_object_new_object();
+            integer(effects, "blocked_steps", module->blocked_steps);
+            integer(effects, "nacks", module->nacks);
+            integer(effects, "rng", module->faults.rng);
+            integer(effects, "events", module->faults.events);
+            json_object_object_add(entry, "fault_counters", effects);
+        }
         if (mechanics || fs.mechanics_revision) {
             json_object_object_add(entry, "mechanics", fs_mechanics(module));
             integer(entry, "coils", (module->latch >> 1) & 15);

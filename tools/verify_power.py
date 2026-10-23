@@ -12,6 +12,7 @@ from pathlib import Path
 
 from flapsim.runner import run
 from flapsim.state import display_aligned
+from tools.verify_native import records as timeline_records
 
 
 class PowerProbe:
@@ -59,8 +60,7 @@ class PowerProbe:
                 return result
 
         def records():
-            with (context.out / "timeline.jsonl").open() as stream:
-                return [json.loads(line) for line in stream if line.endswith("\n")]
+            return timeline_records(context.out)
 
         def settled_after(sequence):
             while True:

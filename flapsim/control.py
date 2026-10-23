@@ -12,12 +12,13 @@ import time
 import uuid
 from contextlib import contextmanager
 
+from flapsim.faults import FAULT_SUPPORT, validate_faults
 from flapsim.state import MAX_CONTROL_ID, MECHANICS, validate_state
 
 CAPABILITIES = {
     "snapshot": True,
     "set_mechanics": True,
-    "set_fault": False,
+    "set_fault": True,
     "reset": False,
     "power": False,
     "speed": False,
@@ -63,6 +64,7 @@ class SnapshotClient:
         self.hardware = hardware
         self.lock = threading.Lock()
         self.closed = False
+        self.failure = None
         self.power = None
         connection.settimeout(0.5)
 
@@ -149,6 +151,11 @@ class SnapshotClient:
                     return result, self.power.state if self.power else "on"
                 return result
             except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
+                self.failure = {
+                    "stage": stage,
+                    "error": type(error).__name__,
+                    "detail": str(error)[:160],
+                }
                 self.closed = True
                 self.connection.close()
                 if command is not None:
@@ -193,10 +200,12 @@ def validate_command(value, bus, addr):
         if type(value[key]) is not int or not lo <= value[key] <= hi:
             raise ValueError("invalid " + key)
     patch = value["patch"]
-    if not isinstance(patch, dict) or not patch or set(patch) - MECHANICS:
+    if not isinstance(patch, dict) or not patch or set(patch) - (MECHANICS | {"faults"}):
         raise ValueError("empty or unknown mechanics fields")
     for key, part in patch.items():
-        if key == "sensor_polarity":
+        if key == "faults":
+            validate_faults(part, partial=True)
+        elif key == "sensor_polarity":
             if part not in ("active-high", "active-low"):
                 raise ValueError("invalid sensor polarity")
         elif type(part) is not int or not 0 <= part <= 1000000:
@@ -223,6 +232,7 @@ class ControlServer:
         self.resets = None
         self.powers = None
         self.power_metadata = None
+        self.channel_failure = None
         self.speeds = None
         self.initial_speed = speed
         self.speed_metadata = None
@@ -253,6 +263,7 @@ class ControlServer:
                     "live": power_state == "on",
                     "power_state": power_state,
                     "capabilities": dict(self.capabilities),
+                    "fault_support": FAULT_SUPPORT,
                     "speed": self.clock_metadata(),
                 }
 
@@ -546,6 +557,7 @@ class ControlServer:
         self.capabilities["power"] = False
         if client is not None:
             client.close()
+            self.channel_failure = client.failure
         if power is not None:
             self.power_metadata = power.metadata()
         if speeds is not None:
@@ -571,6 +583,8 @@ class ControlServer:
             "run_id": self.run_id,
             "endpoint": self.endpoint,
             "token_file": str(self.token_path),
+            **({"channel_failure": self.channel_failure} if self.channel_failure else {}),
+            "fault_support": FAULT_SUPPORT,
             "speed": self.clock_metadata(),
             "capabilities": dict(self.capabilities),
             **(
