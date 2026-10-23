@@ -1690,3 +1690,20 @@ def test_versioned_fault_resume_binds_stochastic_config_and_summary(make_model, 
     model.lib.fs_model_close()
     (model.out / "timeline.jsonl").write_text(json.dumps(record) + "\n")
     assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0
+
+
+@pytest.mark.parametrize("reader", ["python", "native"])
+def test_runtime_fault_receipt_cannot_be_downgraded_to_legacy_startup_evidence(make_model, reader):
+    model = faulted(make_model, {"sensor": "stuck_inactive"})
+    record = model.control({"faults": {"sensor": "stuck_inactive"}})
+    record["event"] = "faults_changed"
+    del record["faults_version"], record["initial_faults"]
+    for module in record["modules"]:
+        del module["faults"], module["fault_counters"]
+    if reader == "python":
+        with pytest.raises(ValueError, match="versioned fault evidence"):
+            validate_state(record, json.loads(model.config.read_text()))
+    else:
+        model.lib.fs_model_close()
+        (model.out / "timeline.jsonl").write_text(json.dumps(record) + "\n")
+        assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0

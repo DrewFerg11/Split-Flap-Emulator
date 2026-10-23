@@ -200,7 +200,8 @@ bool fs_restore_overlay(struct json_object *record) {
     FsModule copy = fs.modules[index];
     struct json_object *physical = fs_mechanics(&copy);
     struct json_object *original_faults = fs_faults(&copy), *fault_patch;
-    if (json_object_object_get_ex(patch, "faults", &fault_patch) && !fs.faults_enabled)
+    if (json_object_object_get_ex(patch, "faults", &fault_patch) &&
+        !json_object_object_get_ex(record, "faults_version", &value))
         valid = false;
     valid = valid && fs_parse_mechanics(patch, &copy, true);
     struct json_object *patched = fs_mechanics(&copy);
