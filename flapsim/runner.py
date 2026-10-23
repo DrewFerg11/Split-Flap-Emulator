@@ -186,6 +186,8 @@ def run(args, *, executor=None, interrupt=None):
     if args.timing not in {"ci", "accurate", "realtime"}:
         raise ValueError("timing must be ci, accurate or realtime")
     control_port = getattr(args, "control_port", None)
+    if getattr(args, "i2c_history", False) and control_port is None:
+        raise ValueError("--i2c-history requires --control-port")
     if control_port is not None:
         from flapsim.control import check_port
 
@@ -214,7 +216,13 @@ def run(args, *, executor=None, interrupt=None):
         if control_port is not None:
             from flapsim.control import ControlServer
 
-            control = ControlServer(control_port, out, hardware, timing=args.timing)
+            control = ControlServer(
+                control_port,
+                out,
+                hardware,
+                timing=args.timing,
+                telemetry=getattr(args, "i2c_history", False),
+            )
             manifest["control"] = control.metadata()
         (out / "flash.bin").write_bytes(data + b"\xff" * (FLASH_SIZE - len(data)))
         config = write_model_config(hardware, out, trace=args.trace)
@@ -248,7 +256,11 @@ def run(args, *, executor=None, interrupt=None):
                     process = subprocess.Popen(
                         command,
                         env={
-                            **{k: v for k, v in os.environ.items() if k != "FLAPSIM_CONTROL_FD"},
+                            **{
+                                k: v
+                                for k, v in os.environ.items()
+                                if k not in {"FLAPSIM_CONTROL_FD", "FLAPSIM_I2C_FD"}
+                            },
                             "FLAPSIM_CONFIG": str(config),
                             **control_env,
                         },
@@ -322,7 +334,7 @@ def run(args, *, executor=None, interrupt=None):
         if control is not None:
             try:
                 control.close()
-                manifest["control"]["status"] = "stopped"
+                manifest["control"] = {**control.metadata(), "status": "stopped"}
             except Exception as error:
                 manifest["cleanup_error"] = str(error)
                 exit_code = EXIT_RUNTIME
@@ -366,6 +378,8 @@ def run_native(args, *, executor=None, interrupt=None):
     if interrupt and (signum := interrupt()) is not None:
         raise InterruptedRun(signum)
     control_port = getattr(args, "control_port", None)
+    if getattr(args, "i2c_history", False) and control_port is None:
+        raise ValueError("--i2c-history requires --control-port")
     if control_port is not None:
         from flapsim.control import check_port
 
@@ -408,7 +422,14 @@ def run_native(args, *, executor=None, interrupt=None):
         if control_port is not None:
             from flapsim.control import ControlServer
 
-            control = ControlServer(control_port, out, hardware, backend="native", speed=speed)
+            control = ControlServer(
+                control_port,
+                out,
+                hardware,
+                backend="native",
+                speed=speed,
+                telemetry=getattr(args, "i2c_history", False),
+            )
             manifest["control"] = control.metadata()
         deadline = started + timeout
         services = {}
@@ -448,7 +469,11 @@ def run_native(args, *, executor=None, interrupt=None):
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                     env={
-                        **{k: v for k, v in os.environ.items() if k != "FLAPSIM_CONTROL_FD"},
+                        **{
+                            k: v
+                            for k, v in os.environ.items()
+                            if k not in {"FLAPSIM_CONTROL_FD", "FLAPSIM_I2C_FD"}
+                        },
                         **control_env,
                     },
                     pass_fds=(server.fileno(), *pass_fds),
@@ -475,12 +500,22 @@ def run_native(args, *, executor=None, interrupt=None):
                                 **{
                                     k: v
                                     for k, v in os.environ.items()
-                                    if k not in {"FLAPSIM_CONTROL_FD", "FLAPSIM_NATIVE_BOOT"}
+                                    if k
+                                    not in {
+                                        "FLAPSIM_CONTROL_FD",
+                                        "FLAPSIM_I2C_FD",
+                                        "FLAPSIM_NATIVE_BOOT",
+                                    }
+                                },
+                                **{
+                                    k: v
+                                    for k, v in control_env.items()
+                                    if k != "FLAPSIM_CONTROL_FD"
                                 },
                                 "FLAPSIM_CONTROL_FD": str(child.fileno()),
                                 "FLAPSIM_NATIVE_BOOT": resume,
                             },
-                            pass_fds=(server.fileno(), child.fileno()),
+                            pass_fds=(server.fileno(), child.fileno(), *pass_fds[1:]),
                         )
 
                     owner = NativePower(process, launch_power_on)
@@ -528,7 +563,7 @@ def run_native(args, *, executor=None, interrupt=None):
         if control is not None:
             try:
                 control.close()
-                manifest["control"]["status"] = "stopped"
+                manifest["control"] = {**control.metadata(), "status": "stopped"}
             except Exception as error:
                 manifest["cleanup_error"] = str(error)
                 exit_code = EXIT_RUNTIME

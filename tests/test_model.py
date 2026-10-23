@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from flapsim.hardware import normalize_hardware, write_model_config
+from flapsim.hardware import load_hardware, normalize_hardware, write_model_config
 from flapsim.state import read_settlement, validate_state
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +25,7 @@ CORE = [
     "pcf8575",
     "resume",
     "stepper",
+    "telemetry",
 ]
 COILS = [0xFFE7, 0xFFF3, 0xFFF9, 0xFFED]
 OFF = 0xFFE1
@@ -1707,3 +1708,147 @@ def test_runtime_fault_receipt_cannot_be_downgraded_to_legacy_startup_evidence(m
         model.lib.fs_model_close()
         (model.out / "timeline.jsonl").write_text(json.dumps(record) + "\n")
         assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0
+
+
+def test_structured_i2c_preserves_raw_results_and_terminates_partial_transactions(
+    model_library, tmp_path, monkeypatch
+):
+    from flapsim.telemetry import Collector
+
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    parent.settimeout(1)
+    monkeypatch.setenv("FLAPSIM_I2C_FD", str(child.fileno()))
+    model = Model(model_library, tmp_path)
+    collector = Collector(
+        tmp_path,
+        "run",
+        normalize_hardware(
+            {
+                "chip": "esp32",
+                "buses": [{"id": 0, "modules": [32]}],
+                "drum": {
+                    "steps_per_rotation": 2048,
+                    "magnet_position": 730,
+                    "sensor_window": 40,
+                    "flaps": " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+                    "flap_offset": 0,
+                    "sensor_polarity": "active-high",
+                },
+                "start_angles": [0],
+            }
+        ),
+    )
+    try:
+        model.write(OFF)
+        expected = model.read()
+        assert model.event(1, addr=33) == 1  # observed address NACK, including omitted STOP
+        model.event(1)  # supersedes that incomplete transaction
+        for _ in range(9):
+            model.event(0xFF05)
+        model.lib.fs_model_guest_reset()
+        model.event(6)  # orphan raw read is preserved, not assigned a fabricated START
+        model.lib.fs_model_close()
+        parent.setblocking(False)
+        while True:
+            try:
+                collector.receive(parent.recv(65536))
+            except BlockingIOError:
+                break
+        rows = collector.history.page()["records"]
+        transactions = [r for r in rows if r["type"] == "i2c"]
+        assert transactions[0]["end"] == "stop"
+        assert [e["kind"] for e in transactions[0]["events"]] == [1, 5, 5, 3]
+        reads = [e["result"] for e in transactions[1]["events"] if e["kind"] == 6]
+        assert reads[0] | reads[1] << 8 == expected
+        assert transactions[2]["end"] == "replaced_start"
+        assert transactions[2]["events"][0]["ack"] is False
+        assert transactions[3]["end"] == "fragment"
+        assert transactions[4]["end"] == "reset"
+        assert transactions[3]["transaction"] == transactions[4]["transaction"]
+        assert transactions[-1]["transaction"] is None
+        assert transactions[-1]["end"] == "source_end"
+        raw = [int(e["sequence"]) for r in transactions for e in r["events"]]
+        assert raw == list(range(1, len(raw) + 1))
+        assert rows[-1]["event"] == "source_ended"
+    finally:
+        model.lib.fs_model_close()
+        parent.close()
+        child.close()
+        collector.close()
+
+
+def test_structured_i2c_full_transport_drops_without_blocking_or_changing_model(
+    model_library, tmp_path, monkeypatch
+):
+    import time
+
+    from flapsim.telemetry import HEADER, Collector
+
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    child.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2048)
+    monkeypatch.setenv("FLAPSIM_I2C_FD", str(child.fileno()))
+    model = Model(model_library, tmp_path)
+    started = time.monotonic()
+    try:
+        for _ in range(1000):
+            model.write(OFF)
+        assert time.monotonic() - started < 5
+        parent.setblocking(False)
+        packets = []
+        while True:
+            try:
+                packets.append(parent.recv(65536))
+            except BlockingIOError:
+                break
+        model.write(OFF)
+        data = parent.recv(65536)
+        words = HEADER.unpack_from(data)
+        assert words[11] > 0 and words[12] > 0
+        collector = Collector(
+            tmp_path,
+            "run",
+            load_hardware("esp32-8-single"),
+        )
+        try:
+            for packet in packets + [data]:
+                collector.receive(packet)
+            assert any(
+                r.get("reason") == "producer_loss" for r in collector.history.page()["records"]
+            )
+        finally:
+            collector.close()
+        model.lib.fs_model_close()
+        state = model.state()
+        assert state["modules"][0]["angle"] == 0
+        assert not state["counters"]["anomalies"] and not state["counters"]["stalls"]
+    finally:
+        model.lib.fs_model_close()
+        parent.close()
+        child.close()
+
+
+def test_structured_snapshots_do_not_change_fault_rng_physics_or_timeline(
+    model_library, tmp_path, monkeypatch
+):
+    def exercise(path):
+        path.mkdir()
+        model = Model(
+            model_library,
+            path,
+            module_overrides={0: {"faults": {"sensor": "noisy", "sensor_noise": 0.3}}},
+        )
+        for _ in range(10):
+            model.write(OFF)
+            model.read()
+            model.tick()
+        model.lib.fs_model_close()
+        return model.state(), model.timeline()
+
+    baseline = exercise(tmp_path / "baseline")
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    monkeypatch.setenv("FLAPSIM_I2C_FD", str(child.fileno()))
+    try:
+        assert exercise(tmp_path / "observed") == baseline
+    finally:
+        parent.close()
+        child.close()

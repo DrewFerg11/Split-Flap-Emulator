@@ -12,6 +12,7 @@ int fs_model_power_checkpoint(int64_t guest_ns) {
     if (!fs.initialized || fs.failed || guest_ns < fs.now)
         return -1;
     fs_model_tick(guest_ns);
+    fs_telemetry_boundary(3);
     fs_emit("controller_power_off", false);
     if (!fs.failed && fsync(fileno(fs.timeline)) != 0)
         fs_fail("cannot commit power checkpoint");

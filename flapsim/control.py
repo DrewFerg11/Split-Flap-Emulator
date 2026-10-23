@@ -10,7 +10,7 @@ import socket
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 from flapsim.faults import FAULT_SUPPORT, validate_faults
 from flapsim.state import MAX_CONTROL_ID, MECHANICS, validate_state
@@ -216,7 +216,9 @@ def validate_command(value, bus, addr):
 class ControlServer:
     """Loopback only; auth secret lives in a mode-0600 file, never the manifest."""
 
-    def __init__(self, port, out, hardware, *, backend="qemu", speed=5.0, timing="ci"):
+    def __init__(
+        self, port, out, hardware, *, backend="qemu", speed=5.0, timing="ci", telemetry=False
+    ):
         if backend not in {"qemu", "native"}:
             raise ValueError("unknown control backend")
         check_port(port)
@@ -224,7 +226,7 @@ class ControlServer:
         from starlette.applications import Starlette
         from starlette.datastructures import Headers
         from starlette.responses import JSONResponse
-        from starlette.routing import Route
+        from starlette.routing import Route, WebSocketRoute
 
         self.hardware = hardware
         self.backend = backend
@@ -240,9 +242,16 @@ class ControlServer:
         self.capabilities = dict(CAPABILITIES)
         self.run_id = str(uuid.uuid4())
         self.token = secrets.token_urlsafe(32)
+        self.telemetry = None
+        self.subscribers = 0
         self.listener = socket.socket()
         self.thread = None
         try:
+            if telemetry:
+                from flapsim.telemetry import Collector
+
+                self.telemetry = Collector(out, self.run_id, hardware)
+                self.capabilities.update(i2c_history=True, stream=True)
             self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.listener.bind(("127.0.0.1", port))
             self.listener.listen(16)
@@ -278,6 +287,8 @@ class ControlServer:
                     )
                     log.flush()
                     os.fsync(log.fileno())
+                if self.telemetry:
+                    self.telemetry.audit(entry)
 
             async def state(request):
                 # SnapshotClient is blocking, bounded and single-flight. Starlette's
@@ -460,9 +471,98 @@ class ControlServer:
                     status_code=code,
                 )
 
+            def history_page(params):
+                from flapsim.telemetry import CursorError
+
+                if set(params) - {"since", "limit"} or any(
+                    len(params.getlist(key)) != 1 for key in params
+                ):
+                    raise CursorError("invalid_query")
+                limit = params.get("limit", "128")
+                if not limit.isascii() or not limit.isdecimal() or len(limit) > 3:
+                    raise CursorError("invalid_limit")
+                return self.telemetry.history.page(params.get("since"), int(limit))
+
+            async def i2c(request):
+                from flapsim.telemetry import CursorError
+
+                if self.telemetry is None:
+                    return JSONResponse({"error": "unsupported_capability"}, status_code=409)
+                try:
+                    page = history_page(request.query_params)
+                except CursorError as error:
+                    return JSONResponse({"error": str(error)}, status_code=error.status)
+                return JSONResponse(page, status_code=503 if page["error"] else 200)
+
+            async def stream(websocket):
+                from starlette.websockets import WebSocketDisconnect
+
+                from flapsim.telemetry import CursorError
+
+                if self.telemetry is None or self.subscribers >= 8:
+                    await websocket.close(code=1013)
+                    return
+                self.subscribers += 1
+                try:
+                    await websocket.accept()
+                    authorization = websocket.headers.getlist("authorization")
+                    if not authorization:
+                        try:
+                            message = await asyncio.wait_for(websocket.receive(), 1)
+                            if message["type"] == "websocket.disconnect":
+                                return
+                            if "text" not in message or len(message["text"].encode()) > 2048:
+                                raise ValueError("invalid authentication message")
+                            value = strict_json(message["text"])
+                        except (TimeoutError, ValueError, RecursionError):
+                            await websocket.close(code=1008)
+                            return
+                        if (
+                            not isinstance(value, dict)
+                            or set(value) != {"token"}
+                            or not isinstance(value["token"], str)
+                            or not hmac.compare_digest(value["token"].encode(), self.token.encode())
+                        ):
+                            await websocket.close(code=1008)
+                            return
+                    try:
+                        page = history_page(websocket.query_params)
+                    except CursorError as error:
+                        await websocket.send_json({"error": str(error)})
+                        await websocket.close(code=1008)
+                        return
+                    since = None
+                    while True:
+                        if since is not None:
+                            page = self.telemetry.history.page(since)
+                        if page["records"] or page["gap"] or since is None or page["error"]:
+                            await asyncio.wait_for(websocket.send_json(page), 1)
+                        since = page["next"]
+                        if page["stopped"] or page["error"]:
+                            await websocket.close(code=1011 if page["error"] else 1000)
+                            return
+                        # One bounded page per turn. Receive also observes disconnects;
+                        # post-auth application messages are not part of this protocol.
+                        try:
+                            message = await asyncio.wait_for(
+                                websocket.receive(), 0.001 if page["more"] else 0.05
+                            )
+                        except TimeoutError:
+                            continue
+                        if message["type"] == "websocket.disconnect":
+                            return
+                        await websocket.close(code=1008)
+                        return
+                except (WebSocketDisconnect, TimeoutError, OSError):
+                    pass
+                finally:
+                    self.subscribers -= 1
+
             app = Starlette(
                 routes=[
                     Route("/api/emu/state", state, methods=["GET"]),
+                    Route("/api/emu/i2c", i2c, methods=["GET"]),
+                    WebSocketRoute("/api/emu/stream", stream),
                     Route(
                         "/api/emu/modules/{bus:int}/{addr:int}/mech", mechanics, methods=["POST"]
                     ),
@@ -478,6 +578,23 @@ class ControlServer:
 
             async def boundary(scope, receive, send):
                 headers = Headers(scope=scope)
+                if scope["type"] == "websocket":
+                    authorization = headers.getlist("authorization")
+                    if not accepts_authority(
+                        headers.getlist("host"), headers.getlist("origin"), self.port
+                    ) or (
+                        authorization
+                        and (
+                            len(authorization) != 1
+                            or not hmac.compare_digest(
+                                authorization[0].encode(), ("Bearer " + self.token).encode()
+                            )
+                        )
+                    ):
+                        await send({"type": "websocket.close", "code": 1008})
+                        return
+                    await app(scope, receive, send)
+                    return
                 if not accepts_authority(
                     headers.getlist("host"), headers.getlist("origin"), self.port
                 ):
@@ -507,7 +624,8 @@ class ControlServer:
                     proxy_headers=False,
                     server_header=False,
                     lifespan="off",
-                    ws="none",
+                    ws="websockets-sansio" if telemetry else "none",
+                    ws_max_size=2048,
                     http="h11",
                     timeout_keep_alive=1,
                     timeout_graceful_shutdown=1,
@@ -585,6 +703,7 @@ class ControlServer:
             "token_file": str(self.token_path),
             **({"channel_failure": self.channel_failure} if self.channel_failure else {}),
             "fault_support": FAULT_SUPPORT,
+            **({"telemetry": self.telemetry.metadata()} if self.telemetry else {}),
             "speed": self.clock_metadata(),
             "capabilities": dict(self.capabilities),
             **(
@@ -604,6 +723,8 @@ class ControlServer:
                 self.thread.join(4)
         finally:
             self.listener.close()
+        if self.telemetry:
+            self.telemetry.close()
         if self.thread is not None and self.thread.is_alive():
             raise RuntimeError("control HTTP server did not stop")
 
@@ -615,8 +736,14 @@ def channel(service):
         yield {}, (), None, None
         return
     parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
-    with parent, child:
+    transport = service.telemetry.channel() if service.telemetry else nullcontext(({}, ()))
+    with parent, child, transport as (extra_env, extra_fds):
         try:
-            yield {"FLAPSIM_CONTROL_FD": str(child.fileno())}, (child.fileno(),), parent, child
+            yield (
+                {"FLAPSIM_CONTROL_FD": str(child.fileno()), **extra_env},
+                (child.fileno(), *extra_fds),
+                parent,
+                child,
+            )
         finally:
             service.detach()

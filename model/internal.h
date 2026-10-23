@@ -94,4 +94,10 @@ struct json_object *fs_faults_json(const FsModule *module);
 struct json_object *fs_fault_summary(void);
 bool fs_validate_fault_summary(struct json_object *record, bool legacy);
 
+void fs_telemetry_start(void);
+void fs_telemetry_event(uint8_t bus, uint8_t address, uint16_t event, int result, int64_t guest_ns);
+void fs_telemetry_boundary(int kind); /* wire kinds: 2 reset, 3 power-off */
+void fs_telemetry_state(int64_t guest_ns);
+void fs_telemetry_close(void);
+
 #endif

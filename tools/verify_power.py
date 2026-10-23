@@ -19,7 +19,8 @@ class PowerProbe:
     timeout = 300
     document = {"version": 1, "mode": "power-probe", "timeout": 300}
 
-    def __init__(self, end_off=False, mode="qemu", off_exit="success"):
+    def __init__(self, end_off=False, mode="qemu", off_exit="success", telemetry=False):
+        self.telemetry = telemetry
         self.end_off = end_off
         self.off_exit = off_exit
         if mode == "native":
@@ -30,6 +31,17 @@ class PowerProbe:
             }
 
     def execute(self, context):
+        if not self.telemetry:
+            return self._execute(context)
+        from tools.verify_telemetry import TelemetryCheck
+
+        observer = TelemetryCheck(context)
+        try:
+            return self._execute(context)
+        finally:
+            observer.finish()
+
+    def _execute(self, context):
         manifest = json.loads((context.out / "run.json").read_text())
         endpoint = manifest["control"]["endpoint"]
         token = (context.out / "control-token").read_text().strip()
@@ -215,6 +227,7 @@ def main():
     parser.add_argument("--hardware", default="esp32-8-single")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--end-off", action="store_true")
+    parser.add_argument("--i2c-history", action="store_true")
     parser.add_argument(
         "--off-exit", choices=["success", "timeout", "interrupt"], default="success"
     )
@@ -224,7 +237,9 @@ def main():
     args.timeout, args.trace, args.control_port, args.timing = 300, False, 0, "ci"
     code = run(
         args,
-        executor=PowerProbe(args.end_off or args.off_exit != "success", args.mode, args.off_exit),
+        executor=PowerProbe(
+            args.end_off or args.off_exit != "success", args.mode, args.off_exit, args.i2c_history
+        ),
     )
     print((args.out / "run.json").read_text())
     expected = {"success": 0, "timeout": 4, "interrupt": 128 + signal.SIGTERM}[args.off_exit]
