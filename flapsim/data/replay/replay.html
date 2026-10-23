@@ -15,7 +15,7 @@
     <div class="meta"><span id="clock"></span><span id="event" class="pill"></span></div>
   </header>
   <p class="notice" id="warning">@@NOTICE@@</p>
-  <div class="frame">
+  <div class="frame" id="frame">
     <div id="board" aria-label="Virtual display"></div>
     <div id="legend"></div>
   </div>
@@ -72,10 +72,7 @@ function facts(frame, index) {
 
 function draw() {
   const index = Number(scrub.value), frame = frames[index];
-  if (!frame) {
-    document.getElementById("clock").textContent = "no complete timeline snapshots";
-    return;
-  }
+  if (!frame) return;
   document.getElementById("clock").textContent =
     "emulated t = " + (frame.guest_ns / 1e9).toFixed(1) + " s · snapshot " + (index + 1) + "/" +
     frames.length;
@@ -85,9 +82,13 @@ function draw() {
   facts(frame, index);
 }
 
+if (!frames.length) {
+  // Nothing to play: say so in the notice and drop the empty display, player and details.
+  const notice = document.getElementById("warning");
+  if (!notice.textContent) notice.textContent = "No complete timeline snapshots.";
+  for (const id of ["frame", "controls", "details"]) document.getElementById(id).hidden = true;
+}
 scrub.max = Math.max(0, frames.length - 1);
-scrub.disabled = !frames.length;
-play.disabled = !frames.length;
 scrub.addEventListener("input", () => { pause(); draw(); });
 play.addEventListener("click", () => {
   if (timer) { pause(); return; }

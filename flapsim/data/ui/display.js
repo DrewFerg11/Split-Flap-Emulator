@@ -107,7 +107,7 @@ const FlapUI = (() => {
       }
       for (const m of modules) {
         const t = tiles.get(key(m));
-        const shown = m.char === " " ? " " : m.char;
+        const shown = m.char === " " ? "\u00a0" : m.char;
         if (t.text !== shown) {
           const first = t.text === null;
           t.text = shown;
