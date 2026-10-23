@@ -28,10 +28,11 @@ def interrupted_reset_lines(text, observed_resets):
 
     Only a literal prefix of the known Preferences begin diagnostic can be
     classified this way, and never more of them than the controller resets the
-    probe observed. It either shares its line with the pinned ESP32 ROM banner
-    or ends its line (the new boot's output can start on a later line, or the
-    capture can end first); what follows is kept in the evidence. Complete
-    errors and other prefixes remain subject to the ordinary serial checks.
+    probe observed. The tear can land anywhere after the "[E][" tag. The
+    fragment either shares its line with the pinned ESP32 ROM banner or ends
+    its line with the banner on the next non-empty line (or the capture ending
+    first); what follows is kept in the evidence. Complete errors and other
+    prefixes remain subject to the ordinary serial checks.
     """
     canonical = "Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
     banner = "ets Jul 29 2019 12:21:46"
@@ -39,7 +40,7 @@ def interrupted_reset_lines(text, observed_resets):
     source = text.splitlines()
 
     def interrupted(prefix):
-        match = re.fullmatch(r"\[\s*\d+\]\[E\]\[(Preference.*)", prefix)
+        match = re.fullmatch(r"\[\s*\d+\]\[E\]\[(.*)", prefix)
         return bool(match) and len(match[1]) < len(canonical) and canonical.startswith(match[1])
 
     def record(fragment, following=None):
@@ -56,8 +57,10 @@ def interrupted_reset_lines(text, observed_resets):
             record(before)
             line = banner + after
         elif not separator and interrupted(line):
-            record(line, next((x for x in source[index + 1 :] if x.strip()), ""))
-            continue
+            following = next((x for x in source[index + 1 :] if x.strip()), None)
+            if following is None or following.startswith(banner):
+                record(line, following or "")
+                continue
         lines.append(line)
     return "\n".join(lines), fragments
 

@@ -80,16 +80,23 @@ def test_reset_uart_fragment_may_end_its_line_before_later_boot_output_or_the_ca
 
     banner = "ets Jul 29 2019 12:21:46"
     fragment = "[ 39140][E][Preference"
+    # The tear can land anywhere after the "[E][" tag, e.g. "Preferen" (55713) or just "[E][".
+    for cut in ["[ 55713][E][Preferen", "[ 55713][E][P", "[ 55713][E]["]:
+        kept, fragments = interrupted_reset_lines(f"{cut}\n{banner}", 1)
+        assert cut not in kept and [f["fragment"] for f in fragments] == [cut]
     for text in [f"{fragment}\n{banner}\nrst:0xc", f"{fragment}\n\n{banner}", fragment]:
         kept, fragments = interrupted_reset_lines(text, 1)
         assert fragment not in kept
         assert [f["fragment"] for f in fragments] == [fragment]
-    assert interrupted_reset_lines(f"{fragment}\nrst:0xc", 1)[1][0]["followed_by"] == "rst:0xc"
+    assert interrupted_reset_lines(f"{fragment}\n{banner}", 1)[1][0]["followed_by"] == banner
+    # Followed by other output, it is not a reset tear and stays an error.
+    other_output = f"{fragment}\nrst:0xc"
+    assert interrupted_reset_lines(other_output, 1) == (other_output, [])
     # Beyond the observed resets, or not a prefix of the known diagnostic, it stays an error.
     with pytest.raises(RuntimeError):
         interrupted_reset_lines(f"{fragment}\n{banner}", 0)
     with pytest.raises(RuntimeError):
-        interrupted_reset_lines(f"{fragment}\n{fragment}", 1)
+        interrupted_reset_lines(f"{fragment}\n{banner}\n{fragment}", 1)
     other = (
         "[ 39140][E][Wire.cpp:3] fail\n[ 39140][E][Preferences.cpp:50] begin(): nvs_open failed: X"
     )
