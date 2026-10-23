@@ -1,5 +1,7 @@
 # Live state, mechanics and reset API (issue #20)
 
+> **Experimental in 1.0.** The control API is shipped for early use and may change in 1.x releases while it is finished.
+
 The runner can expose current physical state independently of the firmware's
 web server. The implemented QEMU and native routes provide authenticated live state, atomic mechanics
 edits, controller reset/power transitions, native runtime speed, deterministic module faults and operation receipts. I2C history and WebSockets remain unavailable and are explicitly false in `capabilities`. Issue #20 stays

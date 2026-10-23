@@ -70,13 +70,23 @@ Details: [runner](docs/runner.md), [native mode](docs/native.md), [QEMU integrat
 
 ## Documentation
 
-- Build, installation, checks and boot reproduction: [`docs/development.md`](docs/development.md)
+The full index is [`docs/README.md`](docs/README.md).
+
+**Using flapsim**
+
 - Running the emulator and writing scenarios: [`docs/runner.md`](docs/runner.md), [`docs/scenarios.md`](docs/scenarios.md)
 - Physical hardware, configuration and state/timeline schemas: [`docs/hardware-model.md`](docs/hardware-model.md)
 - Per-module physical calibration and firmware verification: [`docs/calibration.md`](docs/calibration.md)
-- Live authenticated state and mechanics API: [`docs/control-api.md`](docs/control-api.md); read-only live display: [`docs/panel.md`](docs/panel.md)
-- Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md)
-- Release gate for firmware: [`docs/release-gate.md`](docs/release-gate.md), [`docs/firmware-ci.md`](docs/firmware-ci.md)
+- Container commands: [`docs/container.md`](docs/container.md)
+- Native-mode checks in firmware CI: [`docs/firmware-ci.md`](docs/firmware-ci.md)
+- Experimental in 1.0: live authenticated state and mechanics API [`docs/control-api.md`](docs/control-api.md); read-only live display [`docs/panel.md`](docs/panel.md)
+
+**Maintaining flapsim**
+
+- Build, installation, checks and boot reproduction: [`docs/development.md`](docs/development.md)
+- QEMU/firmware updates and publication: [`docs/maintenance.md`](docs/maintenance.md)
+- Release gate for firmware: [`docs/release-gate.md`](docs/release-gate.md)
+- Native internals, mechanics findings and decisions: [`docs/native.md`](docs/native.md), [`docs/mechanics-findings.md`](docs/mechanics-findings.md), [`docs/adr/`](docs/adr)
 - History (implementation queue, POC findings, original MVP plan): [`docs/history/`](docs/history); POC code (removed, kept in git history): [`poc/` at e0bd421](https://github.com/DrewFerg11/Split-Flap-Emulator/tree/e0bd4215d8c3f7ad67b8e8568dad5e5a1ad671cf/poc)
 
 ## License
