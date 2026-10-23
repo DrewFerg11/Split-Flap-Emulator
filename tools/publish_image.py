@@ -28,7 +28,14 @@ MANIFEST_TYPES = ", ".join(
         "application/vnd.docker.distribution.manifest.v2+json",
     ]
 )
-REQUIRED_CASES = {"smoke-8": 0, "smoke-16": 0, "timeout": 4, "stop": 143, "wrong-version": 5}
+REQUIRED_CASES = {
+    "smoke-8": 0,
+    "smoke-16": 0,
+    "timeout": 4,
+    "stop": 143,
+    "wrong-version": 5,
+    "runtime-controls-16": 0,
+}
 
 
 def release_version(tag, package_version):
@@ -88,6 +95,7 @@ def validate_candidate(proof, info, revision, version, architecture):
         len(cases) != len(REQUIRED_CASES)
         or {c.get("case"): c.get("exit_code") for c in cases} != REQUIRED_CASES
         or any(c.get("expected_exit") != REQUIRED_CASES[c["case"]] for c in cases)
+        or any(c.get("control_verified") is not True for c in cases)
     ):
         raise ValueError("candidate is missing required positive/negative container checks")
 

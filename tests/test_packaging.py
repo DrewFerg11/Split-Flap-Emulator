@@ -98,7 +98,7 @@ def candidate(architecture="amd64"):
         "image": {"Id": image_id, "Architecture": architecture},
         "resources": {"version": "1.2.3", "provenance": {"source_revision": REVISION}},
         "cases": [
-            {"case": name, "exit_code": code, "expected_exit": code}
+            {"case": name, "exit_code": code, "expected_exit": code, "control_verified": True}
             for name, code in REQUIRED_CASES.items()
         ],
     }
@@ -181,6 +181,10 @@ def test_builtins_resolve_outside_checkout_and_explicit_bad_paths_do_not_fall_ba
         firmware_sha256=GOLDEN["sha256"],
     )
     assert executor.document["name"] == "release-smoke-8"
+    controls = load_executor("runtime-controls-16", load_hardware("esp32-16-dual"))
+    assert controls.requires_control
+    speed = load_executor("runtime-speed-native-16", load_hardware("esp32-16-dual"), mode="native")
+    assert speed.requires_control
     with pytest.raises(FileNotFoundError):
         resolve_resource("hardware", "missing/esp32-8-single.yaml")
 
@@ -484,3 +488,12 @@ def test_only_clean_checked_out_commits_on_main_can_be_published(tmp_path, monke
     )
     with pytest.raises(subprocess.CalledProcessError):
         validate_checkout(git("rev-parse", "HEAD"), "v1.2.3")
+
+
+def test_candidate_without_control_acceptance_cannot_be_published():
+    from tools.publish_image import validate_candidate
+
+    proof, info = candidate()
+    proof["cases"][0].pop("control_verified")
+    with pytest.raises(ValueError, match="required positive/negative"):
+        validate_candidate(proof, info, REVISION, "1.2.3", "amd64")

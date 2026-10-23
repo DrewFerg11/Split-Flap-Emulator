@@ -88,7 +88,7 @@ telemetry), not two independent HTTP implementations. Add an optional control
 client to `RunContext` **after** reconciling #30/#31's services/context changes.
 Keep process supervision, signals, finalization and MQTT ownership in the runner.
 
-Recommended HTTP stack: Starlette + Uvicorn with the wsproto WebSocket backend,
+Implemented HTTP stack: Starlette + Uvicorn with the websockets Sans-I/O backend,
 as an optional `control` extra, with explicit pinned-compatible dependency ranges
 and license/version checks at implementation time. This avoids hand-writing a
 WebSocket/HTTP parser. The runner retains signal handling; the server's loop has
@@ -361,3 +361,33 @@ faults preserve their immutable parameters, seeds and exact stream/effect state
 across versioned resume, including alongside deterministic runtime edits. Legacy
 #19 summary recordings retain their documented reseed behavior. Runtime stochastic
 mutation, electrical faults, streaming and declarative scenario controls remain open.
+
+
+## Complete-scope acceptance gates
+
+The telemetry slice adds the optional bounded I2C journal/history and authenticated
+WebSocket pages. Declarative controls share validation, admission, audit and
+receipts with HTTP; implicit scenario dispatch stays private and requires no HTTP
+extras or listener. Explicit `--control-port` enables the public loopback API.
+
+Final acceptance runs the existing golden/native matrices plus real runtime
+control scenarios. Installed wheels must resolve both new scenarios outside the
+checkout. Exact candidate images on amd64 and arm64 run telemetry during positive
+smokes, negative version/timeout/stop checks and a sixteen-module control scenario;
+native image verification also runs that scenario from mounted golden source.
+A successful runtime-controls case requires every step and receipt to pass, the
+actual disconnection effect and repaired overlay to survive reset/power, and a
+complete durable audit. An expected/known failure cannot replace these controls.
+
+Image proofs record `control_verified` for every required case. Journal checks
+require advertised bounds, correct run/cursor ordering, complete lines, a flushed
+terminal cursor and stopped/error-free metadata. Publication rejects proofs
+without these checks. Separate native/QEMU probes retain an authenticated unread
+WebSocket through timeout, actual host SIGINT/SIGTERM and intentional child crash,
+then require clean stream closure, a closed listener, reaped owned processes and
+finalized evidence. Off-state timeout/cancellation probes also run with telemetry.
+
+These are review and CI gates, not a claim that the issue is merged or closed.
+Keep #20 open until the telemetry, scenario and final acceptance PRs have merged
+and their final-head checks pass. Runtime stochastic mutation and electrical faults
+remain separate #19 scope.
