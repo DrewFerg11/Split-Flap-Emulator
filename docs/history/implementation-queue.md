@@ -51,7 +51,7 @@ The intermittent I2C read Error263 remains separately tracked in
 baseline entry does not establish a cause or fix. [#16](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/16)
 tracks mechanical realism after the MVP and does not block this queue.
 
-Phase 6 uses a [strict same-run artifact gate](release-gate.md). Its
+Phase 6 uses a [strict same-run artifact gate](../release-gate.md). Its
 current recorded main base is `dd6a432f5a0a1183c276ed0643abda9053af321b`.
 PR #17 is the next emulator review; the companion firmware PR stays draft until
 actual image and strict hosted activation evidence is available. No published image or active gate is claimed.

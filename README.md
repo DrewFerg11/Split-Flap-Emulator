@@ -77,8 +77,7 @@ Details: [runner](docs/runner.md), [native mode](docs/native.md), [QEMU integrat
 - Live authenticated state and mechanics API: [`docs/control-api.md`](docs/control-api.md); read-only live display: [`docs/panel.md`](docs/panel.md)
 - Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md)
 - Release gate for firmware: [`docs/release-gate.md`](docs/release-gate.md), [`docs/firmware-ci.md`](docs/firmware-ci.md)
-- Implementation history: [`docs/implementation-queue.md`](docs/implementation-queue.md)
-- Original findings and MVP plan: [`docs/poc-findings-and-mvp-plan.md`](docs/poc-findings-and-mvp-plan.md); POC code (reference only): [`poc/`](poc)
+- History (implementation queue, POC findings, original MVP plan): [`docs/history/`](docs/history); POC code (reference only): [`poc/`](poc)
 
 ## License
 

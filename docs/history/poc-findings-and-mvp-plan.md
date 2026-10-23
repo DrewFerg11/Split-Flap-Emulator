@@ -46,7 +46,7 @@ on a 4-vCPU machine. That is fast enough to gate releases in GitHub Actions.
 Using one binary, the POC found a real release bug (`v1.4.0` reports itself as `v1.4.0-rc.1`), plus several
 firmware behaviours worth reviewing ([section 8](#8-firmware-findings-from-the-poc)).
 
-![POC: real v1.4.0 firmware homing 8 virtual modules](images/poc-homing.gif)
+![POC: real v1.4.0 firmware homing 8 virtual modules](../images/poc-homing.gif)
 
 ## 2. Goals and non-goals
 
@@ -135,7 +135,7 @@ Key facts about the fork, verified in the POC:
 
 ## 5. What the POC built
 
-All POC code is in [`poc/`](../poc); see [`poc/README.md`](../poc/README.md) for how to reproduce.
+All POC code is in [`poc/`](../../poc); see [`poc/README.md`](../../poc/README.md) for how to reproduce.
 
 | File | Purpose |
 |---|---|
@@ -170,7 +170,7 @@ replaces these with a hardware config file.
 
 | Start (random drums) | Homing | Homed | No-Wi-Fi "X" |
 |---|---|---|---|
-| ![start](images/poc-start.png) | ![moving](images/poc-moving.png) | ![homed](images/poc-homed.png) | ![x](images/poc-final-x.png) |
+| ![start](../images/poc-start.png) | ![moving](../images/poc-moving.png) | ![homed](../images/poc-homed.png) | ![x](../images/poc-final-x.png) |
 
 ## 7. Performance investigation
 
@@ -307,13 +307,13 @@ maintenance documentation is completed in phase 5.
 Implementations 1–5 are **merged** in main as `9663764`, `3eebd00`, `e237b07`, `2004377` and `dd6a432`. Golden CI uses the accepted checksum-bound known-issues baseline (#15); strict new-firmware release checks use no baseline. Phase 5 packaging is merged as `dd6a432` and `v0.1.0` is published; phase 6's emulator side is merged. Later phases
 remain stacked drafts or queued work. No phase is complete until its
 implementation is merged and acceptance passes. See the [ordered PR queue](implementation-queue.md) and
-[phase-1 reproduction instructions](development.md).
+[phase-1 reproduction instructions](../development.md).
 
 | Phase | Tracking issue | Original steps | Status |
 |---|---|---|---|
-| 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | Merged: [PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9); [current CI passed](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39358214724); Hermes approved before merge; merged as `9663764`; [ADR](adr/0001-qemu-integration.md) |
-| 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | Merged: [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10) as `3eebd00`; both real layouts and CI passed; Hermes approved before merge; [hardware/schema contract](hardware-model.md) |
-| 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | Merged: [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11) as `e237b07`; [runner contract](runner.md); all three CI jobs and 144 local tests passed; Hermes approved before merge |
+| 1 | [Project foundation, pinned QEMU integration, and initial CI](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/2) | 0–2; initial regression checks from 11 | Merged: [PR #9](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/9); [current CI passed](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39358214724); Hermes approved before merge; merged as `9663764`; [ADR](../adr/0001-qemu-integration.md) |
+| 2 | [Production hardware model and configuration](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/3) | 3–4 | Merged: [PR #10](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/10) as `3eebd00`; both real layouts and CI passed; Hermes approved before merge; [hardware/schema contract](../hardware-model.md) |
+| 3 | [Isolated runner and process supervision](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/4) | 5 | Merged: [PR #11](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/11) as `e237b07`; [runner contract](../runner.md); all three CI jobs and 144 local tests passed; Hermes approved before merge |
 | 4 | [Scenarios, smoke tests, reports, and replay](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/5) | 6–8; golden regression checks from 11 | Implementation merged in [PR #12](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/12) as `2004377`; Hermes approved, all seven CI jobs pass using [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15); full strict firmware-functional follow-up remains open |
 | 5 | [Docker packaging, verified publishing, and maintenance](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/6) | 9; maintenance from 11 | Merged in [PR #13](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/13) as `dd6a432`; `v0.1.0` published by [Release / Tag](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39711368887) as `ghcr.io/drewferg11/split-flap-emulator@sha256:acd9a51fe50c91530df3e1583ce070cb17e712d31d8d415654c43d97879d3935` after full image verification |
 | 6 | [Firmware release gating](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7) | 10; companion firmware-repository PR | Emulator side merged in [PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17); [companion firmware PR #85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85) pins the v0.1.0 digest and gate helper; what remains is strict firmware passes (SFD#54/#84 fixed by merged SFD#91; #14 fix in SFD#90) and activation with hosted dry-run evidence; no active gate claimed |
@@ -367,7 +367,7 @@ checklist. Tests and CI evolve within each phase rather than waiting until step 
 ### Step 2: Spike: unmodified QEMU (route B) vs patch (route A). Timebox 1–2 days
 **Implementation note (phase 1):** the pinned callback ABI and upstream shared-library link recipe support a
 single C launcher integration (route B). The launcher keeps initialization, main loop and cleanup on its original
-thread. See [ADR 0001](adr/0001-qemu-integration.md) for the spike evidence and phase-3 executable contract;
+thread. See [ADR 0001](../adr/0001-qemu-integration.md) for the spike evidence and phase-3 executable contract;
 the historical tasks below remain the original decision checklist.
 
 **Tasks**
@@ -385,7 +385,7 @@ the historical tasks below remain the original decision checklist.
 ### Step 3: Hardware model (production version of `flapsim_model.c`)
 **Implementation note (phase 2):** core components are independent of QEMU; the adapter uses the pinned
 library's configured timer/reset headers. `activity.json` plus movement/settlement IDs makes an old settled
-snapshot identifiable during new motion. See the [hardware and schema contract](hardware-model.md) for atomic
+snapshot identifiable during new motion. See the [hardware and schema contract](../hardware-model.md) for atomic
 outputs, guest-reset preservation, actual boot counters and verification evidence. Both golden layouts settle
 at the expected X text with zero stalls/anomalies; recorded backward transitions are retained as diagnostics.
 
@@ -441,7 +441,7 @@ QMP confirms startup before an executor runs, and actual forwarding-bind failure
 retry within the total deadline, only before that startup confirmation. Observed
 settlement faults fail immediately even when expected text differs. Golden
 verification is an offline evidence check after CLI supervision. See
-[runner.md](runner.md).
+[runner.md](../runner.md).
 
 **Tasks**
 - `flapsim run --firmware <factory.bin> --hardware <yaml> --scenario <yaml> --out <dir> [--timing ci|accurate|realtime]`.
@@ -462,7 +462,7 @@ and exits cleanly. Running it twice in parallel works.
 **Implementation note (phase 4):** the engine separates new serial cursors, historical
 settlement evidence and post-command movement identity. The golden-only version
 exception is explicit and checksum-guarded. Reports finalize after supervised
-shutdown on success and failure; [scenarios.md](scenarios.md) defines the schema,
+shutdown on success and failure; [scenarios.md](../scenarios.md) defines the schema,
 semantics, API expectations and validation evidence.
 Hermes review exposed a missing final serial sweep for scenarios without an
 explicit error assertion; the sweep now defaults to strict checking in that
@@ -518,7 +518,7 @@ last 50 serial lines.
 
 ### Step 9: Docker image
 
-**Implementation note:** built-in resources are packaged in the wheel; source archives, provenance and runtime dependencies are included in the image. MQTT/Mosquitto stays post-MVP. The candidate is built once, verified, exported and published without rebuilding; only the publication job has package-write permission. No image is published while the strict golden smokes fail on firmware #54. See [container documentation](container.md).
+**Implementation note:** built-in resources are packaged in the wheel; source archives, provenance and runtime dependencies are included in the image. MQTT/Mosquitto stays post-MVP. The candidate is built once, verified, exported and published without rebuilding; only the publication job has package-write permission. No image is published while the strict golden smokes fail on firmware #54. See [container documentation](../container.md).
 
 **Tasks**
 - Multi-stage `Dockerfile`: stage 1 builds QEMU and the model; stage 2 is `debian:bookworm-slim` + Python + runtime
@@ -548,7 +548,7 @@ last 50 serial lines.
 
 ### Step 11: Emulator self-tests and maintenance hooks
 
-**Implementation note:** the version check is not disabled. Only the checksum-pinned golden v1.4.0/v1.4.0-rc.1 mismatch has an explicit recorded exception; real release gating remains strict. Both golden smoke gates remain failing on firmware #54 by maintainer decision. QEMU/firmware update, clean rebuild, cache, fixture, source licensing and publication procedures are in [maintenance](maintenance.md).
+**Implementation note:** the version check is not disabled. Only the checksum-pinned golden v1.4.0/v1.4.0-rc.1 mismatch has an explicit recorded exception; real release gating remains strict. Both golden smoke gates remain failing on firmware #54 by maintainer decision. QEMU/firmware update, clean rebuild, cache, fixture, source licensing and publication procedures are in [maintenance](../maintenance.md).
 
 **Tasks**
 - A "golden run" in this repo's CI: boot a pinned known-good firmware (v1.4.0 image downloaded from releases) with
