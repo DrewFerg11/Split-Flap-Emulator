@@ -39,7 +39,7 @@ sensors), use the same scenario files and produce the same reports.
 | Network | HTTP through loopback forwarding only | Real host sockets: HTTP, MQTT/Home Assistant and a controllable wall clock |
 | Unique coverage | Byte-for-byte release check; wrong and prerelease versions are rejected | MQTT, time and DST scenarios, hours-long soaks in minutes, sanitizer builds |
 | Build | Pinned QEMU fork, a few minutes once (cached) | Under a minute |
-| Role | **Release gate:** strict and required | **Fast feedback** and coverage QEMU cannot reach; never gates a release |
+| Role | **Release gate:** strict, with no known-issues baseline (the firmware-side gate is not active yet, [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7)) | **Fast feedback** and coverage QEMU cannot reach; never gates a release |
 
 Use QEMU mode to decide whether a release is good, and native mode while developing firmware or for long and
 network-heavy tests. Scenarios drive the firmware the way a user does (web UI, HTTP, MQTT) and check what the
@@ -49,12 +49,18 @@ v1.4.1 firmware through both on every push.
 ```sh
 # QEMU mode: the released factory image
 flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin --hardware esp32-8-single \
-  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.1 --out runs/qemu-8
+  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.1 --seed 7 \
+  --known-issues baselines/v1.4.1-golden.yaml --out runs/qemu-8
 
 # Native mode: build the golden source, then run the same scenario
 flapsim run --mode native --firmware-src golden --hardware esp32-8-single \
-  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.1 --out runs/native-8
+  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.1 --seed 7 \
+  --known-issues baselines/v1.4.1-native.yaml --out runs/native-8
 ```
+
+v1.4.1 has known firmware defects, so golden runs use each mode's
+[known-issues baseline](docs/scenarios.md#known-issue-baselines-golden-runs-only) (as CI does); without it they can fail
+on those defects. New firmware releases run strictly, without `--known-issues`.
 
 The container image `ghcr.io/drewferg11/split-flap-emulator` runs the same commands: `docker run <image> run ...`
 is `flapsim run ...` ([container docs](docs/container.md)).
@@ -71,6 +77,7 @@ Details: [runner](docs/runner.md), [native mode](docs/native.md), [QEMU integrat
 - Live authenticated state and mechanics API: [`docs/control-api.md`](docs/control-api.md); read-only live display: [`docs/panel.md`](docs/panel.md)
 - Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md)
 - Release gate for firmware: [`docs/release-gate.md`](docs/release-gate.md), [`docs/firmware-ci.md`](docs/firmware-ci.md)
+- Implementation history: [`docs/implementation-queue.md`](docs/implementation-queue.md)
 - Original findings and MVP plan: [`docs/poc-findings-and-mvp-plan.md`](docs/poc-findings-and-mvp-plan.md); POC code (reference only): [`poc/`](poc)
 
 ## License
