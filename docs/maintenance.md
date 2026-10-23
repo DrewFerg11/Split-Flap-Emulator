@@ -212,9 +212,13 @@ One-time environment settings (Settings → Environments → `release`):
 - **Deployment branches and tags:** selected tags only, rule `v*.*.*`.
 - **Allow administrators to bypass:** off.
 
-To release: push the tag (`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`),
-open the run, choose **Review deployments → Approve**, then take the digest from the
-publish job's summary or its `container-publication-result` artifact.
+To release: first merge a change that sets `version` in `pyproject.toml` to the new
+version (the `validate` job rejects a tag that does not match it, and the `publish` job
+refuses a version that is already published, but only after both architectures have been
+built and verified), then push the tag
+(`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`), open the run, choose
+**Review deployments → Approve**, then take the digest from the publish job's summary or
+its `container-publication-result` artifact.
 
 ### Docker Hub mirror
 
@@ -231,3 +235,57 @@ Off unless configured, as in numbers-go-up. To enable it:
 missing, or if the name is not `<namespace>/<name>` in lowercase. Unset the variable to
 publish to GHCR only.
 
+### Pre-flight checklist for a release
+
+Run through this before pushing a tag; the first release to use the multi-arch and
+mirror path ([#63](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/63)) is the
+dry run for the real one.
+
+Repository settings (cannot be checked from the repository itself):
+
+- [ ] The `release tags` ruleset covers `v*` and restricts create, update and delete to admins.
+- [ ] The `release` environment lists the owner as required reviewer, allows deployments
+      from tags matching `v*.*.*` only, and has administrator bypass off.
+- [ ] Mirror only: repository variable `DOCKERHUB_IMAGE` is `<namespace>/<name>` in
+      lowercase, the Docker Hub repository exists, and the `release` environment has
+      `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (token scope Read, Write, Delete for the
+      description sync). Leave the variable unset to publish to GHCR only.
+- [ ] The GHCR package `split-flap-emulator` is public and still linked to this repository.
+- [ ] Actions can run on `ubuntu-24.04-arm` (free for public repositories only).
+
+Repository state:
+
+- [ ] `main` CI is green at the commit to be tagged, and that commit is on `origin/main`.
+- [ ] `pyproject.toml` `version` equals the tag without the `v`. A prerelease tag such as
+      `v0.2.0-rc.1` matches version `0.2.0rc1`. Use a prerelease for a dry run: it never
+      moves `latest`, whereas a stable tag does when no higher stable version exists.
+- [ ] The version is not already published in GHCR or on Docker Hub. Nothing before the
+      `publish` job checks this, so a duplicate wastes a full verification run. Versions are
+      immutable, so a failed or abandoned run cannot be repeated under the same tag once
+      any registry write has happened. Choose the next version instead.
+- [ ] Optional: run `Release / Tag` by hand and select a version tag (it still waits for approval). That runs
+      `authorize`, `validate` and both architectures' verification but never publishes.
+
+Expected result for tag `vX.Y.Z` (version `X.Y.Z`):
+
+| Where | Tags | Notes |
+|---|---|---|
+| `ghcr.io/drewferg11/split-flap-emulator` | `X.Y.Z-amd64`, `X.Y.Z-arm64` | One verified image each |
+| same | `X.Y.Z` | Index of both; its digest is the reference to pin |
+| same | `latest` | Stable releases only, and only if no higher stable version exists |
+| `docker.io/$DOCKERHUB_IMAGE` | `X.Y.Z` (and `latest` as above) | Same digest as GHCR, or publication fails |
+
+After the run:
+
+- [ ] `container-publication-result` (also the publish job's summary) has `passed: true`,
+      the source SHA, `platform_digests` for both architectures, the index `digest`,
+      `latest_promoted` as expected and, with the mirror on, a `mirror_reference` with that
+      same digest.
+- [ ] `docker buildx imagetools inspect ghcr.io/drewferg11/split-flap-emulator:X.Y.Z` lists
+      `linux/amd64` and `linux/arm64`, and the digest equals the recorded one. Repeat for
+      `docker.io/$DOCKERHUB_IMAGE:X.Y.Z` when mirrored.
+- [ ] Both pulls work anonymously, and `docker run --rm <ref> --help` works on an amd64 and
+      an arm64 host (pull with `--platform linux/arm64` under emulation if no ARM host).
+- [ ] The Docker Hub description matches the README, or the `::warning::` in the sync step
+      explains why not.
+- [ ] The digest is recorded in [container.md](container.md).
