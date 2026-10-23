@@ -1,5 +1,7 @@
 # Live display panel (issue #21, first slice)
 
+> **Experimental in 1.0.** The live panel is shipped for early use and may change in 1.x releases while it is finished.
+
 `flapsim panel` serves a read-only web page for a run started with `--control-port`.
 It shows the virtual display and, for every module, what is physically showing,
 its angle, flap error, hall level, coils, energized state, step counters, stalls and
