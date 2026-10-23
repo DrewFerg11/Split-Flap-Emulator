@@ -8,7 +8,7 @@ import time
 
 from flapsim.control import Unavailable
 from flapsim.lifecycle import qmp_commands, qmp_reset
-from flapsim.process import stop_group
+from flapsim.process import start_time, stop_group
 
 
 def observed_boot(client, before):
@@ -69,7 +69,7 @@ class NativePower:
         self.closing = False
         self.resume = None
         self.reaped = False
-        self.history = [{"pid": process.pid}]
+        self.history = [{"pid": process.pid, "start_time": start_time(process.pid)}]
 
     @property
     def pid(self):
@@ -134,7 +134,9 @@ class NativePower:
             try:
                 self.current = self.launch(child, self.resume)
                 self.reaped = False
-                self.history.append({"pid": self.current.pid})
+                self.history.append(
+                    {"pid": self.current.pid, "start_time": start_time(self.current.pid)}
+                )
                 child.close()
                 client.connection.close()
                 client.connection = parent

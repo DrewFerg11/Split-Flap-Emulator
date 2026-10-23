@@ -2,12 +2,12 @@
 
 import argparse
 import json
-import os
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from flapsim.process import survives
 from tools.verify_boot import GOLDEN, ROOT, checked_firmware
 
 
@@ -61,11 +61,7 @@ def verify(args):
             if not (case / artifact).is_file():
                 raise RuntimeError(f"negative run missing {artifact}")
         for attempt in manifest["attempts"]:
-            try:
-                os.kill(attempt["pid"], 0)
-            except ProcessLookupError:
-                pass
-            else:
+            if survives(attempt["pid"], attempt.get("start_time")):
                 raise RuntimeError("negative CLI run left its emulator alive")
         cases.append(
             {

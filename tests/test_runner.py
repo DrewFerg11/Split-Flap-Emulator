@@ -17,7 +17,7 @@ import pytest
 
 from flapsim.executor import load_executor
 from flapsim.hardware import load_hardware
-from flapsim.process import enable_subreaper
+from flapsim.process import enable_subreaper, survives
 from flapsim.runner import FLASH_SIZE, QEMU_COMMIT, command_for, run
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,8 +67,8 @@ def manifest(args):
 def assert_reaped(value):
     for attempt in value["attempts"]:
         assert isinstance(attempt["returncode"], int)
-        with pytest.raises(ProcessLookupError):
-            os.kill(attempt["pid"], 0)
+        assert attempt["start_time"] is not None
+        assert not survives(attempt["pid"], attempt["start_time"])
         with pytest.raises(ChildProcessError):
             os.waitpid(attempt["pid"], os.WNOHANG)
         with socket.socket() as connection:

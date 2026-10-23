@@ -22,7 +22,7 @@ from flapsim.executor import (
     positive_timeout,
 )
 from flapsim.hardware import load_hardware, write_model_config
-from flapsim.process import enable_subreaper, stop_group
+from flapsim.process import enable_subreaper, start_time, stop_group
 from flapsim.provenance import emulator_provenance
 from flapsim.state import read_settlement
 
@@ -261,6 +261,7 @@ def run(args, *, executor=None, interrupt=None):
                     if child_channel is not None:
                         child_channel.close()
                     attempt["pid"] = process.pid
+                    attempt["start_time"] = start_time(process.pid)
                     context = RunContext(
                         out, hardware, manifest["endpoint"], process, deadline, interrupt
                     )
@@ -455,6 +456,7 @@ def run_native(args, *, executor=None, interrupt=None):
                 if child_channel is not None:
                     child_channel.close()
                 attempt["pid"] = process.pid
+                attempt["start_time"] = start_time(process.pid)
                 if control is not None:
                     from flapsim.power import NativePower
 

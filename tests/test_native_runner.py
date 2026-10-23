@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import os
 import socket
 import sys
 import time
@@ -15,6 +14,7 @@ from flapsim.baseline import KnownIssues, load_known_issues
 from flapsim.cli import check_mode_arguments
 from flapsim.executor import load_executor
 from flapsim.hardware import load_hardware
+from flapsim.process import survives
 from flapsim.runner import run
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,8 +70,8 @@ def manifest(args):
 def assert_reaped(value):
     attempt = value["attempts"][0]
     assert isinstance(attempt["returncode"], int)
-    with pytest.raises(ProcessLookupError):
-        os.kill(attempt["pid"], 0)
+    assert attempt["start_time"] is not None
+    assert not survives(attempt["pid"], attempt["start_time"])
     with socket.socket() as connection:
         assert connection.connect_ex(("127.0.0.1", attempt["port"])) != 0
 
