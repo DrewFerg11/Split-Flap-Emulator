@@ -165,9 +165,9 @@ jobs:
               --known-issues baselines/v1.4.1-native.yaml --out "runs/native/fault-$1-8"
           done
       - name: Log native scenario outcomes
-        if: always() && matrix.name != 'sanitizers'
+        if: always()
         run: |
-          for run in smoke-8 smoke-16 mqtt-native-8 clock-dst-native-8 date-rollover-native-8 \
+          for run in runtime-controls-16 runtime-speed-native-16 smoke-8 smoke-16 mqtt-native-8 clock-dst-native-8 date-rollover-native-8 \
                      first-boot-8 first-boot-16 fault-stuck-sensor-8 fault-module-lost-8; do
             python -m tools.summarize_run "runs/native/$run/run.json"
           done
@@ -253,7 +253,10 @@ jobs:
             --out runs/fault-control-16
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
-        run: python -m tools.summarize_run runs/scenario/run.json
+        run: |
+          for run in scenario power runtime-controls-16 control-lifecycle-timeout control-lifecycle-sigint control-lifecycle-sigterm control-lifecycle-crash; do
+            python -m tools.summarize_run "runs/$run/run.json"
+          done
       - name: Log available negative-version outcomes
         if: always() && matrix.name == 'negative-versions'
         run: |
