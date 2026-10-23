@@ -75,7 +75,7 @@ def test_reset_uart_fragment_requires_pinned_banner_known_prefix_and_observed_re
             serial_errors(preserved, {}, KnownSerial())
 
 
-def test_reset_uart_fragment_may_end_its_line_before_the_banner_or_the_capture():
+def test_reset_uart_fragment_may_end_its_line_before_later_boot_output_or_the_capture():
     from tools.verify_faults import interrupted_reset_lines
 
     banner = "ets Jul 29 2019 12:21:46"
@@ -84,12 +84,17 @@ def test_reset_uart_fragment_may_end_its_line_before_the_banner_or_the_capture()
         kept, fragments = interrupted_reset_lines(text, 1)
         assert fragment not in kept
         assert [f["fragment"] for f in fragments] == [fragment]
-    # Followed by anything else, or beyond the observed resets, it stays an error.
-    other = f"{fragment}\nHELLO\n{banner}"
-    kept, fragments = interrupted_reset_lines(other, 3)
-    assert kept == other and not fragments
+    assert interrupted_reset_lines(f"{fragment}\nrst:0xc", 1)[1][0]["followed_by"] == "rst:0xc"
+    # Beyond the observed resets, or not a prefix of the known diagnostic, it stays an error.
     with pytest.raises(RuntimeError):
         interrupted_reset_lines(f"{fragment}\n{banner}", 0)
+    with pytest.raises(RuntimeError):
+        interrupted_reset_lines(f"{fragment}\n{fragment}", 1)
+    other = (
+        "[ 39140][E][Wire.cpp:3] fail\n[ 39140][E][Preferences.cpp:50] begin(): nvs_open failed: X"
+    )
+    kept, fragments = interrupted_reset_lines(other, 3)
+    assert kept == other and not fragments
 
 
 def test_golden_baseline_tolerates_the_emulator_wire1_timeout_read_only():

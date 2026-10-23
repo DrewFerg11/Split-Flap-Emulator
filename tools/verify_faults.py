@@ -26,11 +26,12 @@ CASES = {
 def interrupted_reset_lines(text, observed_resets):
     """Keep reset-interrupted UART fragments as evidence, not complete diagnostics.
 
-    Only the known Preferences begin diagnostic's literal prefix, joined to the
-    pinned ESP32 ROM banner, can be classified this way. The ROM banner may
-    share the fragment's line or start the next non-empty line (or the capture
-    may end after the fragment). Complete errors and other prefixes remain
-    subject to the ordinary serial checks.
+    Only a literal prefix of the known Preferences begin diagnostic can be
+    classified this way, and never more of them than the controller resets the
+    probe observed. It either shares its line with the pinned ESP32 ROM banner
+    or ends its line (the new boot's output can start on a later line, or the
+    capture can end first); what follows is kept in the evidence. Complete
+    errors and other prefixes remain subject to the ordinary serial checks.
     """
     canonical = "Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
     banner = "ets Jul 29 2019 12:21:46"
@@ -41,8 +42,11 @@ def interrupted_reset_lines(text, observed_resets):
         match = re.fullmatch(r"\[\s*\d+\]\[E\]\[(Preference.*)", prefix)
         return bool(match) and len(match[1]) < len(canonical) and canonical.startswith(match[1])
 
-    def record(fragment):
-        fragments.append({"kind": "reset_interrupted_diagnostic", "fragment": fragment})
+    def record(fragment, following=None):
+        entry = {"kind": "reset_interrupted_diagnostic", "fragment": fragment}
+        if following is not None:
+            entry["followed_by"] = following[:80]
+        fragments.append(entry)
         if len(fragments) > observed_resets:
             raise RuntimeError("more interrupted diagnostics than observed controller resets")
 
@@ -52,10 +56,8 @@ def interrupted_reset_lines(text, observed_resets):
             record(before)
             line = banner + after
         elif not separator and interrupted(line):
-            following = next((x for x in source[index + 1 :] if x.strip()), None)
-            if following is None or following.startswith(banner):
-                record(line)
-                continue
+            record(line, next((x for x in source[index + 1 :] if x.strip()), ""))
+            continue
         lines.append(line)
     return "\n".join(lines), fragments
 
