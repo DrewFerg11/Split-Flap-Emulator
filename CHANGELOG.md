@@ -17,7 +17,7 @@ number in `pyproject.toml` is still `0.1.0`; it changes in the release PR.
 - Live control API (**experimental**): authenticated live physical state, audited mechanics edits,
   controller reset and power off/on, native runtime speed and runtime fault controls (#34, #36,
   #37, #43, #51, #53, #54).
-- Read-only live display panel (`flapsim panel`, **experimental**) (#49).
+- Read-only live display panel (`flapsim panel`, **experimental**) and its restyle (#49, #56).
 - Per-module fault injection in the hardware model (#47).
 - Realistic drum mechanics: gearbox ratios, module variance, fractional flap landings, per-module
   sensor geometry and firmware calibration verification (#25, #29).
@@ -34,7 +34,7 @@ number in `pyproject.toml` is still `0.1.0`; it changes in the release PR.
 - Long-running scenarios moved from PR checks to a nightly workflow (#68).
 - Docs reorganised: process and planning docs moved to `docs/history/`, a two-part index in
   `docs/README.md` separates using from maintaining flapsim, and README compares QEMU and native
-  modes (#55, #66).
+  modes (#55, #66), and the release steps now include the version bump (#67).
 - The image is published as `ghcr.io/drewferg11/split-flap-emulator` (#28).
 
 ### Fixed
@@ -45,7 +45,7 @@ number in `pyproject.toml` is still `0.1.0`; it changes in the release PR.
 
 ### Removed
 
-- The frozen proof-of-concept `poc/` directory; it remains in git history.
+- The frozen proof-of-concept `poc/` directory; it remains in git history (#69).
 
 ## [0.1.0]
 
