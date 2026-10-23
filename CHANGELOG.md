@@ -34,7 +34,7 @@ number in `pyproject.toml` is still `0.1.0`; it changes in the release PR.
 - Long-running scenarios moved from PR checks to a nightly workflow (#68).
 - Docs reorganised: process and planning docs moved to `docs/history/`, a two-part index in
   `docs/README.md` separates using from maintaining flapsim, and README compares QEMU and native
-  modes (#55, #66), and the release steps now include the version bump (#67).
+  modes (#55, #66, #71), and the release steps now include the version bump (#67).
 - The image is published as `ghcr.io/drewferg11/split-flap-emulator` (#28).
 
 ### Fixed
