@@ -227,7 +227,7 @@ settings, sends HELLO, and verifies exact centered ` HELLO  `.
 `release-smoke-16.yaml` checks initial X, versions, then independent centered
 rows ` HELLO  ` / ` WORLD  `, followed by the explicit idempotent repeat.
 `homing-random.yaml` asserts the intermediate all-blank settlement and zero
-stalls/anomalies before completing startup X. CI runs three recorded seeds.
+stalls/anomalies before completing startup X. PRs run seed 7 and the nightly workflow runs seeds 19 and 42.
 `settings-race-8.yaml` stresses the settings store
 ([SFD#54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54), #24) with the
 `settings_stress` step: each of `rounds` (1–500) sends one `POST /settings` with a new
@@ -239,7 +239,8 @@ mode, so golden runs record it as a #54 expected failure; firmware with the fix 
 all 30 rounds.
 `clock-soak-native-8.yaml` (native only) runs time mode for three guest hours, 180 display
 updates, and then asserts no errors and no model faults. Run it with `--speed 50`: it takes
-about 3.5 wall minutes. CI runs it on the golden source under the native baseline.
+about 3.5 wall minutes. The nightly workflow runs it (and `settings-race-8`) on the golden source under the
+native baseline; PR checks skip both to stay fast.
 `first-boot-8.yaml` / `first-boot-16.yaml` follow a new user from a blank flash
 ([#22](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/22)): access point and
 no-Wi-Fi display, the compiled defaults in `GET /settings`, one save of layout (8 only),

@@ -1,0 +1,48 @@
+name: QEMU golden firmware setup
+description: Build the pinned QEMU integration (cached) and fetch the checksum-verified golden firmware.
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install QEMU build dependencies
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends build-essential git ninja-build \
+          libglib2.0-dev libgcrypt20-dev libslirp-dev libpixman-1-dev \
+          python3-venv flex bison pkg-config libjson-c-dev
+    - name: Record toolchain for cache identity
+      id: toolchain
+      shell: bash
+      run: |
+        mkdir -p build runs
+        {
+          cc --version
+          ld --version
+          python --version
+          ninja --version
+          pkg-config --modversion glib-2.0 libgcrypt slirp pixman-1 json-c
+          dpkg-query -W build-essential libc6-dev
+        } > build/toolchain.txt
+        lscpu > build/runner-specs.txt
+        echo "digest=$(sha256sum build/toolchain.txt | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+    - name: Restore compatible QEMU build cache
+      uses: actions/cache@v4
+      with:
+        path: build/qemu
+        key: qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/actions/qemu-setup/action.yml') }}-${{ hashFiles('qemu/*.c', 'qemu/*.h', 'model/*.c', 'model/*.h') }}
+        restore-keys: |
+          qemu-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.digest }}-${{ hashFiles('qemu/QEMU_COMMIT', 'qemu/build.py', 'qemu/build.sh', '.github/actions/qemu-setup/action.yml') }}-
+    - name: Build pinned integration
+      shell: bash
+      run: |
+        set -o pipefail
+        timeout --kill-after=30s 18m qemu/build.sh --jobs 4 2>&1 | tee runs/qemu-build.log
+    - name: Install Python configuration loader
+      shell: bash
+      run: python -m pip install -e '.[control]'
+    - name: Fetch checksum-verified golden firmware
+      shell: bash
+      run: python -m tools.verify_model --fetch-only
