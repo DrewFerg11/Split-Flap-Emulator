@@ -73,7 +73,12 @@ def validate_effective_faults(initial, effective):
 def validate_summary(state, configurations, *, versioned):
     expected = []
     actual = state.get("faults", [])
-    if not isinstance(actual, list):
+    if not isinstance(actual, list) or any(
+        not isinstance(entry, dict)
+        or any(type(entry.get(key)) is not int for key in ("bus", "addr", "events"))
+        or not 0 <= entry["events"] < 2**63
+        for entry in actual
+    ):
         raise ValueError("invalid fault summary")
     for module, config in zip(state["modules"], configurations, strict=True):
         if not config["configured"]:

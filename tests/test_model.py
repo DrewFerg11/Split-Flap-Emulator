@@ -1664,7 +1664,7 @@ def test_legacy_19_fault_summary_is_readable_and_resumes_with_legacy_reseed(make
 
 
 @pytest.mark.parametrize(
-    "problem", ["seed", "rng", "probability", "summary", "configured", "effects"]
+    "problem", ["seed", "rng", "probability", "summary", "summary_bool", "configured", "effects"]
 )
 def test_versioned_fault_resume_binds_stochastic_config_and_summary(make_model, problem):
     model = faulted(make_model, {"sensor": "noisy", "sensor_noise": 0.5})
@@ -1678,6 +1678,8 @@ def test_versioned_fault_resume_binds_stochastic_config_and_summary(make_model, 
         record["modules"][0]["faults"]["sensor_noise"] = 0.25
     elif problem == "summary":
         record["faults"][0]["events"] += 1
+    elif problem == "summary_bool":
+        record["faults"][0]["events"] = bool(record["faults"][0]["events"])
     elif problem == "effects":
         effects = record["modules"][0]["fault_counters"]
         effects["blocked_steps"] = effects["events"] + 1
