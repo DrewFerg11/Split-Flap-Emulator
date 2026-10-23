@@ -35,7 +35,7 @@ sensors), use the same scenario files and produce the same reports.
 
 | | **QEMU mode** (`--mode qemu`, default) | **Native mode** (`--mode native`) |
 |---|---|---|
-| Runs | The released firmware `.bin`, unchanged, on an emulated ESP32 | The firmware source, built for Linux against host shims of the Arduino/ESP32 APIs |
+| Runs | The released firmware `.bin`, unchanged, on an emulated ESP32 ([lcgamboa QEMU fork](https://github.com/lcgamboa/qemu) with ESP32 I²C and Wi-Fi) | The firmware source, built for Linux against host shims of the Arduino/ESP32 APIs |
 | Proves | The shipped artifact works | The code behaves correctly at any commit, branch or local checkout |
 | Firmware input | `--firmware <factory.bin>` | `--firmware-src golden\|git:<ref>\|<checkout>`, or a prebuilt `--native-build` |
 | Speed | About ⅓ of real time | Adjustable virtual clock, 0.25×–50× (default 5×) |
@@ -45,7 +45,8 @@ sensors), use the same scenario files and produce the same reports.
 | Role | **Release gate:** strict and required | **Fast feedback** and coverage QEMU cannot reach; never gates a release |
 
 Use QEMU mode to decide whether a release is good, and native mode while developing firmware or for long and
-network-heavy tests. Most scenarios run in both modes; `*-native-*` scenarios are native only. CI runs the golden
+network-heavy tests. Scenarios drive the firmware the way a user does (web UI, HTTP, MQTT) and check what the
+virtual drums show. Most scenarios run in both modes; `*-native-*` scenarios are native only. CI runs the golden
 v1.4.1 firmware through both on every push.
 
 ```sh
@@ -71,14 +72,6 @@ Details: [runner](docs/runner.md), [native mode](docs/native.md), [QEMU integrat
 - Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md)
 - Release gate for firmware: [`docs/release-gate.md`](docs/release-gate.md), [`docs/firmware-ci.md`](docs/firmware-ci.md)
 - Original findings and MVP plan: [`docs/poc-findings-and-mvp-plan.md`](docs/poc-findings-and-mvp-plan.md); POC code (reference only): [`poc/`](poc)
-
-## How it works (short version)
-
-- **QEMU**, using the [lcgamboa fork](https://github.com/lcgamboa/qemu) with ESP32 I²C and Wi-Fi support, runs the
-  firmware binary unchanged. Native mode instead compiles the firmware source against host shims.
-- A small hardware model answers the firmware's I²C traffic the way PCF8575 expanders, 28BYJ-48 steppers, drums and
-  hall sensors would.
-- Tests drive the firmware like a user does (web UI, HTTP, MQTT) and check what the virtual drums show.
 
 ## License
 
