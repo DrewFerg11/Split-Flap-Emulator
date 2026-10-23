@@ -96,6 +96,14 @@ jobs:
             python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
               --case control --timeout ${{ matrix.timeout }} --out "runs/native/control-$hardware"
           done
+      - name: Verify deterministic faults, unaffected modules and recovery
+        run: |
+          for hardware in esp32-8-single esp32-16-dual; do
+            for fault_case in hall-active hall-inactive motor-dead absent; do
+              python -m tools.verify_faults --mode native --native-build build/native/golden \
+                --hardware "$hardware" --case "$fault_case" --out "runs/native/fault-$hardware-$fault_case"
+            done
+          done
       - name: Verify runtime speed and rate preservation through reset and power
         run: |
           for hardware in esp32-8-single esp32-16-dual; do
@@ -275,6 +283,11 @@ jobs:
           python -m tools.verify_power --mode qemu \
             --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
             --hardware "${{ matrix.hardware }}" --out runs/power
+      - name: Verify a disconnected module, unaffected drums and fault recovery
+        if: matrix.name == 'control-16'
+        run: |
+          python -m tools.verify_faults --mode qemu --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+            --hardware esp32-16-dual --case absent --out runs/fault-control-16
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
         run: python -m tools.summarize_run runs/scenario/run.json

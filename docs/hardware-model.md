@@ -225,9 +225,10 @@ if that comes out as zero, `0x5bd1e995` is used instead. The seed is recorded
 as `faults.seed` in the normalized module. Only firmware transactions advance
 the stream. Snapshots and other modules never touch it, so the same seed and
 the same firmware traffic inject the same faults. `disappear_at` is stored as
-`disappear_at_ns`. Like drums and latches, a new process starts its fault state
-from the normalized configuration: after a native crash resume or power restart
-each stream starts again from its seed and `events` from zero.
+`disappear_at_ns`. Versioned runtime evidence (`faults_version: 1`) preserves each
+stream position and effect count through native crash resume, reset and power
+restart. Older summary-only #19 recordings retain their original reseed-on-resume
+behavior; their next emitted record upgrades to the versioned extension.
 
 **Evidence.** When any module has faults, the identity block in state,
 activity and timeline output gains a top-level `faults` list. Each entry has
@@ -239,8 +240,10 @@ with the `fault-stuck-sensor-8` and `fault-module-lost-8` scenarios, check the
 firmware's response to a sensor that never sees its magnet and to a module that
 drops off the bus mid-run.
 
-Changing faults mid-run needs the control API (#20). Power faults (brown-out,
-supply sag) are not modeled yet.
+The [control API](control-api.md#deterministic-module-faults) can set or repair
+`stuck_active`/`stuck_inactive` sensors, dead motors and missing modules during a
+run, or return these modes to `ok`. Other startup faults and their PRNG state are
+preserved. Power faults (brown-out, supply sag) are not modeled yet.
 
 ## Output and freshness contract
 
