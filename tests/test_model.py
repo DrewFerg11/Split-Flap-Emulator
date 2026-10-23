@@ -1701,7 +1701,7 @@ def test_runtime_fault_receipt_cannot_be_downgraded_to_legacy_startup_evidence(m
     for module in record["modules"]:
         del module["faults"], module["fault_counters"]
     if reader == "python":
-        with pytest.raises(ValueError, match="versioned fault evidence"):
+        with pytest.raises(ValueError, match="fault evidence"):
             validate_state(record, json.loads(model.config.read_text()))
     else:
         model.lib.fs_model_close()

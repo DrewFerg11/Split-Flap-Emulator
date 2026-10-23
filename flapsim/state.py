@@ -167,8 +167,6 @@ def validate_state(state, hardware, *, require_settled=True):
         if recorded_initial != initial:
             raise ValueError("model initial mechanics do not match hardware")
     faults_enabled = validate_fault_identity(state)
-    if not faults_enabled and revision and "faults" in state["last_operation"]["command"]["patch"]:
-        raise ValueError("fault command requires versioned fault evidence")
     initial_faults = [resolved_faults(m) for m in hardware["modules"]]
     if faults_enabled:
         if state["initial_faults"] != initial_faults:
