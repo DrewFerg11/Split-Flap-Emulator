@@ -4,7 +4,7 @@ The verified build host is Linux x86-64 with Python 3.11 or newer. The integrati
 runs the production physical model through an unmodified pinned QEMU library.
 Phase 3 adds the supervised `flapsim run` CLI; see [runner.md](runner.md) for its
 executor, isolation, exit-code and evidence contracts.
-The POC remains frozen under `poc/` (only its tracked bytecode cache was removed).
+The proof-of-concept code was removed from the tree; it is kept in [git history](https://github.com/DrewFerg11/Split-Flap-Emulator/tree/e0bd4215d8c3f7ad67b8e8568dad5e5a1ad671cf/poc).
 
 On Debian/Ubuntu, install system build dependencies as an administrator:
 
