@@ -8,7 +8,7 @@ virtual display.
 The Docker image is `ghcr.io/drewferg11/split-flap-emulator`; the command inside it (and the Python package) is
 `flapsim`.
 
-![Real v1.4.0 firmware homing 8 virtual modules](docs/images/poc-homing.gif)
+![Live panel: real v1.4.1 firmware homing 16 virtual modules](docs/images/live-panel.gif)
 
 ## Status
 

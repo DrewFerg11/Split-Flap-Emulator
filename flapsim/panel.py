@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from flapsim.control import accepts_authority
+from flapsim.ui import assemble
 
 STATE_TIMEOUT = 2.0
 MAX_STATE = 1024 * 1024
@@ -76,7 +77,8 @@ class PanelServer(ThreadingHTTPServer):
 
     def __init__(self, run_dir, port=0):
         self.run_dir = Path(run_dir)
-        self.page = files("flapsim").joinpath("data/panel/index.html").read_bytes()
+        template = files("flapsim").joinpath("data/panel/index.html").read_text(encoding="utf-8")
+        self.page = assemble(template).encode()
         super().__init__(("127.0.0.1", port), PanelHandler)
 
     @property

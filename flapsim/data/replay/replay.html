@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Split-Flap Emulator replay</title>
+<style>
+/*@SHARED_CSS@*/
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Split-Flap Emulator replay</h1>
+    <div class="meta"><span id="clock"></span><span id="event" class="pill"></span></div>
+  </header>
+  <p class="notice" id="warning">@@NOTICE@@</p>
+  <div class="frame">
+    <div id="board" aria-label="Virtual display"></div>
+    <div id="legend"></div>
+  </div>
+  <div class="controls" id="controls">
+    <button id="play" type="button">Play</button>
+    <label for="scrub" class="meta">Timeline snapshot</label>
+    <input id="scrub" type="range" min="0" value="0" step="1">
+  </div>
+  <details id="details">
+    <summary>Snapshot details</summary>
+    <dl id="facts"></dl>
+    <div class="tablewrap" id="modules"></div>
+  </details>
+</div>
+<script id="frames" type="application/json">@@FRAMES@@</script>
+<script id="mechanics" type="application/json">@@MECHANICS@@</script>
+<script>
+/*@SHARED_JS@*/
+</script>
+<script>
+"use strict";
+const frames = JSON.parse(document.getElementById("frames").textContent);
+// Snapshots carry a module's mechanics only once they change; until then use the configured ones.
+const initial = JSON.parse(document.getElementById("mechanics").textContent);
+for (const frame of frames) {
+  for (const m of frame.modules) {
+    if (!m.mechanics && initial[m.bus + ":" + m.addr]) m.mechanics = initial[m.bus + ":" + m.addr];
+  }
+}
+const scrub = document.getElementById("scrub"), play = document.getElementById("play");
+const board = FlapUI.display(document.getElementById("board"));
+const modules = FlapUI.table(document.getElementById("modules"));
+document.getElementById("legend").append(FlapUI.legend());
+let timer = null;
+
+function pause() { clearInterval(timer); timer = null; play.textContent = "Play"; }
+
+function facts(frame, index) {
+  const rows = [
+    ["snapshot", (index + 1) + " of " + frames.length],
+    ["guest seconds", String(frame.guest_ns / 1e9)],
+    ["event", String(frame.event)],
+    ["movement", String(frame.movement_id)],
+    ["settlement", String(frame.settlement_id)],
+    ["settled", String(frame.settled)],
+    ["counters", JSON.stringify(frame.counters)],
+    ["mechanics revision", String(frame.mechanics_revision ?? 0)],
+    ["last operation", JSON.stringify(frame.last_operation)],
+  ];
+  const dl = document.getElementById("facts");
+  dl.replaceChildren();
+  for (const [name, value] of rows) dl.append(FlapUI.el("dt", "", name), FlapUI.el("dd", "", value));
+}
+
+function draw() {
+  const index = Number(scrub.value), frame = frames[index];
+  if (!frame) {
+    document.getElementById("clock").textContent = "no complete timeline snapshots";
+    return;
+  }
+  document.getElementById("clock").textContent =
+    "emulated t = " + (frame.guest_ns / 1e9).toFixed(1) + " s · snapshot " + (index + 1) + "/" +
+    frames.length;
+  document.getElementById("event").textContent = frame.event || "";
+  board.update(frame.modules, true);
+  modules.update(frame.modules);
+  facts(frame, index);
+}
+
+scrub.max = Math.max(0, frames.length - 1);
+scrub.disabled = !frames.length;
+play.disabled = !frames.length;
+scrub.addEventListener("input", () => { pause(); draw(); });
+play.addEventListener("click", () => {
+  if (timer) { pause(); return; }
+  if (Number(scrub.value) >= frames.length - 1) scrub.value = 0;
+  play.textContent = "Pause";
+  timer = setInterval(() => {
+    if (Number(scrub.value) >= frames.length - 1) { pause(); return; }
+    scrub.value = Number(scrub.value) + 1;
+    draw();
+  }, 100);
+  draw();
+});
+// ?frame=N opens at a snapshot and ?hide-controls drops the player, for stills and recordings.
+const params = new URLSearchParams(location.search);
+if (params.has("hide-controls")) document.getElementById("controls").hidden = true;
+if (params.has("frame")) {
+  scrub.value = Math.max(0, Math.min(Number(params.get("frame")) || 0, frames.length - 1));
+}
+draw();
+</script>
+</body>
+</html>

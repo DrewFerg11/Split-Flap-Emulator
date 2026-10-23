@@ -2,6 +2,7 @@
 
 import http.client
 import json
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -152,3 +153,21 @@ def test_panel_is_read_only(tmp_path, control, panel):
     assert request(panel, "/api/emu/reset", method="POST")[0].status == 501
     assert request(panel, "/api/emu/state")[0].status == 404
     assert not control[1]
+
+
+def test_panel_and_replay_share_one_self_contained_style(tmp_path, control, panel):
+    from flapsim.report import write_replay
+    from flapsim.ui import assemble
+
+    write_run(tmp_path, control[0])
+    page = request(panel, "/")[1].decode()
+    write_replay(tmp_path, [], None)
+    replay = (tmp_path / "replay.html").read_text()
+    for document in (page, replay):
+        assert "@SHARED_" not in document and "@@" not in document
+        assert "--bg: #15171a" in document and "const FlapUI" in document
+        # Self-contained: no stylesheet, script, image or font is fetched from anywhere.
+        assert not re.search(
+            r"<link|<img|src=|@import|url\(|https?://(?!www\.w3\.org/2000/svg)", document
+        )
+    assert assemble("/*@SHARED_CSS@*/|/*@SHARED_JS@*/").count("FlapUI") > 0
