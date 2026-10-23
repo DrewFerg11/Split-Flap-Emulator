@@ -14,6 +14,17 @@ Installed wheels include the hardware and scenario YAML, so commands work from
 **Published:** `v0.1.0` is `ghcr.io/drewferg11/split-flap-emulator:0.1.0` (also `latest`),
 immutable reference `ghcr.io/drewferg11/split-flap-emulator@sha256:acd9a51fe50c91530df3e1583ce070cb17e712d31d8d415654c43d97879d3935`.
 It predates multi-platform publishing, so it is linux/amd64 only; arm64 starts with the next release.
+
+**Dry run:** `v0.2.0-rc.1` (commit `3ef0e1f`) is the first multi-platform release, published by its
+[Release / Tag run](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/40029539279) as
+`ghcr.io/drewferg11/split-flap-emulator:0.2.0-rc.1`, immutable reference
+`ghcr.io/drewferg11/split-flap-emulator@sha256:3a726e96f6a5f37d18d1a848370fa61ca715ef0b022c1b624b3f3b0829f56ab3`.
+The index lists linux/amd64 (`sha256:063254135f171400543c7273cc058b3b98ccf266a6071ca9cbcd9e5e79266150`,
+tag `0.2.0-rc.1-amd64`) and linux/arm64 (`sha256:9218f122a3d051b4d46f29385244d86fe936ddbf1bded2dbf2cb87f04276b413`,
+tag `0.2.0-rc.1-arm64`). Image tags are the git tag without the `v`, so a prerelease keeps its hyphen
+(`0.2.0-rc.1`), even though the Python package version is `0.2.0rc1`. `latest` still points at `v0.1.0`,
+as a prerelease should. Published without the Docker Hub mirror. Do not pin consumers to a prerelease;
+pin the digest of the real release.
 Its [Release / Tag run](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/39711368887) verified that exact image (installed resources, both golden
 layouts, timeout, stop, wrong-version rejection and native mode) before publishing it, and the
 image pulls anonymously. Split-Flap-Display pins it two ways:
