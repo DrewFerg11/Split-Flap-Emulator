@@ -1,6 +1,7 @@
 """Native scenario setup (seeded NVS, fixed clock, services) and the MQTT observer and steps."""
 
 import json
+import os
 import shutil
 import socket
 import struct
@@ -154,8 +155,16 @@ def test_wait_mqtt_consumes_matches_in_order_and_publish_sends(tmp_path):
         executor.action(context, "wait_mqtt", {"topic": "s"}, {})
 
 
-@pytest.mark.skipif(shutil.which("mosquitto") is None, reason="mosquitto is not installed")
+def require_mosquitto():
+    """Skip without a broker locally; CI sets FLAPSIM_REQUIRE_MOSQUITTO so a skip cannot hide."""
+    if shutil.which("mosquitto") is None:
+        if os.environ.get("FLAPSIM_REQUIRE_MOSQUITTO"):
+            pytest.fail("mosquitto is required here (FLAPSIM_REQUIRE_MOSQUITTO is set)")
+        pytest.skip("mosquitto is not installed")
+
+
 def test_supervised_broker_and_observer_round_trip(tmp_path):
+    require_mosquitto()
     with socket.socket() as candidate:
         candidate.bind(("127.0.0.1", 0))
         port = candidate.getsockname()[1]

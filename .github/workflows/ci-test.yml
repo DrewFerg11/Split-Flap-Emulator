@@ -31,7 +31,7 @@ jobs:
       - name: Install development tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libjson-c-dev
+          sudo apt-get install -y --no-install-recommends libjson-c-dev mosquitto
           python -m pip install -e '.[dev,control]' clang-format==18.1.8
       - name: Lint and format Python
         run: |
@@ -45,6 +45,9 @@ jobs:
         run: |
           flapsim --help
           python -m pytest
+        env:
+          # Fail instead of skipping the broker round-trip test if mosquitto goes missing.
+          FLAPSIM_REQUIRE_MOSQUITTO: '1'
 
   native:
     name: Native firmware (${{ matrix.name }})
