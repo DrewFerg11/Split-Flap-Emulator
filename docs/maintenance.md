@@ -213,8 +213,9 @@ One-time environment settings (Settings → Environments → `release`):
 - **Allow administrators to bypass:** off.
 
 To release: first merge a change that sets `version` in `pyproject.toml` to the new
-version (the `validate` job rejects a tag that does not match it, and a version that is
-already published is refused), then push the tag
+version (the `validate` job rejects a tag that does not match it, and the `publish` job
+refuses a version that is already published, but only after both architectures have been
+built and verified), then push the tag
 (`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`), open the run, choose
 **Review deployments → Approve**, then take the digest from the publish job's summary or
 its `container-publication-result` artifact.
@@ -258,7 +259,8 @@ Repository state:
 - [ ] `pyproject.toml` `version` equals the tag without the `v`. A prerelease tag such as
       `v0.2.0-rc.1` matches version `0.2.0rc1`. Use a prerelease for a dry run: it never
       moves `latest`, whereas a stable tag does when no higher stable version exists.
-- [ ] The version is not already published in GHCR or on Docker Hub. Versions are
+- [ ] The version is not already published in GHCR or on Docker Hub. Nothing before the
+      `publish` job checks this, so a duplicate wastes a full verification run. Versions are
       immutable, so a failed or abandoned run cannot be repeated under the same tag once
       any registry write has happened. Choose the next version instead.
 - [ ] Optional: run `Release / Tag` by hand and select a version tag (it still waits for approval). That runs
