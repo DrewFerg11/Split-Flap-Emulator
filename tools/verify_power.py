@@ -2,7 +2,6 @@
 
 import argparse
 import json
-import os
 import signal
 import socket
 import time
@@ -10,6 +9,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from flapsim.process import survives
 from flapsim.runner import run
 from flapsim.state import display_aligned
 from tools.verify_native import records as timeline_records
@@ -236,13 +236,10 @@ def main():
         if probe.connect_ex(("127.0.0.1", port)) == 0:
             raise RuntimeError("power listener survived shutdown")
     attempts = manifest["attempts"]
-    pids = [p["pid"] for a in attempts for p in a.get("power_processes", [{"pid": a["pid"]}])]
-    for pid in pids:
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
-            continue
-        raise RuntimeError("supervised process survived shutdown")
+    processes = [p for a in attempts for p in a.get("power_processes", [a])]
+    for process in processes:
+        if survives(process["pid"], process.get("start_time")):
+            raise RuntimeError("supervised process survived shutdown")
     return 0
 
 

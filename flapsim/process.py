@@ -18,6 +18,36 @@ def enable_subreaper():
         raise OSError(ctypes.get_errno(), "cannot enable child subreaper")
 
 
+def parse_start_time(stat):
+    return int(stat.rsplit(b")", 1)[1].split()[19])
+
+
+def start_time(pid):
+    """Return the kernel start time (clock ticks since boot) of a process, or None if it is gone.
+
+    Together with the PID this identifies one process even after the PID is reused. The command
+    name in /proc/<pid>/stat may contain spaces and parentheses, so fields are counted from the
+    last closing parenthesis; start time is field 22 overall, which is index 19 after it.
+    """
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as stat:
+            return parse_start_time(stat.read())
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+
+
+def survives(pid, recorded_start_time):
+    """True while the process recorded as (pid, start time) still exists, even as a zombie.
+
+    A reused PID has a different start time and so does not count. Without a recorded start
+    time (older manifests) only the PID can be compared.
+    """
+    current = start_time(pid)
+    if current is None:
+        return False
+    return recorded_start_time is None or current == recorded_start_time
+
+
 def signal_group(process, signum):
     try:
         os.killpg(process.pid, signum)
