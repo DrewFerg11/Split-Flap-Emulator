@@ -83,6 +83,13 @@ jobs:
             python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
               --case control --timeout ${{ matrix.timeout }} --out "runs/native/control-$hardware"
           done
+      - name: Verify declarative controls through the shared dispatcher
+        run: |
+          for scenario in runtime-controls-16 runtime-speed-native-16; do
+            flapsim run --mode native --native-build build/native/golden --hardware esp32-16-dual \
+              --scenario "$scenario" --known-issues baselines/v1.4.1-native.yaml \
+              --out "runs/native/$scenario"
+          done
       - name: Verify deterministic faults, unaffected modules and recovery
         run: |
           for hardware in esp32-8-single esp32-16-dual; do
@@ -218,6 +225,12 @@ jobs:
           python -m tools.verify_power --mode qemu \
             --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
             --hardware "${{ matrix.hardware }}" --i2c-history --out runs/power
+      - name: Verify declarative runtime controls with real QEMU firmware
+        if: matrix.name == 'control-16'
+        run: |
+          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+            --hardware esp32-16-dual --scenario runtime-controls-16 \
+            --known-issues baselines/v1.4.1-golden.yaml --out runs/runtime-controls-16
       - name: Verify a disconnected module, unaffected drums and fault recovery
         if: matrix.name == 'control-16'
         run: |

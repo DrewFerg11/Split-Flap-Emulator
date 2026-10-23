@@ -327,3 +327,60 @@ left to the normal `fresh_nvs` policy. Counts/first occurrence remain visible. S
 runs still reject it, as do other malformed messages. This records current-image
 behavior while the firmware maintainer investigates writer/SDK locking; it does
 not repair logging or establish physical-hardware behavior.
+
+## Declarative runtime controls
+
+Scenarios can mutate the running emulator directly through the same typed,
+serialized dispatcher and durable `control.jsonl` audit as the HTTP API. A
+scenario containing these actions automatically provisions a private dispatcher
+and model channel. It requires no HTTP dependency, listener or token file. Add
+`--control-port 0` and install the `control` extra to expose the authenticated
+loopback API as well. No token, HTTP self-request or shell command
+belongs in the YAML. Normal scenarios without controls retain their existing
+startup behavior.
+
+| Action | Value |
+|---|---|
+| `set_mechanics` | `{id: 1, expected_revision: 0, bus: 0, addr: 32, patch: {sensor_window: 42}}` |
+| `set_fault` | `{id: 2, expected_revision: 1, bus: 0, addr: 32, faults: {i2c: missing}}`; canonical deterministic sensor/motor/I2C modes only |
+| `reset` | `{id: 1}`; success requires the observed controller generation receipt |
+| `set_power` | `{id: 1, on: false}` or `{id: 2, on: true}` |
+| `power_cycle` | `{off_id: 1, on_id: 2, off_seconds: 0.05}`; two audited transitions, optional host-time off interval 0–30 seconds |
+| `set_speed` | `{id: 1, speed: 10}`; native only, 0.25–50; QEMU scenarios reject this action before launch |
+
+Commands use the API's explicit IDs and mechanics compare-and-set revisions.
+IDs increase in each API namespace: mechanics/faults share one namespace;
+reset, power and speed each have their own. The power-on ID in a cycle must
+exceed its off ID. Applied edits, reset/power receipts and clock controls obey
+the same persistence and fidelity limits described in [the API contract](control-api.md).
+Foreign concurrent mutations can cause a conflict; the scenario does not hide
+it by rewriting revisions or IDs.
+
+Only explicit `model_busy`/`backend_busy` rejections that applied nothing retry,
+using the identical command until the step/run deadline. A transport/audit
+failure, unknown receipt, unavailable backend or revision/ID conflict stops the
+scenario. An uncertain mutation is never retried automatically. Each step
+records receipts and busy-rejection counts; a partial power cycle preserves the
+off receipt if the next transition fails. Cancellation/deadline while off stops
+without issuing an unrequested power-on; the runner still owns cleanup.
+
+Runtime controls establish the same pre-command serial/movement baseline as
+mutating firmware HTTP steps. Subsequent waits must observe fresh events and
+settlements. A receipt proves control application, not final physical landing;
+follow it with `wait_display` and normal error assertions. For an injected I2C
+fault, `assert_no_errors: {faulted_modules: [37]}` may excuse only the existing
+specific module-37 write-error diagnostic after a preceding valid I2C injection.
+It does not excuse other errors, model anomalies or unexplained stalls. Repair
+does not erase historical serial evidence.
+
+`runtime-controls-16` demonstrates healthy boot, a geometry edit, live module
+disconnection with observed firmware failure, repair, controller reset and power
+cycle on the default sixteen-module hardware, without firmware settings writes.
+`runtime-speed-native-16` demonstrates native rate changes with reset/power.
+Both are installed resources:
+
+```sh
+flapsim run --mode native --native-build build/native/golden \
+  --hardware esp32-16-dual --scenario runtime-controls-16 \
+  --known-issues baselines/v1.4.1-native.yaml --out runs/runtime-controls
+```

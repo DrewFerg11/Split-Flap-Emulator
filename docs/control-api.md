@@ -5,7 +5,8 @@
 The runner can expose current physical state independently of the firmware's
 web server. The implemented QEMU and native routes provide authenticated live state, atomic mechanics
 edits, controller reset/power transitions, native runtime speed, deterministic module faults, operation receipts and optional structured I2C/WebSocket telemetry.
-Issue #20 stays open for declarative scenario controls and final complete-scope acceptance. See [the implementation plan](control-api-plan.md) for later slices.
+Declarative [scenario controls](scenarios.md#declarative-runtime-controls) use the same dispatcher.
+Issue #20 stays open for review and final complete-scope acceptance. See [the implementation plan](control-api-plan.md) for later slices.
 
 ```sh
 python -m pip install -e '.[control]'

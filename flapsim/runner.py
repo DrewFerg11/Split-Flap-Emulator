@@ -213,7 +213,7 @@ def run(args, *, executor=None, interrupt=None):
     control = None
     exit_code = EXIT_RUNTIME
     try:
-        if control_port is not None:
+        if control_port is not None or getattr(executor, "requires_control", False):
             from flapsim.control import ControlServer
 
             control = ControlServer(
@@ -275,7 +275,13 @@ def run(args, *, executor=None, interrupt=None):
                     attempt["pid"] = process.pid
                     attempt["start_time"] = start_time(process.pid)
                     context = RunContext(
-                        out, hardware, manifest["endpoint"], process, deadline, interrupt
+                        out,
+                        hardware,
+                        manifest["endpoint"],
+                        process,
+                        deadline,
+                        interrupt,
+                        control=control,
                     )
                     try:
                         while True:
@@ -419,7 +425,7 @@ def run_native(args, *, executor=None, interrupt=None):
     broker = observer = None
     exit_code = EXIT_RUNTIME
     try:
-        if control_port is not None:
+        if control_port is not None or getattr(executor, "requires_control", False):
             from flapsim.control import ControlServer
 
             control = ControlServer(
@@ -527,6 +533,7 @@ def run_native(args, *, executor=None, interrupt=None):
                     deadline,
                     interrupt,
                     services,
+                    control,
                 )
                 try:
                     while not native.ready(out):

@@ -1,0 +1,46 @@
+version: 1
+name: runtime-controls-16
+timeout: 600
+# Exercise declarative controls with real firmware on both backends, using the
+# default topology. No firmware settings writes or additional CLI control flag.
+steps:
+  - wait_serial: "=== Split Flap Display ==="
+    timeout: 120
+  - wait_display: {text: XXXXXXXXXXXXXXXX}
+    timeout: 180
+  - assert_no_errors: {fresh_nvs: true}
+  - set_mechanics:
+      id: 1
+      expected_revision: 0
+      bus: 1
+      addr: 37
+      patch: {sensor_window: 42}
+  - set_fault:
+      id: 2
+      expected_revision: 1
+      bus: 1
+      addr: 37
+      faults: {i2c: missing}
+  - reset: {id: 1}
+  - wait_serial: "Error writing data to module 37, error code: 2"
+    timeout: 60
+  - wait_display: {text: "XXXXXXXXXXXXX.XX"}
+    timeout: 180
+  - assert_no_errors: {fresh_nvs: true, faulted_modules: [37]}
+  - set_fault:
+      id: 3
+      expected_revision: 2
+      bus: 1
+      addr: 37
+      faults: {i2c: ok}
+  - reset: {id: 2}
+  - wait_serial: Homing
+    timeout: 60
+  - wait_display: {text: XXXXXXXXXXXXXXXX}
+    timeout: 180
+  - power_cycle: {off_id: 1, on_id: 2, off_seconds: 0.05}
+  - wait_serial: Homing
+    timeout: 60
+  - wait_display: {text: XXXXXXXXXXXXXXXX}
+    timeout: 180
+  - assert_no_errors: {fresh_nvs: true}
