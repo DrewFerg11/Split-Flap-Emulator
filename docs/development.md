@@ -18,6 +18,10 @@ python3 -m venv .venv
 python -m pip install -e '.[dev,control]' clang-format==18.1.8
 ```
 
+`mosquitto` is an optional extra (`sudo apt-get install -y mosquitto`): without it
+`test_supervised_broker_and_observer_round_trip` is skipped locally. CI installs it and sets
+`FLAPSIM_REQUIRE_MOSQUITTO=1`, which turns that skip into a failure.
+
 Run the same fast checks as CI:
 
 ```sh
