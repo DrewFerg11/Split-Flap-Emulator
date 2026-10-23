@@ -522,6 +522,29 @@ def test_reports_escape_html_xml_and_keep_missing_partial_evidence_honest(tmp_pa
     assert ET.parse(tmp_path / "junit.xml").getroot().get("failures") == "1"
 
 
+def test_replay_embeds_configured_mechanics_and_never_expands_markers_in_data(tmp_path):
+    from flapsim.report import initial_mechanics, write_replay
+
+    hardware = {
+        "modules": [
+            {"bus": 0, "addr": 32, "steps_per_rotation": 2048, "magnet_position": 730, "angle": 5},
+            {"bus": "x", "addr": 33},
+            "junk",
+        ]
+    }
+    assert initial_mechanics(hardware) == {
+        "0:32": {"steps_per_rotation": 2048, "magnet_position": 730}
+    }
+    assert initial_mechanics(None) == {}
+    frame = copy.deepcopy(FIXTURE["states"][0])
+    frame["modules"][0]["char"] = "@@MECHANICS@@"
+    write_replay(tmp_path, [frame], "see @@FRAMES@@ <b>", hardware)
+    replay = (tmp_path / "replay.html").read_text()
+    assert '"0:32": {"steps_per_rotation": 2048, "magnet_position": 730}' in replay
+    assert "see @@FRAMES@@ &lt;b&gt;" in replay and "@@MECHANICS@@" in replay
+    assert replay.count('id="frames"') == 1 and "<b>" not in replay
+
+
 @pytest.mark.parametrize("mode,code", [("success", 5), ("exit", 3), ("hang", 4)])
 def test_run_finalizes_failure_and_not_run_steps_with_a_real_child(
     arguments, monkeypatch, mode, code

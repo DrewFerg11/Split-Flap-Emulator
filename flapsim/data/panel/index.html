@@ -5,148 +5,41 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Split-Flap Emulator</title>
 <style>
-:root {
-  --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1d1f; --muted: #6b6b70; --line: #dcd8d0;
-  --flap: #202124; --flap-ink: #f5f3ee; --flap-seam: #3b3c40;
-  --ok: #1f7a4d; --warn: #a15c00; --bad: #b3261e; --on: #2f6fdd;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #121214; --panel: #1c1c1f; --ink: #ececef; --muted: #9a9aa2; --line: #2e2e33;
-    --flap: #0b0b0c; --flap-ink: #f1efe9; --flap-seam: #2a2a2e;
-    --ok: #58c48c; --warn: #e2a24a; --bad: #f2867e; --on: #7aa7ff;
-  }
-}
-* { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink);
-  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-main { max-width: 1100px; margin: 0 auto; padding: 16px; }
-header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
-h1 { font-size: 18px; margin: 0; }
-.status { color: var(--muted); }
-.status.live::before { content: "● "; color: var(--ok); }
-.status.down::before { content: "● "; color: var(--bad); }
-.board { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
-  padding: 16px; margin-top: 16px; overflow-x: auto; }
-.row { display: flex; gap: 6px; margin-bottom: 10px; }
-.flap { position: relative; width: 56px; height: 80px; flex: none; border-radius: 6px;
-  background: var(--flap); color: var(--flap-ink); display: grid; place-items: center;
-  font: 600 44px/1 ui-monospace, "SF Mono", Menlo, monospace; }
-.flap::after { content: ""; position: absolute; left: 0; right: 0; top: 50%;
-  border-top: 1px solid var(--flap-seam); }
-.flap.moving { outline: 2px solid var(--on); outline-offset: 2px; }
-.flap.flip { animation: flip 120ms ease-in; }
-@keyframes flip { from { transform: rotateX(70deg); } to { transform: rotateX(0); } }
-table { width: 100%; border-collapse: collapse; margin-top: 16px; background: var(--panel);
-  border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--line);
-  font-variant-numeric: tabular-nums; white-space: nowrap; }
-th { color: var(--muted); font-weight: 500; font-size: 12px; }
-.tablewrap { overflow-x: auto; }
-.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
-  border: 1px solid var(--muted); vertical-align: -1px; }
-.dot.on { background: var(--on); border-color: var(--on); }
-.coils { font-family: ui-monospace, Menlo, monospace; letter-spacing: 2px; }
-.bad { color: var(--bad); }
-.warn { color: var(--warn); }
-.meta { color: var(--muted); margin-top: 12px; }
+/*@SHARED_CSS@*/
 </style>
 </head>
 <body>
-<main>
+<div class="wrap">
   <header>
     <h1>Split-Flap Emulator</h1>
-    <span id="status" class="status">connecting…</span>
+    <div class="meta"><span id="clock"></span><span id="status" class="pill">connecting…</span></div>
   </header>
-  <section class="board" id="board" aria-label="Virtual display"></section>
-  <div class="tablewrap">
-    <table>
-      <thead><tr><th>Module</th><th>Shows</th><th>Angle</th><th>Flap error</th><th>Hall</th>
-        <th>Coils</th><th>Energized</th><th>Steps (fwd/back)</th><th>Stalls</th><th>Anomalies</th></tr></thead>
-      <tbody id="modules"></tbody>
-    </table>
+  <div class="frame">
+    <div id="board" aria-label="Virtual display"></div>
+    <div id="legend"></div>
   </div>
+  <div class="tablewrap" id="modules"></div>
   <p class="meta" id="meta"></p>
-</main>
+</div>
+<script>
+/*@SHARED_JS@*/
+</script>
 <script>
 "use strict";
-const board = document.getElementById("board");
-const body = document.getElementById("modules");
 const status = document.getElementById("status");
+const clock = document.getElementById("clock");
 const meta = document.getElementById("meta");
-const flaps = new Map();
-const cells = new Map();
-
-function key(m) { return m.bus + ":" + m.addr; }
-function hex(n) { return "0x" + n.toString(16).padStart(2, "0"); }
-function el(tag, cls, text) {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text !== undefined) e.textContent = text;
-  return e;
-}
-
-function layout(modules) {
-  board.replaceChildren();
-  body.replaceChildren();
-  flaps.clear();
-  cells.clear();
-  const buses = [...new Set(modules.map(m => m.bus))];
-  for (const bus of buses) {
-    const row = el("div", "row");
-    row.setAttribute("aria-label", "Bus " + bus);
-    for (const m of modules.filter(m => m.bus === bus)) {
-      const flap = el("div", "flap", m.char);
-      flap.title = "bus " + m.bus + " " + hex(m.addr);
-      row.append(flap);
-      flaps.set(key(m), flap);
-      const tr = el("tr");
-      const tds = ["module", "char", "angle", "error", "hall", "coils", "energized", "steps",
-        "stalls", "anomalies"].map(name => [name, el("td")]);
-      for (const [, td] of tds) tr.append(td);
-      body.append(tr);
-      cells.set(key(m), Object.fromEntries(tds));
-    }
-    board.append(row);
-  }
-}
+const board = FlapUI.display(document.getElementById("board"));
+const modules = FlapUI.table(document.getElementById("modules"));
+document.getElementById("legend").append(FlapUI.legend());
 
 function render(envelope) {
   const state = envelope.state;
-  const modules = state.modules;
-  if (cells.size !== modules.length || modules.some(m => !cells.has(key(m)))) layout(modules);
-  for (const m of modules) {
-    const flap = flaps.get(key(m));
-    if (flap.textContent !== m.char) {
-      flap.textContent = m.char;
-      flap.classList.remove("flip");
-      void flap.offsetWidth;
-      flap.classList.add("flip");
-    }
-    flap.classList.toggle("moving", !!m.energized);
-    const c = cells.get(key(m));
-    const steps = (m.mechanics && m.mechanics.steps_per_rotation) || null;
-    const coils = (m.latch >> 1) & 0xf;
-    c.module.textContent = "bus " + m.bus + " " + hex(m.addr);
-    c.char.textContent = JSON.stringify(m.char);
-    c.angle.textContent = steps ? m.angle + " / " + steps : String(m.angle);
-    c.error.textContent = m.flap_error.toFixed(3);
-    c.error.className = Math.abs(m.flap_error) > 0.25 ? "warn" : "";
-    const dot = el("span", "dot" + (m.hall ? " on" : ""));
-    dot.title = m.hall ? "high" : "low";
-    c.hall.replaceChildren(dot);
-    c.coils.className = "coils";
-    c.coils.textContent = [8, 4, 2, 1].map(b => (coils & b ? "■" : "□")).join("");
-    c.energized.textContent = m.energized ? "yes" : "no";
-    c.steps.textContent = m.counters.forward + " / " + m.counters.backward;
-    c.stalls.textContent = m.counters.stalls;
-    c.stalls.className = m.counters.stalls ? "bad" : "";
-    c.anomalies.textContent = m.counters.anomalies;
-    c.anomalies.className = m.counters.anomalies ? "bad" : "";
-  }
-  status.className = "status live";
-  status.textContent = "live · " + envelope.backend + " · guest " +
-    (state.guest_ns / 1e9).toFixed(1) + " s";
+  board.update(state.modules, true);
+  modules.update(state.modules);
+  status.className = "pill live";
+  status.textContent = "live · " + envelope.backend;
+  clock.textContent = "guest t = " + (state.guest_ns / 1e9).toFixed(1) + " s";
   meta.textContent = "Run " + envelope.run_id + " · boot generation " +
     envelope.boot_generation + " · text " + JSON.stringify(state.text);
 }
@@ -158,7 +51,7 @@ async function poll() {
     if (!response.ok) throw new Error(value.error || "HTTP " + response.status);
     render(value);
   } catch (error) {
-    status.className = "status down";
+    status.className = "pill down";
     status.textContent = String(error.message || error);
   }
   setTimeout(poll, 250);

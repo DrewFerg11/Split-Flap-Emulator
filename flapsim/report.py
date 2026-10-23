@@ -5,7 +5,10 @@ import json
 import os
 import re
 import xml.etree.ElementTree as ET
+from importlib.resources import files
 from pathlib import Path
+
+from flapsim.ui import assemble
 
 
 def fenced(value):
@@ -44,79 +47,52 @@ def replay_data(out):
     return frames, warning
 
 
-def write_replay(out, frames, warning):
+MECHANICS_FIELDS = (
+    "steps_per_rotation",
+    "magnet_position",
+    "flap_offset",
+    "sensor_window",
+    "sensor_polarity",
+)
+
+
+def initial_mechanics(hardware):
+    """Each module's configured mechanics by "bus:addr", for the replay's drum dials.
+
+    Timeline snapshots only carry a module's mechanics once they change, so the dials fall
+    back to the run's hardware description until then.
+    """
+    result = {}
+    modules = hardware.get("modules") if isinstance(hardware, dict) else None
+    for module in modules if isinstance(modules, list) else []:
+        if isinstance(module, dict) and type(module.get("bus")) is int:
+            if type(module.get("addr")) is int:
+                result[f"{module['bus']}:{module['addr']}"] = {
+                    k: module[k] for k in MECHANICS_FIELDS if k in module
+                }
+    return result
+
+
+def write_replay(out, frames, warning, hardware=None):
     # Encode '<' so firmware/configuration text can never close the script element.
-    payload = json.dumps(frames, ensure_ascii=True).replace("<", "\\u003c").replace("&", "\\u0026")
+    def embed(value):
+        text = json.dumps(value, ensure_ascii=True)
+        return text.replace("<", "\\u003c").replace("&", "\\u0026")
+
+    payload = embed(frames)
     notice = html.escape(warning or ("No replay snapshots available." if not frames else ""))
-    document = """<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width">
-<title>Split-flap replay</title>
-<style>
-body{font:16px system-ui;background:#15181c;color:#eee;max-width:1000px;
-margin:2rem auto;padding:1rem}
-.row{display:flex;gap:.35rem;margin:1rem 0;flex-wrap:wrap}.flap{display:grid;place-items:center;
-font:42px monospace;background:#292d34;min-width:1.4em;height:1.7em;border-radius:.15em;
-border-bottom:3px solid #050607}.moving{outline:2px solid #ffbe58}
-.between{border-bottom-color:#ff6658}.fraction{font:12px system-ui;padding:.2rem}
-input{width:100%}button{padding:.5rem}
-pre{white-space:pre-wrap}#warning{color:#ffbe58}
-</style><h1>Split-flap replay</h1><p id="warning">NOTICE</p>
-<button id="play" type="button">Play</button>
-<label for="scrub">Timeline snapshot</label>
-<input id="scrub" type="range" min="0" value="0" step="1">
-<div id="board" aria-label="Virtual display"></div><pre id="details"></pre>
-<script id="frames" type="application/json">PAYLOAD</script>
-<script>
-'use strict';
-const frames=JSON.parse(document.getElementById('frames').textContent);
-const scrub=document.getElementById('scrub'),play=document.getElementById('play');
-const board=document.getElementById('board'),details=document.getElementById('details');
-let timer=null;
-function pause(){clearInterval(timer);timer=null;play.textContent='Play';}
-function draw(){
-  const frame=frames[Number(scrub.value)];board.replaceChildren();
-  if(!frame){details.textContent='No complete timeline snapshots.';return;}
-  for(const bus of [0,1]){
-    const row=document.createElement('div');row.className='row';
-    for(const module of frame.modules.filter(m=>m.bus===bus)){
-      const flap=document.createElement('span');
-      flap.className='flap'+(module.energized?' moving':'');
-      flap.textContent=module.char===' '?'\u00a0':module.char;
-      flap.title=`Bus ${module.bus}, address ${module.addr}, angle ${module.angle}`;
-      if(Number.isFinite(module.flap_position)&&Number.isFinite(module.flap_error)){
-        if(Math.abs(module.flap_error)>0.25)flap.classList.add('between');
-        const fraction=document.createElement('small');fraction.className='fraction';
-        fraction.textContent=`${module.flap_position.toFixed(3)} (${module.flap_error.toFixed(3)})`;
-        flap.append(fraction);flap.title+=`, flap position ${module.flap_position}`;
-      }
-      row.append(flap);
-    }
-    board.append(row);
-  }
-  details.textContent=JSON.stringify({snapshot:Number(scrub.value)+1,total:frames.length,
-    guest_seconds:frame.guest_ns/1e9,event:frame.event,movement:frame.movement_id,
-    settlement:frame.settlement_id,settled:frame.settled,counters:frame.counters,
-    mechanics_revision:frame.mechanics_revision??0,last_operation:frame.last_operation,
-    mechanics:frame.modules.map(m=>({bus:m.bus,addr:m.addr,mechanics:m.mechanics,
-      faults:m.faults,fault_counters:m.fault_counters}))},null,2);
-}
-scrub.max=Math.max(0,frames.length-1);scrub.disabled=!frames.length;play.disabled=!frames.length;
-scrub.addEventListener('input',()=>{pause();draw();});
-play.addEventListener('click',()=>{
-  if(timer){pause();return;}if(Number(scrub.value)>=frames.length-1)scrub.value=0;
-  play.textContent='Pause';timer=setInterval(()=>{
-    if(Number(scrub.value)>=frames.length-1){pause();return;}
-    scrub.value=Number(scrub.value)+1;draw();
-  },100);draw();
-});draw();
-</script></html>
-""".replace("PAYLOAD", payload).replace("NOTICE", notice, 1)
+    template = files("flapsim").joinpath("data/replay/replay.html").read_text(encoding="utf-8")
+    values = {"NOTICE": notice, "FRAMES": payload, "MECHANICS": embed(initial_mechanics(hardware))}
+    # One pass, so text inside the notice or frames is never mistaken for a marker.
+    document = re.sub(
+        r"@@(NOTICE|FRAMES|MECHANICS)@@", lambda m: values[m.group(1)], assemble(template)
+    )
     (out / "replay.html").write_text(document)
 
 
 def write_reports(out: Path, manifest, steps, known_issues=None):
     frames, warning = replay_data(out)
-    write_replay(out, frames, warning)
+    write_replay(out, frames, warning, manifest.get("hardware"))
     try:
         serial = (out / "serial.log").read_text(errors="replace").splitlines()[-50:]
     except OSError:

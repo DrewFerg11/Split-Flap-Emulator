@@ -4,6 +4,11 @@
 It shows the virtual display and, for every module, what is physically showing,
 its angle, flap error, hall level, coils, energized state, step counters, stalls and
 anomalies. It refreshes four times a second, with a short flip when a flap changes.
+Under each tile are the drum-angle dial (needle = drum, dot = magnet), a coil LED and a
+hall LED. A tile outlined in red is between flaps: its landing error is over 0.25 of a flap
+pitch.
+
+![Live panel homing 16 modules with the real v1.4.1 firmware](images/live-panel.gif)
 
 ![Live panel during a native release-smoke-16 run](images/live-panel.png)
 
@@ -17,6 +22,15 @@ flapsim run --mode native --native-build build/native/golden \
 flapsim panel --run runs/live --port 8765
 # Panel for runs/live: http://127.0.0.1:8765/
 ```
+
+## One look across the UIs
+
+The live panel and the run's `replay.html` share one dark style and one display script
+(`flapsim/data/ui/theme.css` and `display.js`, derived from the POC viewer). They are
+inlined into each page when it is served or written, so both stay self-contained, with no
+external assets and the panel's strict Content-Security-Policy unchanged. The replay adds
+play/pause, a scrubber and a collapsible *Snapshot details* panel with the per-module table.
+Its dials use the run's configured mechanics until a snapshot records a change.
 
 ## How it works
 
