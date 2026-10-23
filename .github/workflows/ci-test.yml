@@ -52,7 +52,9 @@ jobs:
   native:
     name: Native firmware (${{ matrix.name }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The expanded control/lifecycle matrix also includes the existing bounded
+    # golden expected-failure scenarios; keep their individual deadlines intact.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
