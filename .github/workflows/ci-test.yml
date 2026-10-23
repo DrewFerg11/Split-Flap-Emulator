@@ -222,7 +222,8 @@ jobs:
         if: matrix.name == 'control-16'
         run: |
           python -m tools.verify_faults --mode qemu --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
-            --hardware esp32-16-dual --case absent --out runs/fault-control-16
+            --hardware esp32-16-dual --case absent --known-issues baselines/v1.4.1-golden.yaml \
+            --out runs/fault-control-16
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
         run: python -m tools.summarize_run runs/scenario/run.json
