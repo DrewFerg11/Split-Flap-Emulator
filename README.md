@@ -74,6 +74,7 @@ The full index is [`docs/README.md`](docs/README.md).
 
 **Using flapsim**
 
+- Stability and versioning: [`docs/stability.md`](docs/stability.md); release notes: [`CHANGELOG.md`](CHANGELOG.md)
 - Running the emulator and writing scenarios: [`docs/runner.md`](docs/runner.md), [`docs/scenarios.md`](docs/scenarios.md)
 - Physical hardware, configuration and state/timeline schemas: [`docs/hardware-model.md`](docs/hardware-model.md)
 - Per-module physical calibration and firmware verification: [`docs/calibration.md`](docs/calibration.md)
