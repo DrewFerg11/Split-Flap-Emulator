@@ -21,6 +21,7 @@ class TelemetryCheck:
         self.sources = set()
         self.cursor = None
         self.failure = None
+        self.finished = False
         self.done = threading.Event()
         self.ws = connect(self.endpoint.replace("http:", "ws:") + "/api/emu/stream", proxy=None)
         self.ws.send(json.dumps({"token": self.token}))
@@ -55,12 +56,18 @@ class TelemetryCheck:
             if not self.done.is_set():
                 self.failure = error
 
-    def finish(self):
+    def close(self):
         self.done.set()
         self.reader.join(2)
         self.ws.close()
         if self.reader.is_alive():
             raise RuntimeError("telemetry client did not stop")
+
+    def finish(self):
+        if self.finished:
+            return
+        self.close()
+        self.finished = True
         if self.failure:
             raise RuntimeError("telemetry stream failed") from self.failure
         if not all(self.types[k] for k in ["i2c", "state", "control", "lifecycle"]):

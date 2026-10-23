@@ -37,11 +37,11 @@ class PowerProbe:
 
         observer = TelemetryCheck(context)
         try:
-            return self._execute(context)
+            return self._execute(context, before_final=observer.finish)
         finally:
-            observer.finish()
+            observer.close()
 
-    def _execute(self, context):
+    def _execute(self, context, before_final=None):
         manifest = json.loads((context.out / "run.json").read_text())
         endpoint = manifest["control"]["endpoint"]
         token = (context.out / "control-token").read_text().strip()
@@ -178,6 +178,8 @@ class PowerProbe:
                 if self.off_exit == "interrupt":
                     context.interrupt = lambda: signal.SIGTERM
                     context.checkpoint()
+                if before_final:
+                    before_final()
                 return {"power_state": "off"}
             on_command = {"id": 2 * cycle + 2, "on": True}
             on = api("/power", on_command, 202)
@@ -187,6 +189,10 @@ class PowerProbe:
                 raise RuntimeError("power-on retry applied twice")
             entry["on"] = on
             record()
+        # Stop and validate observers before choosing the final physical settlement.
+        # Observer teardown may take host time while the guest continues running.
+        if before_final:
+            before_final()
         final = settled_after(on["sequence"])
         if api("/operations/1")["operation"] != edit["operation"]:
             raise RuntimeError("power-on lost mechanics receipt")
