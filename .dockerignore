@@ -4,7 +4,6 @@ build
 dist
 firmware
 runs
-poc
 *.bin
 *.egg-info
 **/__pycache__

@@ -39,7 +39,7 @@ of packaging.
    publication. Record its digest before updating the companion firmware gate.
 
 `qemu/build.sh` is a shell entrypoint into `qemu/build.py`; consult its current
-help before invoking destructive clean options. Do not edit or erase `poc/`.
+help before invoking destructive clean options.
 
 ## Golden firmware updates and version exception retirement
 

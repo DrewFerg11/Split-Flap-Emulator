@@ -77,7 +77,7 @@ Details: [runner](docs/runner.md), [native mode](docs/native.md), [QEMU integrat
 - Live authenticated state and mechanics API: [`docs/control-api.md`](docs/control-api.md); read-only live display: [`docs/panel.md`](docs/panel.md)
 - Container commands, verified publication and maintenance: [`docs/container.md`](docs/container.md), [`docs/maintenance.md`](docs/maintenance.md)
 - Release gate for firmware: [`docs/release-gate.md`](docs/release-gate.md), [`docs/firmware-ci.md`](docs/firmware-ci.md)
-- History (implementation queue, POC findings, original MVP plan): [`docs/history/`](docs/history); POC code (reference only): [`poc/`](poc)
+- History (implementation queue, POC findings, original MVP plan): [`docs/history/`](docs/history); POC code (removed, kept in git history): [`poc/` at e0bd421](https://github.com/DrewFerg11/Split-Flap-Emulator/tree/e0bd4215d8c3f7ad67b8e8568dad5e5a1ad671cf/poc)
 
 ## License
 

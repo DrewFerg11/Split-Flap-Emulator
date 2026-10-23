@@ -135,7 +135,7 @@ Key facts about the fork, verified in the POC:
 
 ## 5. What the POC built
 
-All POC code is in [`poc/`](../../poc); see [`poc/README.md`](../../poc/README.md) for how to reproduce.
+The POC code was removed from the tree after the MVP; it is in [git history](https://github.com/DrewFerg11/Split-Flap-Emulator/tree/e0bd4215d8c3f7ad67b8e8568dad5e5a1ad671cf/poc), with a `README.md` there for how to reproduce.
 
 | File | Purpose |
 |---|---|

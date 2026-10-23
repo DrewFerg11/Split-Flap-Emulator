@@ -104,8 +104,8 @@ and actionlint passed locally.
 Route A remains a documented contingency if a future pin loses this library
 ABI or lifecycle. It would require a new decision and a minimal patch with
 model source staging. Maintaining both routes now would duplicate build and
-regression work without a proven need. The existing patch in `poc/` remains
-historical reference only.
+regression work without a proven need. The patch from the proof of concept remains
+available in [git history](https://github.com/DrewFerg11/Split-Flap-Emulator/tree/e0bd4215d8c3f7ad67b8e8568dad5e5a1ad671cf/poc) as historical reference only.
 
 ## Phase-2 model integration
 
