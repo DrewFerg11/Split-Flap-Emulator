@@ -4,8 +4,8 @@
 
 The runner can expose current physical state independently of the firmware's
 web server. The implemented QEMU and native routes provide authenticated live state, atomic mechanics
-edits, controller reset/power transitions, native runtime speed, deterministic module faults and operation receipts. I2C history and WebSockets remain unavailable and are explicitly false in `capabilities`. Issue #20 stays
-open. See [the implementation plan](control-api-plan.md) for later slices.
+edits, controller reset/power transitions, native runtime speed, deterministic module faults, operation receipts and optional structured I2C/WebSocket telemetry.
+Issue #20 stays open for declarative scenario controls and final complete-scope acceptance. See [the implementation plan](control-api-plan.md) for later slices.
 
 ```sh
 python -m pip install -e '.[control]'
@@ -49,8 +49,7 @@ The API lives only as long as the bounded scenario. After success, failure,
 timeout or cancellation the listener is closed; final metadata records
 `control.status: stopped`. Use a scenario with sufficient runtime for inspection.
 This is not an always-on server. Backend startup/failure returns 503, missing or
-incorrect authentication 401, and foreign Origin/Host 403. Unsupported routes
-are not installed (404); a wrong method on the state route returns 405.
+incorrect authentication 401, and foreign Origin/Host 403. Disabled telemetry returns `409 unsupported_capability`; unknown routes return 404; a wrong method on the state route returns 405.
 
 Successful state and mechanics responses include `api_version: 1`, a run ID, backend, boot generation,
 capabilities, `live: true`, and `state`. The state contains guest time, movement
@@ -477,3 +476,81 @@ and anomalies. Tests must prove the intended fault effect and unaffected modules
 then restore faults and verify recovery; injecting a fault does not disable normal
 error checks or grant a blanket serial-error allowance. The real-firmware probe
 accepts only the targeted module's explicitly evidenced address-NACK diagnostic.
+
+## Structured I2C history and WebSocket stream
+
+Add `--i2c-history --control-port 0` to enable telemetry on either backend.
+Rebuild native/QEMU model integration from this revision first. Without
+`--i2c-history`, `i2c_history` and `stream` capabilities remain false and no
+telemetry transport, collector, journal or optional WebSocket protocol is started.
+The existing `--trace` text output remains independently available.
+
+Authenticated `GET /api/emu/i2c?since=<cursor>&limit=128` returns a version-1
+page with `records`, `next`, `latest`, `oldest`, `gap`, `more`, `stopped` and
+`error`. `since` defaults to the start of this run; `limit` is 1–128. Read the
+**earliest** records after the cursor, then continue with `next` while `more`
+is true. Treat cursors as opaque strings: they bind the run ID and a canonical
+unsigned 64-bit decimal sequence. Invalid/duplicate queries return 422;
+foreign-run/future cursors return 409. An expired cursor returns 200 with an
+explicit `gap` describing the evicted range, followed by the oldest retained
+records. Collection/journal failures return 503 with the recorded error.
+
+`/api/emu/stream` upgrades to WebSocket and sends the same pages/cursors.
+Nonbrowser clients may send the normal Bearer header. Browser clients send
+`{"token":"<control-token contents>"}` as their **first** text message within
+one second after upgrade. No history is sent before authentication. Tokens
+must never appear in URLs or subprotocols. Host/Origin checks run before upgrade;
+incorrect authentication, binary/oversized authentication, or further application
+messages close the connection. Incoming messages are limited to 2048 bytes.
+At most eight subscribers run at once. Clients hold only a cursor, with no
+unbounded private queue; a lagging reader receives a retention gap. A send that
+cannot complete within one second disconnects. Reconnect using the last fully
+processed `next`; handle any gap as a resynchronization boundary. WebSocket
+ping/pong is handled by the protocol implementation.
+
+Each typed record includes `schema_version: 1`, `run_id` and `cursor`:
+
+- `i2c`: a transaction **fragment**, with bus/address, model-source nonce,
+  transaction ID (null for an orphan), producer/raw sequences, guest time and
+  boot generation. All sequences, IDs and nanosecond times are decimal strings.
+  Each raw event preserves its actual address, event word, kind/data and return
+  value. START and write events additionally expose the observed `ack`; read
+  bytes remain values, including `255`, rather than fabricated ACKs.
+- `state`: a coherent owner-context snapshot, coalesced to at most five samples
+  per host second. It does not advance model time, consume fault randomness or
+  append physical timeline records. While powered off, the last snapshot stays
+  frozen; lifecycle/control records describe the transition.
+- `lifecycle`: source start/end, reset, power-off or runner stream shutdown.
+- `control`: intent/result/unknown entries mirrored after the durable control
+  audit. Commands and bounded receipt fields are included, without secrets.
+- `gap`: producer loss, retained-history loss or an unknown source tail. Packet
+  and raw-event loss counts are explicit when observed; an abrupt source end
+  has `exact_count: null`, because no terminal packet can prove the tail count.
+
+The shared C event boundary records events after their actual result is known.
+A transaction flushes on STOP or in fragments of eight events; long transactions
+retain the same ID. `end` is `fragment`, `stop`, `replaced_start`, `reset`,
+`power_off`, `source_end` or `orphan`. An empty final fragment can terminate a
+transaction whose last data fragment was full. Missing STOPs and orphan events
+are preserved; reset/power/source boundaries never invent a FINISH. Raw event
+sequences preserve inter-bus ordering; fragment collection order may differ
+because each bus buffers independently. Runner audit and model telemetry cursors
+represent collection order, not a fabricated total causal order across channels.
+A new random source nonce distinguishes model incarnations through native re-exec
+and power-on, independently of the deterministic physics/fault PRNG.
+
+The model sends on a separate nonblocking `SOCK_SEQPACKET` channel. Firmware
+never waits for readers, disk or subscribers. A collector retains at most 4096
+records **and** 4 MiB of encoded data. Producer sequence gaps report packets and
+raw events dropped before collection. Every source without an observed terminal
+packet is marked with an unknown-tail gap, including reset/re-exec or abrupt
+shutdown. Telemetry is best effort under load; it is not a lossless bus analyzer.
+
+A separate writer persists complete newline-terminated records in `i2c.jsonl`,
+rotating to `i2c.previous.jsonl`, with at most 4 MiB per file. Older rotations are
+replaced. Writer lag beyond memory retention emits `journal_retention`; the final
+manifest records bounds, rotations, source/drop counts and the journal cursor.
+Shutdown drains the transport, flushes/fsyncs the journal, closes listeners and
+joins owned threads. Journal failure fails the run rather than claiming complete
+evidence. Readers of a growing journal must ignore an incomplete final line and
+check cursor/gap/rotation metadata rather than assume a complete capture.

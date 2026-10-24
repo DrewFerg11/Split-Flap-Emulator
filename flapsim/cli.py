@@ -55,6 +55,11 @@ def main() -> int:
         help="enable the authenticated loopback state API (0 chooses a free port)",
     )
     runner.add_argument(
+        "--i2c-history",
+        action="store_true",
+        help="retain I2C history and enable WebSocket telemetry (requires --control-port)",
+    )
+    runner.add_argument(
         "--qemu-prefix",
         type=Path,
         default=Path(os.environ.get("FLAPSIM_QEMU_PREFIX", ROOT / "build/qemu/install")),
@@ -116,6 +121,8 @@ def main() -> int:
 
 def check_mode_arguments(args):
     """Each mode takes only its own inputs, so a run never silently ignores an option."""
+    if getattr(args, "i2c_history", False) and args.control_port is None:
+        raise ValueError("--i2c-history requires --control-port")
     if args.mode == "qemu":
         if args.firmware is None:
             raise ValueError("qemu mode requires --firmware")

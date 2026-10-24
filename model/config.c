@@ -18,6 +18,7 @@ void fs_fail(const char *format, ...) {
 const char *fs_model_error(void) { return fs.error; }
 
 void fs_model_close(void) {
+    fs_telemetry_close();
     if (fs.operation)
         json_object_put(fs.operation);
     fs.operation = NULL;
@@ -203,6 +204,11 @@ static int start(char *timeline, const char *mode, const char *event, bool state
             fs_fail("cannot open timeline: %s", timeline);
     }
     free(timeline);
+    if (fs.failed) {
+        fs_model_close();
+        return -1;
+    }
+    fs_telemetry_start();
     if (fs.failed) {
         fs_model_close();
         return -1;

@@ -116,6 +116,7 @@ static int event_inner(uint8_t id, uint8_t address, uint16_t event, int64_t gues
 
 int fs_model_event(uint8_t id, uint8_t address, uint16_t event, int64_t guest_ns) {
     int result = event_inner(id, address, event, guest_ns);
+    fs_telemetry_event(id, address, event, result, guest_ns);
     if (fs.fault_event_pending) {
         fs.fault_event_pending = false;
         fs_emit("fault_observed", !fs_any_energized());
@@ -131,6 +132,7 @@ void fs_model_tick(int64_t guest_ns) {
     if (!fs.initialized || fs.failed)
         return;
     fs.now = guest_ns;
+    fs_telemetry_state(guest_ns);
     if (fs_any_energized() && guest_ns - fs.last_snapshot >= FS_TICK_NS) {
         fs.last_snapshot = guest_ns;
         fs_emit("snapshot", false);
@@ -143,6 +145,7 @@ void fs_model_guest_reset(void) {
     if (!fs.initialized || fs.failed)
         return;
     fs.guest_resets++;
+    fs_telemetry_boundary(2);
     for (int b = 0; b < 2; b++) {
         memset(&fs.buses[b], 0, sizeof(fs.buses[b]));
         fs.buses[b].selected = fs.buses[b].hidden = -1;

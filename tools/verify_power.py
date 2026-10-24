@@ -19,7 +19,8 @@ class PowerProbe:
     timeout = 300
     document = {"version": 1, "mode": "power-probe", "timeout": 300}
 
-    def __init__(self, end_off=False, mode="qemu", off_exit="success"):
+    def __init__(self, end_off=False, mode="qemu", off_exit="success", telemetry=False):
+        self.telemetry = telemetry
         self.end_off = end_off
         self.off_exit = off_exit
         if mode == "native":
@@ -30,6 +31,17 @@ class PowerProbe:
             }
 
     def execute(self, context):
+        if not self.telemetry:
+            return self._execute(context)
+        from tools.verify_telemetry import TelemetryCheck
+
+        observer = TelemetryCheck(context)
+        try:
+            return self._execute(context, before_final=observer.finish)
+        finally:
+            observer.close()
+
+    def _execute(self, context, before_final=None):
         manifest = json.loads((context.out / "run.json").read_text())
         endpoint = manifest["control"]["endpoint"]
         token = (context.out / "control-token").read_text().strip()
@@ -166,6 +178,8 @@ class PowerProbe:
                 if self.off_exit == "interrupt":
                     context.interrupt = lambda: signal.SIGTERM
                     context.checkpoint()
+                if before_final:
+                    before_final()
                 return {"power_state": "off"}
             on_command = {"id": 2 * cycle + 2, "on": True}
             on = api("/power", on_command, 202)
@@ -175,6 +189,10 @@ class PowerProbe:
                 raise RuntimeError("power-on retry applied twice")
             entry["on"] = on
             record()
+        # Stop and validate observers before choosing the final physical settlement.
+        # Observer teardown may take host time while the guest continues running.
+        if before_final:
+            before_final()
         final = settled_after(on["sequence"])
         if api("/operations/1")["operation"] != edit["operation"]:
             raise RuntimeError("power-on lost mechanics receipt")
@@ -215,6 +233,7 @@ def main():
     parser.add_argument("--hardware", default="esp32-8-single")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--end-off", action="store_true")
+    parser.add_argument("--i2c-history", action="store_true")
     parser.add_argument(
         "--off-exit", choices=["success", "timeout", "interrupt"], default="success"
     )
@@ -224,7 +243,9 @@ def main():
     args.timeout, args.trace, args.control_port, args.timing = 300, False, 0, "ci"
     code = run(
         args,
-        executor=PowerProbe(args.end_off or args.off_exit != "success", args.mode, args.off_exit),
+        executor=PowerProbe(
+            args.end_off or args.off_exit != "success", args.mode, args.off_exit, args.i2c_history
+        ),
     )
     print((args.out / "run.json").read_text())
     expected = {"success": 0, "timeout": 4, "interrupt": 128 + signal.SIGTERM}[args.off_exit]
