@@ -21,11 +21,14 @@ enum {
 };
 enum { FS_MOTOR_OK, FS_MOTOR_DEAD, FS_MOTOR_SLIP };
 enum { FS_I2C_OK, FS_I2C_MISSING, FS_I2C_DISAPPEAR, FS_I2C_NACK, FS_I2C_CORRUPT };
+/* Electrical faults (#64): rail lost, a timed drop window, momentary module brownouts and
+ * momentary controller supply sags that abort a transaction. */
+enum { FS_POWER_OK, FS_POWER_LOST, FS_POWER_DROP, FS_POWER_BROWNOUT, FS_POWER_SAG };
 typedef struct {
     bool configured;
-    int sensor, motor, i2c;
-    double sensor_noise, slip, nack, corrupt;
-    int64_t disappear_at_ns;
+    int sensor, motor, i2c, power;
+    double sensor_noise, slip, nack, corrupt, brownout, sag;
+    int64_t disappear_at_ns, power_off_at_ns, power_on_at_ns;
     uint32_t seed, rng;
     uint64_t events;
 } FsFaults;
@@ -33,14 +36,15 @@ typedef struct {
     int bus, addr, angle, phase, steps, magnet, flap_offset, window;
     bool energized, active_low;
     uint16_t latch;
-    bool observed_nack, observed_block;
-    uint64_t blocked_steps, nacks;
+    bool observed_nack, observed_block, observed_power;
+    bool powered; /* false while the module rail is down; the model starts powered */
+    uint64_t blocked_steps, nacks, power_losses;
     FsCounters counters;
     FsFaults faults;
 } FsModule;
 typedef struct {
     int selected, direction, writes, reads;
-    bool active, rejected;
+    bool active, rejected, aborted;
     uint8_t bytes[2];
     uint16_t input;
     int hidden; /* address of a present module answering this transaction as absent, or -1 */
@@ -87,6 +91,9 @@ char *fs_control_command(const char *request, int64_t guest_ns);
 bool fs_restore(const char *timeline_path, bool *recorded_reset);
 bool fs_parse_faults(struct json_object *entry, FsModule *module);
 bool fs_fault_absent(FsModule *module, int64_t guest_ns);
+bool fs_fault_sag(FsModule *module);
+void fs_power_sync(FsModule *module, int64_t guest_ns, bool emit);
+bool fs_power_evidence(const FsModule *module);
 int fs_fault_hall(FsModule *module);
 bool fs_fault_blocks_step(FsModule *module);
 uint8_t fs_fault_read(FsModule *module, uint8_t byte);

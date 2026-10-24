@@ -9,6 +9,11 @@
 static const char *const SENSOR[] = {"ok", "stuck_active", "stuck_inactive", "inverted", "noisy"};
 static const char *const MOTOR[] = {"ok", "dead", "slip"};
 static const char *const I2C[] = {"ok", "missing", "disappear", "nack", "corrupt"};
+static const char *const POWER[] = {"ok", "lost", "drop", "brownout", "sag"};
+
+/* PCF8575 power-on reset drives every output high; an unpowered module drives nothing. */
+#define POWER_ON_LATCH 0xffff
+#define POWER_OFF_LATCH 0
 
 /* Resolved configuration; unlike the legacy summary, this binds parameters and seed. */
 struct json_object *fs_faults(const FsModule *module) {
@@ -17,6 +22,9 @@ struct json_object *fs_faults(const FsModule *module) {
     json_object_object_add(object, "sensor", json_object_new_string(SENSOR[f->sensor]));
     json_object_object_add(object, "motor", json_object_new_string(MOTOR[f->motor]));
     json_object_object_add(object, "i2c", json_object_new_string(I2C[f->i2c]));
+    /* Healthy-power modules keep the pre-#64 shape so older evidence stays valid. */
+    if (f->power)
+        json_object_object_add(object, "power", json_object_new_string(POWER[f->power]));
     json_object_object_add(object, "seed", json_object_new_int64(f->seed));
     json_object_object_add(object, "configured", json_object_new_boolean(f->configured));
     if (f->sensor == FS_SENSOR_NOISY)
@@ -30,7 +38,22 @@ struct json_object *fs_faults(const FsModule *module) {
     if (f->i2c == FS_I2C_DISAPPEAR)
         json_object_object_add(object, "disappear_at_ns",
                                json_object_new_int64(f->disappear_at_ns));
+    if (f->power == FS_POWER_BROWNOUT)
+        json_object_object_add(object, "brownout", json_object_new_double(f->brownout));
+    if (f->power == FS_POWER_SAG)
+        json_object_object_add(object, "sag", json_object_new_double(f->sag));
+    if (f->power == FS_POWER_DROP) {
+        json_object_object_add(object, "power_off_at_ns",
+                               json_object_new_int64(f->power_off_at_ns));
+        json_object_object_add(object, "power_on_at_ns",
+                               json_object_new_int64(f->power_on_at_ns));
+    }
     return object;
+}
+
+/* Power effects extend the effect counters only once they matter, like the faults object. */
+bool fs_power_evidence(const FsModule *module) {
+    return module->faults.power || module->power_losses || !module->powered;
 }
 
 static int literal(struct json_object *value, const char *const *names, int count) {
@@ -68,6 +91,13 @@ bool fs_patch_faults(struct json_object *object, FsModule *module) {
             f->i2c = mode;
             f->nack = f->corrupt = 0;
             f->disappear_at_ns = 0;
+        } else if (!strcmp(key, "power")) {
+            /* Only the rail switch is a runtime control; timed and random modes stay startup-only. */
+            if ((mode = literal(value, POWER, 2)) < 0)
+                return false;
+            f->power = mode;
+            f->brownout = f->sag = 0;
+            f->power_off_at_ns = f->power_on_at_ns = 0;
         } else
             return false;
     }
@@ -88,6 +118,10 @@ bool fs_load_fault_state(struct json_object *object, FsModule *module) {
             (*modes[i] = literal(value, names[i], counts[i])) < 0)
             return false;
     }
+    /* Absent means healthy; an explicit "ok" is not canonical and fails the final comparison. */
+    if (json_object_object_get_ex(object, "power", &value) &&
+        (restored.power = literal(value, POWER, 5)) < 0)
+        return false;
     if (!json_object_object_get_ex(object, "seed", &value) ||
         !json_object_is_type(value, json_type_int) || json_object_get_int64(value) < 0 ||
         json_object_get_int64(value) > UINT32_MAX)
@@ -101,17 +135,21 @@ bool fs_load_fault_state(struct json_object *object, FsModule *module) {
     if (restored.seed != initial->seed || (initial->configured && !restored.configured) ||
         (restored.sensor > FS_SENSOR_STUCK_INACTIVE && restored.sensor != initial->sensor) ||
         (restored.motor > FS_MOTOR_DEAD && restored.motor != initial->motor) ||
-        (restored.i2c > FS_I2C_MISSING && restored.i2c != initial->i2c))
+        (restored.i2c > FS_I2C_MISSING && restored.i2c != initial->i2c) ||
+        (restored.power > FS_POWER_LOST && restored.power != initial->power))
         return false;
     if (!restored.configured &&
-        (restored.seed || restored.sensor || restored.motor || restored.i2c))
+        (restored.seed || restored.sensor || restored.motor || restored.i2c || restored.power))
         return false;
-    const char *parameters[] = {"sensor_noise", "slip", "nack", "corrupt"};
+    const char *parameters[] = {"sensor_noise", "slip", "nack", "corrupt", "brownout", "sag"};
     bool required[] = {restored.sensor == FS_SENSOR_NOISY, restored.motor == FS_MOTOR_SLIP,
-                       restored.i2c == FS_I2C_NACK, restored.i2c == FS_I2C_CORRUPT};
-    double *numbers[] = {&restored.sensor_noise, &restored.slip, &restored.nack, &restored.corrupt};
-    double originals[] = {initial->sensor_noise, initial->slip, initial->nack, initial->corrupt};
-    for (int i = 0; i < 4; i++) {
+                       restored.i2c == FS_I2C_NACK,        restored.i2c == FS_I2C_CORRUPT,
+                       restored.power == FS_POWER_BROWNOUT, restored.power == FS_POWER_SAG};
+    double *numbers[] = {&restored.sensor_noise, &restored.slip,     &restored.nack,
+                         &restored.corrupt,      &restored.brownout, &restored.sag};
+    double originals[] = {initial->sensor_noise, initial->slip,     initial->nack,
+                          initial->corrupt,      initial->brownout, initial->sag};
+    for (int i = 0; i < 6; i++) {
         bool present = json_object_object_get_ex(object, parameters[i], &value);
         if (present != required[i])
             return false;
@@ -125,15 +163,23 @@ bool fs_load_fault_state(struct json_object *object, FsModule *module) {
                 return false;
         }
     }
-    bool disappear = restored.i2c == FS_I2C_DISAPPEAR;
-    if (json_object_object_get_ex(object, "disappear_at_ns", &value) != disappear)
-        return false;
-    if (disappear) {
-        if (!json_object_is_type(value, json_type_int) || json_object_get_int64(value) <= 0)
+    const char *times[] = {"disappear_at_ns", "power_off_at_ns", "power_on_at_ns"};
+    bool timed[] = {restored.i2c == FS_I2C_DISAPPEAR, restored.power == FS_POWER_DROP,
+                    restored.power == FS_POWER_DROP};
+    int64_t *instants[] = {&restored.disappear_at_ns, &restored.power_off_at_ns,
+                           &restored.power_on_at_ns};
+    int64_t configured[] = {initial->disappear_at_ns, initial->power_off_at_ns,
+                            initial->power_on_at_ns};
+    for (int i = 0; i < 3; i++) {
+        if (json_object_object_get_ex(object, times[i], &value) != timed[i])
             return false;
-        restored.disappear_at_ns = json_object_get_int64(value);
-        if (restored.disappear_at_ns != initial->disappear_at_ns)
-            return false;
+        if (timed[i]) {
+            if (!json_object_is_type(value, json_type_int) || json_object_get_int64(value) <= 0)
+                return false;
+            *instants[i] = json_object_get_int64(value);
+            if (*instants[i] != configured[i])
+                return false;
+        }
     }
     FsModule copy = *module;
     copy.faults = restored;
@@ -200,8 +246,11 @@ bool fs_parse_faults(struct json_object *entry, FsModule *module) {
         fs_fail("normalized faults must be an object");
         return false;
     }
-    static const char *const KEYS[] = {"sensor", "motor",   "i2c",  "sensor_noise",   "slip",
-                                       "nack",   "corrupt", "seed", "disappear_at_ns"};
+    static const char *const KEYS[] = {"sensor",          "motor",    "i2c",
+                                       "power",           "sensor_noise", "slip",
+                                       "nack",            "corrupt",  "brownout",
+                                       "sag",             "seed",     "disappear_at_ns",
+                                       "power_off_at_ns", "power_on_at_ns"};
     json_object_object_foreach(faults, key, unused) {
         (void)unused;
         size_t i = 0;
@@ -217,10 +266,13 @@ bool fs_parse_faults(struct json_object *entry, FsModule *module) {
     f->sensor = choice(faults, "sensor", SENSOR, 5);
     f->motor = choice(faults, "motor", MOTOR, 3);
     f->i2c = choice(faults, "i2c", I2C, 5);
+    f->power = choice(faults, "power", POWER, 5);
     f->sensor_noise = probability(faults, "sensor_noise", f->sensor == FS_SENSOR_NOISY);
     f->slip = probability(faults, "slip", f->motor == FS_MOTOR_SLIP);
     f->nack = probability(faults, "nack", f->i2c == FS_I2C_NACK);
     f->corrupt = probability(faults, "corrupt", f->i2c == FS_I2C_CORRUPT);
+    f->brownout = probability(faults, "brownout", f->power == FS_POWER_BROWNOUT);
+    f->sag = probability(faults, "sag", f->power == FS_POWER_SAG);
     if (json_object_object_get_ex(faults, "disappear_at_ns", &value) !=
         (f->i2c == FS_I2C_DISAPPEAR)) {
         fs_fail("normalized faults.disappear_at_ns belongs to i2c: disappear");
@@ -230,25 +282,110 @@ bool fs_parse_faults(struct json_object *entry, FsModule *module) {
         else
             f->disappear_at_ns = json_object_get_int64(value);
     }
+    bool drop = f->power == FS_POWER_DROP;
+    if (json_object_object_get_ex(faults, "power_off_at_ns", &value) != drop ||
+        json_object_object_get_ex(faults, "power_on_at_ns", &value) != drop) {
+        fs_fail("normalized faults.power_off_at_ns and power_on_at_ns belong to power: drop");
+    } else if (drop) {
+        struct json_object *off = NULL, *on = NULL;
+        json_object_object_get_ex(faults, "power_off_at_ns", &off);
+        json_object_object_get_ex(faults, "power_on_at_ns", &on);
+        if (!json_object_is_type(off, json_type_int) || !json_object_is_type(on, json_type_int) ||
+            json_object_get_int64(off) <= 0 || json_object_get_int64(on) <= json_object_get_int64(off))
+            fs_fail("normalized faults.power_on_at_ns must follow a positive power_off_at_ns");
+        else {
+            f->power_off_at_ns = json_object_get_int64(off);
+            f->power_on_at_ns = json_object_get_int64(on);
+        }
+    }
     if (!json_object_object_get_ex(faults, "seed", &value) ||
         !json_object_is_type(value, json_type_int) || json_object_get_int64(value) <= 0 ||
         json_object_get_int64(value) > 0xffffffffLL)
         fs_fail("normalized faults.seed must be a nonzero 32-bit integer");
     else
         f->seed = f->rng = (uint32_t)json_object_get_int64(value);
-    if (!f->sensor && !f->motor && !f->i2c)
+    if (!f->sensor && !f->motor && !f->i2c && !f->power)
         fs_fail("normalized faults name no fault");
     return !fs.failed;
 }
 
+/* One reset of the module's electrical state. A power change can start or end motion, so it
+ * keeps the movement and settlement identities honest; the control path records its own event. */
+static void power_reset(FsModule *module, uint16_t latch, bool emit) {
+    bool moving = fs_any_energized();
+    module->latch = latch;
+    module->energized = ((latch >> 1) & 15) != 0;
+    module->phase = -1;
+    bool now_moving = fs_any_energized();
+    if (!moving && now_moving) {
+        fs.movement_id++;
+        if (emit)
+            fs_emit("move_started", false);
+    } else if (moving && !now_moving) {
+        fs.settlement_id++;
+        if (emit)
+            fs_emit("move_finished", true);
+    }
+}
+
+/* The rail the configured mode demands at this instant; brownouts and sags are momentary. */
+static bool rail_up(const FsFaults *f, int64_t guest_ns) {
+    return f->power != FS_POWER_LOST &&
+           !(f->power == FS_POWER_DROP && guest_ns >= f->power_off_at_ns &&
+             guest_ns < f->power_on_at_ns);
+}
+
+/* Applies a rail transition at most once per change. A module without power drives nothing
+ * and its coils release; a powered-up expander starts from its reset state, not its old latch. */
+void fs_power_sync(FsModule *module, int64_t guest_ns, bool emit) {
+    const FsFaults *f = &module->faults;
+    /* A drop is the only way a module with this mode loses its rail, so a missing loss means
+     * the window opened since anyone looked, even if it has already closed again. */
+    if (f->power == FS_POWER_DROP && !module->power_losses && module->powered &&
+        guest_ns >= f->power_off_at_ns) {
+        module->powered = false;
+        module->power_losses++;
+        power_reset(module, POWER_OFF_LATCH, emit);
+    }
+    bool up = rail_up(f, guest_ns);
+    if (up == module->powered)
+        return;
+    module->powered = up;
+    if (!up)
+        module->power_losses++;
+    power_reset(module, up ? POWER_ON_LATCH : POWER_OFF_LATCH, emit);
+}
+
 bool fs_fault_absent(FsModule *module, int64_t guest_ns) {
     FsFaults *f = &module->faults;
-    bool absent = f->i2c == FS_I2C_MISSING ||
+    fs_power_sync(module, guest_ns, true);
+    bool absent = !module->powered || f->i2c == FS_I2C_MISSING ||
                   (f->i2c == FS_I2C_DISAPPEAR && guest_ns >= f->disappear_at_ns) ||
                   (f->i2c == FS_I2C_NACK && chance(f, f->nack));
+    if (!absent && f->power == FS_POWER_BROWNOUT && chance(f, f->brownout)) {
+        /* The rail dips below reset and recovers within the transaction: it is lost, and the
+         * expander comes back in its power-on state. */
+        module->power_losses++;
+        power_reset(module, POWER_ON_LATCH, true);
+        absent = true;
+    }
     if (absent)
         f->events++;
     return absent;
+}
+
+/* A controller supply sag resets the I2C peripheral mid-transaction: the address was
+ * acknowledged, but the bytes after it are lost and reads float high. */
+bool fs_fault_sag(FsModule *module) {
+    FsFaults *f = &module->faults;
+    if (f->power != FS_POWER_SAG || !chance(f, f->sag))
+        return false;
+    f->events++;
+    if (!module->observed_power) {
+        module->observed_power = true;
+        fs.fault_event_pending = true;
+    }
+    return true;
 }
 
 /* The level the firmware reads; snapshots keep reporting the physical sensor. */
@@ -303,6 +440,8 @@ struct json_object *fs_faults_json(const FsModule *module) {
         json_object_object_add(object, "motor", json_object_new_string(MOTOR[f->motor]));
     if (f->i2c)
         json_object_object_add(object, "i2c", json_object_new_string(I2C[f->i2c]));
+    if (f->power)
+        json_object_object_add(object, "power", json_object_new_string(POWER[f->power]));
     json_object_object_add(object, "events", json_object_new_int64((int64_t)f->events));
     return object;
 }

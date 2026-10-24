@@ -159,6 +159,7 @@ static char *load(const char *config_path, const char *mode) {
             if (module->faults.configured)
                 fs.faults_enabled = true;
             module->phase = -1;
+            module->powered = true;
             module->latch = 0xffe1;
             if (i &&
                 (module->bus < fs.modules[i - 1].bus || (module->bus == fs.modules[i - 1].bus &&

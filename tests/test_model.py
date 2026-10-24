@@ -1852,3 +1852,234 @@ def test_structured_snapshots_do_not_change_fault_rng_physics_or_timeline(
     finally:
         parent.close()
         child.close()
+
+
+def current(model):
+    """The latest timeline record: state.json is only replaced while every motor is settled."""
+    return model.timeline()[-1]
+
+
+def effects(model, index=0):
+    return current(model)["modules"][index]["fault_counters"]
+
+
+def test_lost_power_releases_the_coils_and_restores_into_the_expander_reset_state(make_model):
+    model = make_model(angles=(100,))
+    model.write(COILS[0])
+    model.write(COILS[1])
+    assert current(model)["modules"][0]["energized"]
+    config = json.loads(model.config.read_text())
+    lost = model.control({"faults": {"power": "lost"}})
+    module = lost["modules"][0]
+    assert (module["latch"], module["energized"], module["phase"]) == (0, False, -1)
+    assert module["angle"] == 101 and lost["settled"]
+    assert lost["settlement_id"] == lost["movement_id"]
+    assert module["fault_counters"]["power_losses"] == 1
+    assert module["fault_counters"]["powered"] is False
+    assert current(model)["modules"][0]["faults"]["power"] == "lost"
+    validate_state(lost, config)
+    # The address no longer answers, writes never land, and nothing counts as a model anomaly.
+    assert model.event(1) == 1
+    model.event(3)
+    assert read_cycle(model) == (False, 0xFFFF)
+    unpowered = current(model)
+    assert unpowered["counters"]["writes"] == 2 and unpowered["counters"]["anomalies"] == 0
+    # Replaying the acknowledged command is idempotent and returns the live snapshot.
+    live = model.control({"faults": {"power": "lost"}})
+    assert live["modules"][0]["fault_counters"]["nacks"] == 2
+    assert resume(model, model.now) == 0
+    assert current(model)["modules"][0]["fault_counters"]["powered"] is False
+    # Restoring the rail brings the PCF8575 up with every output high, as its datasheet says.
+    restored = model.control({"faults": {"power": "ok"}}, identifier=2, revision=1)
+    module = restored["modules"][0]
+    assert (module["latch"], module["energized"], module["phase"]) == (0xFFFF, True, -1)
+    assert "power" not in module["faults"]
+    assert module["fault_counters"]["powered"] is True
+    assert module["fault_counters"]["power_losses"] == 1
+    assert module["angle"] == 101
+    validate_state(restored, config, require_settled=False)
+    # The firmware regains control with its next write and the drum steps from there.
+    model.write(COILS[0])
+    model.write(COILS[1])
+    model.write(OFF)
+    final = model.state()
+    assert final["modules"][0]["angle"] == 102 and final["settled"]
+    assert final["counters"]["anomalies"] == 0
+    validate_state(final, config)
+
+
+def test_a_power_change_is_isolated_to_its_module_and_may_interrupt_a_move(make_model):
+    model = make_model(angles=(100, 200), buses=(0, 0))
+    model.write(COILS[0], addr=33)
+    model.write(COILS[1], addr=33)
+    lost = model.control({"faults": {"power": "lost"}})
+    assert not lost["settled"]  # The second module is still driven.
+    assert lost["modules"][1]["energized"] and lost["modules"][1]["latch"] == COILS[1]
+    model.write(COILS[2], addr=33)
+    model.write(OFF, addr=33)
+    state = model.state()
+    assert state["modules"][1]["angle"] == 202 and state["settled"]
+    assert state["modules"][1]["fault_counters"]["nacks"] == 0
+    assert "power_losses" not in state["modules"][1]["fault_counters"]
+
+
+def test_timed_power_drop_applies_between_transactions_and_comes_back(make_model):
+    model = faulted(
+        make_model,
+        {"power": "drop", "power_off_at": 0.5, "power_on_at": 1.0},
+        angles=(100,),
+    )
+    config = json.loads(model.config.read_text())
+    model.write(COILS[0])
+    model.write(COILS[1])
+    model.now = 499_000_000
+    model.tick(1_000_000)
+    assert model.activity()["faults"][0]["power"] == "drop"
+    state = model.state()
+    assert state["modules"][0]["latch"] == 0 and state["settled"]
+    assert state["modules"][0]["fault_counters"]["powered"] is False
+    model.now = 700_000_000
+    assert read_cycle(model) == (False, 0xFFFF)
+    model.now = 1_000_000_000
+    model.tick(0)
+    state = current(model)
+    assert state["modules"][0]["latch"] == 0xFFFF and state["modules"][0]["energized"]
+    assert state["modules"][0]["fault_counters"]["power_losses"] == 1
+    assert state["modules"][0]["fault_counters"]["powered"] is True
+    model.write(OFF)
+    final = model.state()
+    assert final["settled"] and final["counters"]["anomalies"] == 0
+    assert final["modules"][0]["angle"] == 101
+    validate_state(final, config)
+    assert resume(model, model.now) == 0
+
+
+def test_a_timed_drop_is_applied_even_if_nothing_observed_it_while_it_lasted(make_model):
+    model = faulted(
+        make_model,
+        {"power": "drop", "power_off_at": 0.5, "power_on_at": 1.0},
+        angles=(100,),
+    )
+    model.write(COILS[0])
+    model.write(COILS[1])
+    # Both edges pass with no tick and no transaction; the next one still sees the lost latch.
+    model.now = 2_000_000_000
+    assert read_cycle(model) == (True, 0x7FFF)
+    state = current(model)
+    assert state["modules"][0]["fault_counters"]["power_losses"] == 1
+    assert state["modules"][0]["latch"] == 0xFFFF
+
+
+def test_brownouts_reset_the_module_nack_the_transaction_and_are_reproducible(make_model):
+    def run():
+        model = faulted(make_model, {"power": "brownout", "brownout": 0.25}, angles=(0,))
+        results = []
+        for _ in range(120):
+            results.append(read_cycle(model))
+        record = fault_record(model)
+        counters = effects(model)
+        assert model.activity()["counters"]["anomalies"] == 0
+        model.lib.fs_model_close()
+        return results, record["events"], counters
+
+    results, events, counters = run()
+    dropped = sum(not acked for acked, _ in results)
+    assert 10 < dropped < 60
+    assert events == dropped == counters["nacks"] == counters["power_losses"]
+    assert counters["powered"] is True
+    assert all(value == 0xFFFF for acked, value in results if not acked)
+    assert run()[0] == results
+
+
+def test_a_brownout_loses_the_latched_outputs_of_a_driven_module(make_model):
+    model = faulted(make_model, {"power": "brownout", "brownout": 1}, angles=(100,))
+    assert model.event(1) == 1
+    model.event(3)
+    module = current(model)["modules"][0]
+    assert module["latch"] == 0xFFFF and module["energized"]
+    assert module["fault_counters"]["power_losses"] == 1
+    assert any(r["event"] == "fault_observed" for r in model.timeline())
+    assert current(model)["modules"][0]["fault_counters"]["powered"] is True
+    assert resume(model, model.now) == 0
+    after = model.control({"faults": {"power": "ok"}})
+    assert after["modules"][0]["fault_counters"]["power_losses"] == 1
+    assert model.event(1) == 0
+    model.event(3)
+
+
+def test_supply_sags_abort_the_transaction_after_the_address_acknowledges(make_model):
+    model = faulted(make_model, {"power": "sag", "sag": 1}, angles=(100,))
+    assert model.event(1) == 0
+    model.event(0xE105, 0, 32)
+    model.event(0xFF05, 0, 32)
+    model.event(3)
+    state = current(model)
+    assert state["modules"][0]["latch"] == 0xFFE1 and state["counters"]["writes"] == 0
+    assert state["counters"]["anomalies"] == 0
+    assert read_cycle(model) == (True, 0xFFFF)
+    assert [r["event"] for r in model.timeline()].count("fault_observed") == 1
+    record = fault_record(model)
+    assert record["power"] == "sag" and record["events"] == 2
+    assert effects(model)["nacks"] == 0
+    # The sag is momentary and the firmware can repair it: repeating the write lands.
+    model.control({"faults": {"power": "ok"}})
+    model.write(COILS[0])
+    assert current(model)["modules"][0]["latch"] == COILS[0]
+
+
+def test_sags_are_seeded_and_only_abort_the_transactions_they_hit(make_model):
+    def run():
+        model = faulted(make_model, {"power": "sag", "sag": 0.3}, angles=(0,))
+        outcomes = [read_cycle(model) for _ in range(100)]
+        events = fault_record(model)["events"]
+        assert model.activity()["counters"]["anomalies"] == 0
+        model.lib.fs_model_close()
+        return outcomes, events
+
+    first, events = run()
+    assert all(acked for acked, _ in first)
+    assert 10 < events < 60 and [v for _, v in first].count(0xFFFF) == events
+    assert run() == (first, events)
+
+
+def test_power_faults_keep_healthy_evidence_unchanged_and_runtime_support_narrow(make_model):
+    model = make_model(angles=(100,))
+    state = model.control({"faults": {"sensor": "stuck_active"}})
+    assert set(state["modules"][0]["fault_counters"]) == {
+        "blocked_steps",
+        "nacks",
+        "rng",
+        "events",
+    }
+    assert "power" not in state["modules"][0]["faults"]
+    for mode in ["drop", "brownout", "sag"]:
+        assert model.control({"faults": {"power": mode}}, identifier=2, revision=1) == {
+            "error": "invalid_mechanics"
+        }
+
+
+def test_runtime_repair_cannot_swap_in_startup_only_power_parameters(make_model):
+    model = faulted(make_model, {"power": "brownout", "brownout": 0.5}, angles=(100,))
+    repaired = model.control({"faults": {"power": "ok"}})
+    assert "power" not in repaired["modules"][0]["faults"]
+    assert resume(model, model.now) == 0
+    validate_state(model.timeline()[-1], json.loads(model.config.read_text()))
+
+
+@pytest.mark.parametrize("problem", ["missing", "unexpected", "powered", "healthy"])
+def test_native_resume_rejects_inconsistent_power_evidence(make_model, problem):
+    model = make_model()
+    record = model.control({"faults": {"power": "lost"}})
+    model.lib.fs_model_close()
+    counters = record["modules"][0]["fault_counters"]
+    if problem == "missing":
+        del counters["power_losses"]
+    elif problem == "unexpected":
+        counters["rail"] = 1
+    elif problem == "powered":
+        counters["powered"] = 1
+    elif problem == "healthy":
+        record["modules"][0]["faults"].pop("power")
+    record["event"] = "faults_changed"
+    (model.out / "timeline.jsonl").write_text(json.dumps(record) + "\n")
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0

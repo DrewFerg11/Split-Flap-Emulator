@@ -64,6 +64,7 @@ static int event_inner(uint8_t id, uint8_t address, uint16_t event, int64_t gues
             /* Only a read samples the sensor, so writes never consume or count sensor faults. */
             int hall = kind == 0 ? fs_fault_hall(module) : fs_hall(module);
             bus->input = (module->latch & 0x7fff) | (hall ? 0x8000 : 0);
+            bus->aborted = fs_fault_sag(module);
         }
         return index >= 0 ? 0 : 1;
     }
@@ -89,7 +90,8 @@ static int event_inner(uint8_t id, uint8_t address, uint16_t event, int64_t gues
     }
     if (kind == 3) {
         bool moving = fs_any_energized();
-        fs_pcf_finish(bus, module);
+        if (!bus->aborted)
+            fs_pcf_finish(bus, module);
         bus->selected = -1;
         bool now_moving = fs_any_energized();
         if (!moving && now_moving) {
@@ -102,6 +104,8 @@ static int event_inner(uint8_t id, uint8_t address, uint16_t event, int64_t gues
         return 0;
     }
     if (kind == 5 && bus->direction != 0) {
+        if (bus->aborted)
+            return 0;
         if (bus->writes < 2)
             bus->bytes[bus->writes] = event >> 8;
         if (bus->writes < 3)
@@ -109,7 +113,7 @@ static int event_inner(uint8_t id, uint8_t address, uint16_t event, int64_t gues
         return 0;
     }
     if (kind == 6 && bus->direction == 0)
-        return fs_fault_read(module, fs_pcf_read(bus));
+        return bus->aborted ? 0xff : fs_fault_read(module, fs_pcf_read(bus));
     fs_anomaly(module, "invalid event or transaction direction");
     return 1;
 }
@@ -132,6 +136,11 @@ void fs_model_tick(int64_t guest_ns) {
     if (!fs.initialized || fs.failed)
         return;
     fs.now = guest_ns;
+    /* Timed rail changes apply even when the firmware is quiet, but never inside a transaction. */
+    for (int i = 0; i < fs.count; i++) {
+        if (fs.modules[i].faults.power && fs.buses[fs.modules[i].bus].selected != i)
+            fs_power_sync(&fs.modules[i], guest_ns, true);
+    }
     fs_telemetry_state(guest_ns);
     if (fs_any_energized() && guest_ns - fs.last_snapshot >= FS_TICK_NS) {
         fs.last_snapshot = guest_ns;

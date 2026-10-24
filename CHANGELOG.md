@@ -15,6 +15,8 @@ Merged to `main` after the `v0.1.0` tag (`3ba32a9`) and not yet released.
   #53, #54).
 - Read-only live display panel (`flapsim panel`, **experimental**) and its restyle (#49, #56).
 - Per-module fault injection in the hardware model (#47).
+- Power fault injection: module rail loss and restore (also at runtime), timed drops,
+  seeded brownouts and controller supply sags, with resume-safe evidence (#64).
 - Factory-fresh first-boot scenarios, a settings-race stress scenario and a long time-mode soak
   (#44, #46).
 - Multi-arch (amd64 and arm64) image publication with an optional Docker Hub mirror (#48).

@@ -8,6 +8,7 @@ from flapsim.faults import (
     DEFAULT_FAULTS,
     resolved_faults,
     validate_effective_faults,
+    validate_fault_counters,
     validate_fault_identity,
     validate_faults,
     validate_summary,
@@ -192,16 +193,7 @@ def validate_state(state, hardware, *, require_settled=True):
         if faults_enabled:
             faults = validate_faults(actual.get("faults"))
             validate_effective_faults(initial_faults[len(text)], faults)
-            effects = actual.get("fault_counters")
-            if (
-                not isinstance(effects, dict)
-                or set(effects) != {"blocked_steps", "nacks", "rng", "events"}
-                or any(type(n) is not int or not 0 <= n < 2**63 for n in effects.values())
-                or effects.get("rng", 2**32) >= 2**32
-                or bool(effects["rng"]) != bool(faults["seed"])
-                or effects["events"] < effects["blocked_steps"] + effects["nacks"]
-            ):
-                raise ValueError("invalid observed fault counters")
+            validate_fault_counters(actual.get("fault_counters"), faults)
         elif "faults" in actual or "fault_counters" in actual:
             raise ValueError("fault state without version")
         mechanics = initial[len(text)]
@@ -254,7 +246,7 @@ def validate_state(state, hardware, *, require_settled=True):
             raise ValueError("mechanics command target is missing")
         for key, part in command["patch"].items():
             if key == "faults":
-                if any(v != target["faults"].get(k) for k, v in part.items()):
+                if any(v != target["faults"].get(k, "ok") for k, v in part.items()):
                     raise ValueError("faults do not match last applied command")
             elif (
                 type(part) is not type(target["mechanics"].get(key))
