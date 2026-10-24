@@ -23,6 +23,12 @@ serial:
       Item 1: the loop and web-server tasks share one Preferences handle without a lock, so one task's
       end() invalidates the other's read.
     regex: '^\[\s*\d+\]\[E\]\[Preferences\.cpp:\d+\] (getString|getBytesLength)\(\): nvs_get_(str|blob) (len )?fail: \w+ INVALID_HANDLE$'
+  - issue: DrewFerg11/Split-Flap-Display#54
+    reason: >-
+      Item 1, write side: a save from the web-server task commits through a handle the loop task has
+      already ended, so nvs_commit logs INVALID_HANDLE (here wire1Addresses). Only the putString
+      commit failure with that code is covered; any other put or code is still reported.
+    regex: '^\[\s*\d+\]\[E\]\[Preferences\.cpp:\d+\] putString\(\): nvs_commit fail: \w+ INVALID_HANDLE$'
   - issue: DrewFerg11/Split-Flap-Display#86
     reason: >-
       Two firmware tasks print to the UART without a shared lock, so request logging gets spliced into
@@ -57,6 +63,15 @@ serial:
       are reported once more by the final sweep. Policy checks that expect those lines are applied
       before this baseline; other write codes and addresses still fail.
     regex: '^Error writing data to module 3[2-9], error code: 2$'
+  - issue: DrewFerg11/Split-Flap-Display#86
+    reason: >-
+      The request-body form of the splice: the other task's request-body JSON (no brackets and no
+      error keywords) is followed on the same line by the head of the fresh-NVS diagnostic, from
+      "[ timestamp][E][" up to "begin(): " (the last cut the tail entry above can resume from), e.g.
+      '{"mode":"dual-single",...}[ 38172][E][Preferences'. The rest of the diagnostic resumes on the
+      next line and is covered by the tail entry above. Any other text before the head, a cut past
+      "begin(): ", or any other continuation is still reported.
+    regex: '^\{(?!(?i:[^\[\]]*?(?:error|failed|panic|abort|exception)))[^\[\]]*\}\[\s*\d+\]\[E\]\[(?:P(?:r(?:e(?:f(?:e(?:r(?:e(?:n(?:c(?:e(?:s(?:\.(?:c(?:p(?:p(?::(?:5(?:0(?:\](?:\ (?:b(?:e(?:g(?:i(?:n(?:\((?:\)(?::(?:\ )?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?$'
 
 expected_failures:
   - issue: DrewFerg11/Split-Flap-Display#54
