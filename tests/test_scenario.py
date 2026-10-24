@@ -831,6 +831,27 @@ def test_head_and_late_tail_splices_are_golden_only(context, raw, spliced):
 DIAGNOSTIC = "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
 
 
+def test_reset_banner_joined_to_complete_fresh_nvs_diagnostic(context):
+    raw = DIAGNOSTIC + "ets Jul 29 2019 12:21:46\n\nrst:0x1 (POWERON_RESET)\n"
+    path = context.out / "serial.log"
+    path.write_text(raw)
+    executor([{"assert_no_errors": {"fresh_nvs": True}}]).execute(context)
+    assert path.read_text() == raw
+    with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+        serial_errors(raw, {})
+    for bad in [
+        raw.replace("NOT_FOUND", "INVALID_HANDLE"),
+        raw.replace("NOT_FOUND", "NOT_FOUNDpanic"),
+        raw.replace("12:21:46", "12:21:46 panic"),
+        raw.replace("ets Jul", "panic ets Jul"),
+        raw.replace("Preferences.cpp:50", "Preferences.cpp:51"),
+        raw + "[ 9][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263\n",
+        raw + "Error writing data to module 34, error code: 5\n",
+    ]:
+        with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+            serial_errors(bad, {"fresh_nvs": True})
+
+
 def test_every_split_point_of_the_diagnostic_is_recognised():
     known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     body = '{"mode":"dual-single","row1":"HELLO"'
