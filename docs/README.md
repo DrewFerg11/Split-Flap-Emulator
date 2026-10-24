@@ -22,7 +22,7 @@ For people who build, change or release the emulator.
 - [Development](development.md): building, checks, boot reproduction and emulation pitfalls.
 - [Maintenance](maintenance.md): QEMU and golden firmware updates, publication procedures.
 - [Release gate](release-gate.md): the firmware release gate.
-- [Changelog](../CHANGELOG.md) and the release steps in [Maintenance](maintenance.md#release-approval).
+- The release steps in [Maintenance](maintenance.md#release-approval).
 - [Native mode internals](native.md) and [mechanics findings](mechanics-findings.md).
 - [Architecture decisions](adr): [0001 QEMU integration](adr/0001-qemu-integration.md), [0002 native mode](adr/0002-native-mode.md).
 - [Control API plan](control-api-plan.md): working plan for the control API.

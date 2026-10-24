@@ -1,0 +1,20 @@
+# Groups the "What's Changed" list that GitHub generates for each Release by PR label
+# (releases/generate-notes). Labels come from .github/workflows/pr-labeler.yml. The first matching
+# category wins and "*" catches anything unlabeled.
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+    authors:
+      - dependabot
+  categories:
+    - title: 🚀 Features
+      labels: [enhancement]
+    - title: 🐛 Bug fixes
+      labels: [bug]
+    - title: 📖 Documentation
+      labels: [documentation]
+    - title: 🔧 Build, CI and release
+      labels: [ci]
+    - title: 🧹 Other changes
+      labels: ["*"]

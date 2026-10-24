@@ -1,0 +1,187 @@
+# Creates the GitHub Release for a published version tag. Called by release.yml after the images are
+# published to GHCR (and Docker Hub), and runnable by hand to backfill a tag that predates it.
+#
+# Notes are GitHub's generated "What's Changed" list, an AI summary of the commits, and the image
+# locations with the digests read back from the registries. Uses the preinstalled GitHub CLI so the
+# release path adds no third-party action beyond GitHub's own. Re-running updates the Release.
+
+name: Release / GitHub Release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Version tag to release (vX.Y.Z or vX.Y.Z-prerelease)
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Already-published version tag to create or refresh the GitHub Release for
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  github-release:
+    name: Create GitHub Release
+    if: github.repository == 'DrewFerg11/Split-Flap-Emulator'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      packages: read   # read the published digests
+      models: read     # AI release summary
+    env:
+      TAG: ${{ inputs.tag }}
+      REPO: ${{ github.repository }}
+      DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify actor and tag
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          if [ "$ACTOR" != "$OWNER" ]; then
+            echo "::error::Releases are restricted to $OWNER. Actor was $ACTOR."
+            exit 1
+          fi
+          if ! [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "::error::$TAG is not a vX.Y.Z or vX.Y.Z-prerelease tag."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0   # tag and commit history for the notes
+
+      - id: commitlog
+        name: Collect commits since the previous tag
+        run: |
+          # A prerelease compares against the tag immediately before it, so iterating on release
+          # candidates stays incremental; a stable release skips past prereleases.
+          if [[ "$TAG" == *-* ]]; then
+            PREV=$(git tag --merged "$TAG" --sort=-v:refname | grep -vx "$TAG" | head -1 || true)
+          else
+            PREV=$(git tag --merged "$TAG" --sort=-v:refname | grep -vx "$TAG" | grep -v -- '-' | head -1 || true)
+          fi
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+          if [ -n "$PREV" ]; then
+            LOG=$(git log "${PREV}..${TAG}" --pretty=format:"%s%n%b---")
+          else
+            LOG=$(git log "$TAG" --pretty=format:"%s%n%b---")
+          fi
+          # Per-run delimiter: commit text is untrusted and must not end the output early.
+          DELIM="EOF_$(openssl rand -hex 16)"
+          { echo "log<<$DELIM"; echo "$LOG"; echo "$DELIM"; } >> "$GITHUB_OUTPUT"
+
+      - id: ai_summary
+        name: AI release summary
+        if: steps.commitlog.outputs.log != ''
+        continue-on-error: true
+        uses: actions/ai-inference@2c43c91ae16266ca159d311430343c67a5ffa222 # v3
+        with:
+          model: openai/gpt-4o-mini
+          system-prompt: |
+            You summarize commit logs for users of Split-Flap-Emulator, a QEMU and native emulator
+            that runs Split-Flap-Display firmware against a model of the physical display so it can
+            be tested in CI. Write 2-4 plain-prose sentences describing what changed, in user terms.
+            No markdown headings, no bullet list, no preamble like "This release includes" -- just
+            the summary itself.
+          prompt: ${{ steps.commitlog.outputs.log }}
+
+      - name: Save AI summary
+        if: always()
+        env:
+          # Derived from commit text, which is untrusted: route it through env, never into `run:`.
+          AI_SUMMARY: ${{ steps.ai_summary.outcome == 'success' && steps.ai_summary.outputs.response || '' }}
+        run: printf '%s\n' "$AI_SUMMARY" > "$RUNNER_TEMP/ai-summary.txt"
+
+      - name: Build release notes
+        env:
+          PREV: ${{ steps.commitlog.outputs.prev }}
+        run: |
+          GHCR="ghcr.io/${REPO,,}"
+          ghcr_digest=$(docker buildx imagetools inspect "$GHCR:${TAG#v}" --format '{{.Manifest.Digest}}')
+          if ! [[ "$ghcr_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::$GHCR:${TAG#v} is not published, so there is nothing to release."
+            exit 1
+          fi
+          hub_digest=""
+          if [ -n "$DOCKERHUB_IMAGE" ]; then
+            hub_digest=$(docker buildx imagetools inspect "docker.io/$DOCKERHUB_IMAGE:${TAG#v}" \
+              --format '{{.Manifest.Digest}}' 2>/dev/null || true)
+          fi
+
+          args=(-f tag_name="$TAG")
+          [ -n "$PREV" ] && args+=(-f previous_tag_name="$PREV")
+          gh api "repos/${REPO}/releases/generate-notes" "${args[@]}" --jq .body > "$RUNNER_TEMP/changes.md"
+
+          platforms=$(docker buildx imagetools inspect "$GHCR:${TAG#v}" --format '{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}} {{end}}' \
+            | tr ' ' '\n' | grep -v -e '^unknown' -e '^$' | paste -sd, - | sed 's/,/, /g' || true)
+          [ -n "$platforms" ] || platforms="linux/amd64"
+          if [ -n "$PREV" ]; then
+            range="${PREV}..${TAG}"
+            commits=$(git rev-list --count "$range")
+            diffstat=$(git diff --shortstat "$PREV" "$TAG" | sed 's/^ *//')
+            since="since $PREV"
+          else
+            commits=$(git rev-list --count "$TAG")
+            diffstat="first release"
+            since="first release"
+          fi
+          if [[ "$TAG" == *-* ]]; then channel="pre--release-orange"; channel_text="prerelease"; else channel="stable-brightgreen"; channel_text="stable"; fi
+          badge() { echo -n "![$1](https://img.shields.io/badge/$2)"; }
+          {
+            badge version "version-${TAG//-/--}-blue"; echo -n " "
+            badge channel "channel-${channel}"; echo -n " "
+            plat="${platforms//\//%2F}"; plat="${plat//, /%20%7C%20}"
+            badge platforms "platforms-${plat}-informational"
+            echo; echo
+            if [ -s "$RUNNER_TEMP/ai-summary.txt" ]; then
+              echo "## 📝 Summary"; echo; cat "$RUNNER_TEMP/ai-summary.txt"; echo
+            fi
+            echo "## 📊 At a glance"; echo
+            echo "- **Channel:** $channel_text"
+            echo "- **Platforms:** $platforms"
+            echo "- **Commits $since:** $commits"
+            echo "- **Changed $since:** $diffstat"
+            echo
+            cat "$RUNNER_TEMP/changes.md"; echo
+            echo "## 🐳 Images"; echo
+            echo "| Registry | Pull |"
+            echo "|---|---|"
+            echo "| GitHub Container Registry | \`docker pull $GHCR:${TAG#v}\` |"
+            if [ -n "$hub_digest" ]; then
+              echo "| Docker Hub | \`docker pull docker.io/$DOCKERHUB_IMAGE:${TAG#v}\` |"
+            fi
+            echo
+            echo "## 🔒 Verify"; echo
+            echo "Pull by digest to get exactly the bits that passed the release gate:"; echo
+            echo '```sh'
+            echo "docker pull $GHCR@$ghcr_digest"
+            if [ -n "$hub_digest" ]; then
+              echo "docker pull docker.io/$DOCKERHUB_IMAGE@$hub_digest"
+            fi
+            echo "docker buildx imagetools inspect $GHCR@$ghcr_digest"
+            echo '```'
+            echo
+            echo "Digest (GHCR): \`$ghcr_digest\`"
+            if [ -n "$hub_digest" ]; then
+              echo; echo "Digest (Docker Hub): \`$hub_digest\`"
+            fi
+          } > "$RUNNER_TEMP/notes.md"
+
+      - name: Create or update the release
+        run: |
+          flags=()
+          [[ "$TAG" == *-* ]] && flags+=(--prerelease)
+          if gh release view "$TAG" --repo "$REPO" > /dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$REPO" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}"
+          else
+            gh release create "$TAG" --repo "$REPO" --title "$TAG" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag "${flags[@]}"
+          fi
