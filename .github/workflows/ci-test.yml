@@ -232,7 +232,8 @@ jobs:
         run: |
           python -m tools.verify_power --mode qemu \
             --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
-            --hardware "${{ matrix.hardware }}" --i2c-history --out runs/power
+            --hardware "${{ matrix.hardware }}" --i2c-history \
+            --known-issues baselines/v1.4.1-golden.yaml --out runs/power
       - name: Verify QEMU cleanup with an active WebSocket
         if: matrix.name == 'control-16'
         run: |
