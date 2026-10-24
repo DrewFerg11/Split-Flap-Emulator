@@ -18,6 +18,7 @@ import yaml
 
 from flapsim.executor import positive_timeout
 from flapsim.runner import QEMU_COMMIT
+from tools.control_evidence import verify_control_artifacts
 from tools.verify_boot import GOLDEN, ROOT, checked_firmware
 
 # The published platforms (tools.publish_image.ARCHITECTURES; the publish job installs only
@@ -26,18 +27,23 @@ ARCHITECTURES = ("amd64", "arm64")
 
 RESOURCE_CHECK = """
 import json, pathlib, tarfile
-from importlib.metadata import version
+from importlib.metadata import metadata, version
+from uvicorn.protocols.websockets.websockets_sansio_impl import WebSocketsSansIOProtocol
 from flapsim.hardware import load_hardware
 from flapsim.provenance import emulator_provenance
 from flapsim.resources import resolve_resource
 assert not pathlib.Path('/src').exists(), 'source checkout must not be mounted'
 assert '/site-packages/' in str(pathlib.Path(__import__('flapsim').__file__))
+assert WebSocketsSansIOProtocol.__name__ == 'WebSocketsSansIOProtocol'
+assert 15 <= int(version('websockets').split('.')[0]) < 17
+ws_metadata = metadata('websockets')
+assert ws_metadata.get('License-Expression', ws_metadata.get('License')) == 'BSD-3-Clause'
 hardware = {name: load_hardware(name) for name in ['esp32-8-single','esp32-16-dual']}
 assert len(hardware['esp32-8-single']['modules']) == 8
 assert len(hardware['esp32-16-dual']['modules']) == 16
 scenarios = {name: resolve_resource('scenarios',name).read_text() for name in
              ['release-smoke-8','release-smoke-16','homing-random','version-check',
-              'mqtt-native-8']}
+              'mqtt-native-8','runtime-controls-16','runtime-speed-native-16']}
 native = pathlib.Path('/opt/flapsim/native')
 assert (native/'src/native/build.py').is_file() and (native/'src/model/resume.c').is_file()
 pins = sorted(p.read_text().strip() for p in native.glob('cache/*/.flapsim-pin'))
@@ -164,6 +170,9 @@ class ImageVerifier:
             "/out/run",
             "--timing",
             "ci",
+            "--control-port",
+            "0",
+            "--i2c-history",
         ]
         if scenario != "boot":
             command += [
@@ -215,11 +224,19 @@ class ImageVerifier:
         failures = int(ET.parse(case / "run/junit.xml").getroot().get("failures"))
         if (failures == 0) != (expected == 0):
             raise RuntimeError("container JUnit result does not match expected execution")
+        proof = verify_control_artifacts(
+            case / "run",
+            manifest,
+            require_i2c=expected == 0,
+            require_actions=name == "runtime-controls-16",
+        )
+        record["control_verified"] = proof["verified"]
+        record["control_evidence"] = proof
         return manifest
 
     def execute(self, name, board, scenario, *, expected=0, wrong_version=False, timeout=None):
         extra_mounts = []
-        known_issues = name in {"smoke-8", "smoke-16"} and not wrong_version
+        known_issues = name in {"smoke-8", "smoke-16", "runtime-controls-16"} and not wrong_version
         if known_issues:
             extra_mounts.append((ROOT / "baselines/v1.4.1-golden.yaml", "/known-issues.yaml"))
         scale = self.args.timeout_scale
@@ -239,7 +256,7 @@ class ImageVerifier:
             completed = subprocess.run(
                 self.docker + ["start", "--attach", container_id],
                 check=False,
-                timeout=(timeout or 300 * scale) + 30,
+                timeout=(timeout or (600 if name == "runtime-controls-16" else 300) * scale) + 30,
             )
             return self.check_result(name, case, completed.returncode, expected)
 
@@ -262,6 +279,9 @@ class ImageVerifier:
             "/known-issues.yaml",
             "--out",
             "/out/run",
+            "--control-port",
+            "0",
+            "--i2c-history",
         ]
         mounts = [
             (source, "/firmware-src"),
@@ -310,6 +330,14 @@ class ImageVerifier:
             for artifact in ["native-build.log", "serial.log", "timeline.jsonl", "report.md"]:
                 if not (case / "run" / artifact).is_file():
                     raise RuntimeError(f"native container {name} missing {artifact}")
+            proof = verify_control_artifacts(
+                case / "run",
+                manifest,
+                require_i2c=True,
+                require_actions=name == "native-runtime-controls-16",
+            )
+            record["control_verified"] = proof["verified"]
+            record["control_evidence"] = proof
             return manifest
 
     def stop_case(self):
@@ -353,6 +381,7 @@ def verify(args):
         if args.mode in {"all", "smoke"}:
             verifier.execute("smoke-8", "esp32-8-single", "release-smoke-8")
             verifier.execute("smoke-16", "esp32-16-dual", "release-smoke-16")
+            verifier.execute("runtime-controls-16", "esp32-16-dual", "runtime-controls-16")
         if args.mode in {"all", "lifecycle"}:
             verifier.execute("timeout", "esp32-8-single", "boot", expected=4, timeout=3)
             verifier.stop_case()
@@ -361,6 +390,9 @@ def verify(args):
                 raise ValueError("--mode native requires --native-source (a golden checkout)")
             verifier.execute_native("native-smoke-8", "esp32-8-single", "release-smoke-8")
             verifier.execute_native("native-mqtt-8", "esp32-8-single", "mqtt-native-8")
+            verifier.execute_native(
+                "native-runtime-controls-16", "esp32-16-dual", "runtime-controls-16"
+            )
         if args.mode == "reject":
             verifier.execute("wrong-version", "esp32-8-single", "version-check", wrong_version=True)
         elif args.mode == "all":

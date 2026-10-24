@@ -105,7 +105,7 @@ docker run --rm --network none --user "$(id -u):$(id -g)" \
 The checkout must belong to the `--user` (git refuses other owners) and include the tag if the
 version should read as a release (`--depth 1 --branch <tag>` keeps it). `golden`/`git:` sources
 need network access and are meant for source checkouts. CI's container job runs
-`tools.verify_container --mode native` against the candidate: `release-smoke-8` and `mqtt-native-8`
+`tools.verify_container --mode native` against the candidate: `release-smoke-8`, `mqtt-native-8` and `runtime-controls-16`
 build the golden source inside the image under `--network none`, as a separate evidence set that
 does not change the publication contract.
 
@@ -131,7 +131,12 @@ python -m tools.verify_publication_gate --image flapsim:candidate \
 
 The first verifier resolves resources from installed site-packages, inspects
 license/source archives, mounts only external firmware/output, and checks both
-real smoke layouts, a timeout, TERM cleanup, and a deliberate version failure.
+real smoke layouts, a declarative runtime-control scenario, a timeout, TERM cleanup,
+and a deliberate version failure. Every case enables structured telemetry and
+requires bounded complete journals, a flushed terminal cursor and stopped
+control metadata; the control scenario also proves applied receipts, observed
+disconnection/repair and reset/power persistence. Candidate proofs missing these
+control checks are rejected before publication.
 `--mode lifecycle` isolates timeout/stop diagnostics; `--mode reject` deliberately
 fails candidate verification on the wrong version. Neither is publication
 proof. `--timeout-scale` is an explicit local wall-budget diagnostic; publication

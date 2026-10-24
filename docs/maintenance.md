@@ -98,7 +98,10 @@ depends on those gates. Golden scenarios use the accepted checksum-bound baselin
 from #15; matched issues remain visible, while unmatched failures prevent image
 verification/publication. Container golden checks mount that same baseline
 read-only; version-rejection probes and future release gating remain strict. The reusable container job
-also tests installed resources, timeout, stop and wrong-version rejection.
+also tests installed resources, runtime-control scenarios, telemetry evidence,
+timeout, stop and wrong-version rejection. Native and QEMU lifecycle probes keep
+a WebSocket open through timeout, SIGINT/SIGTERM and child crash; cleanup must
+close the listener/stream, reap owned children and flush bounded evidence.
 Manual `Release / Tag` dispatch checks a trusted main commit without
 publication. Version-tag runs add the publication step only after verification.
 

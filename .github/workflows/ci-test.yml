@@ -116,10 +116,16 @@ jobs:
               --hardware "$hardware" --i2c-history --out "runs/native/power-$hardware"
           done
           python -m tools.verify_power --mode native --native-build build/native/golden \
-            --end-off --out runs/native/power-end-off
+            --end-off --i2c-history --out runs/native/power-end-off
           for result in timeout interrupt; do
             python -m tools.verify_power --mode native --native-build build/native/golden \
-              --off-exit "$result" --out "runs/native/power-off-$result"
+              --off-exit "$result" --i2c-history --out "runs/native/power-off-$result"
+          done
+      - name: Verify bounded cleanup with an active WebSocket
+        run: |
+          for lifecycle_case in timeout sigint sigterm crash; do
+            python -m tools.verify_control_lifecycle --mode native --native-build build/native/golden \
+              --case "$lifecycle_case" --out "runs/native/control-lifecycle-$lifecycle_case"
           done
       - name: Run the golden smoke scenarios natively under the native known-issues baseline
         if: matrix.name != 'sanitizers'
@@ -228,6 +234,14 @@ jobs:
             --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
             --hardware "${{ matrix.hardware }}" --i2c-history \
             --known-issues baselines/v1.4.1-golden.yaml --out runs/power
+      - name: Verify QEMU cleanup with an active WebSocket
+        if: matrix.name == 'control-16'
+        run: |
+          for lifecycle_case in timeout sigint sigterm crash; do
+            python -m tools.verify_control_lifecycle --mode qemu \
+              --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin --case "$lifecycle_case" \
+              --out "runs/control-lifecycle-$lifecycle_case"
+          done
       - name: Verify declarative runtime controls with real QEMU firmware
         if: matrix.name == 'control-16'
         run: |
@@ -243,7 +257,7 @@ jobs:
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
         run: |
-          for run in scenario power runtime-controls-16; do
+          for run in scenario power runtime-controls-16 control-lifecycle-timeout control-lifecycle-sigint control-lifecycle-sigterm control-lifecycle-crash; do
             python -m tools.summarize_run "runs/$run/run.json"
           done
       - name: Log available negative-version outcomes
