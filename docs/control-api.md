@@ -5,7 +5,8 @@
 The runner can expose current physical state independently of the firmware's
 web server. The implemented QEMU and native routes provide authenticated live state, atomic mechanics
 edits, controller reset/power transitions, native runtime speed, deterministic module faults, operation receipts and optional structured I2C/WebSocket telemetry.
-Issue #20 stays open for declarative scenario controls and final complete-scope acceptance. See [the implementation plan](control-api-plan.md) for later slices.
+Declarative [scenario controls](scenarios.md#declarative-runtime-controls) use the same dispatcher.
+Issue #20 stays open for review and final complete-scope acceptance. See [the implementation plan](control-api-plan.md) for later slices.
 
 ```sh
 python -m pip install -e '.[control]'
@@ -438,6 +439,7 @@ addressable by the control API so it can be restored.
 | `sensor` | `ok`, `stuck_active`, `stuck_inactive` | Override the detection returned to firmware before applying configured polarity; snapshots retain the physical Hall level |
 | `motor` | `ok`, `dead` | Coils and driver phase update, but valid steps do not move the drum while dead |
 | `i2c` | `ok`, `missing` | I²C ACK/NACK presence; disconnecting leaves the external latch, coils and drum angle preserved |
+| `power` | `ok`, `lost` | Module rail. `lost` is an electrical loss: the module stops ACKing, its PCF8575 forgets the latch (`0`) and the coils release, while the drum keeps its angle. `ok` restores the rail with the expander in its power-on state (`latch` `0xFFFF`, coils energized until the firmware writes) |
 
 Fault-only patches may apply during motion, between acknowledged I²C transactions.
 An active two-byte read/write returns `409 model_busy`; no input is changed halfway
@@ -453,14 +455,19 @@ disappearance, NACKs and corrupt reads with their required parameters; see
 [hardware model](hardware-model.md#injected-faults). Runtime patches accept only
 the deterministic literals above. They preserve other configured modes and their
 random stream, while repairing a mode clears its now-unused parameter. Faults
-never consume geometry/angle draws. Electrical power loss and brownouts remain
-unsupported. `fault_support` and `capabilities.set_fault` describe runtime support.
+never consume geometry/angle draws. Timed power drops, brownouts and controller supply
+sags are startup-only (see the hardware model); a runtime patch can only cut or restore the
+module rail. `fault_support` and `capabilities.set_fault` describe runtime support.
+A rail change takes effect immediately, even while the module is driving a move, and it
+may be applied while other modules are in motion. It is separate from the controller
+power operation below, which approximates the ESP32 supply only.
 
 Healthy legacy recordings are unchanged. Once a startup fault or any
 runtime fault command is used, `faults_version: 1` and immutable `initial_faults`
 identify the extension in state/activity/timeline evidence. Each full module
 snapshot includes resolved `faults` (modes, parameters, seed and configured flag)
-and `fault_counters` (`blocked_steps`, `nacks`, PRNG `rng`, and total `events`).
+and `fault_counters` (`blocked_steps`, `nacks`, PRNG `rng`, and total `events`; once a
+module's rail has been faulted also `power_losses` and `powered`).
 The existing top-level #19 `faults` summary is retained and checked against these
 records. New native recordings restore the exact random-stream position and effect
 counts; older #19 summary-only recordings remain readable and retain their legacy

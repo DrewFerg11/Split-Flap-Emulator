@@ -223,21 +223,42 @@ def validate_command(value, bus, addr):
     return {**value, "bus": bus, "addr": addr}
 
 
+def validate_operation(kind, value, hardware, *, bus=None, addr=None):
+    """One typed command schema for HTTP and declarative scenario callers."""
+    if kind == "mechanics":
+        if (
+            type(bus) is not int
+            or type(addr) is not int
+            or (bus, addr)
+            not in {(module["bus"], module["addr"]) for module in hardware["modules"]}
+        ):
+            raise ValueError("module_not_found")
+        return validate_command(value, bus, addr)
+    if kind not in {"reset", "power", "speed"}:
+        raise ValueError("unknown control operation")
+    from flapsim.speed import valid_speed
+
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != ({"id", "speed"} if kind == "speed" else {"id", "on"} if kind == "power" else {"id"})
+        or type(value["id"]) is not int
+        or not 1 <= value["id"] <= MAX_CONTROL_ID
+        or (kind == "power" and type(value["on"]) is not bool)
+        or (kind == "speed" and not valid_speed(value["speed"]))
+    ):
+        raise ValueError("invalid_command")
+    return copy.deepcopy(value)
+
+
 class ControlServer:
-    """Loopback only; auth secret lives in a mode-0600 file, never the manifest."""
+    """Shared dispatcher with an optional loopback HTTP API (port=None is private)."""
 
     def __init__(
         self, port, out, hardware, *, backend="qemu", speed=5.0, timing="ci", telemetry=False
     ):
         if backend not in {"qemu", "native"}:
             raise ValueError("unknown control backend")
-        check_port(port, telemetry=telemetry)
-        import uvicorn
-        from starlette.applications import Starlette
-        from starlette.datastructures import Headers
-        from starlette.responses import JSONResponse
-        from starlette.routing import Route, WebSocketRoute
-
         self.hardware = hardware
         self.backend = backend
         self.client = None
@@ -251,11 +272,27 @@ class ControlServer:
         self.timing = timing
         self.capabilities = dict(CAPABILITIES)
         self.run_id = str(uuid.uuid4())
-        self.token = secrets.token_urlsafe(32)
+        self.token = None
+        self.endpoint = self.token_path = None
+        self.out = out
+        self.journal = self.audit
         self.telemetry = None
         self.subscribers = 0
-        self.listener = socket.socket()
+        self.listener = None
         self.thread = None
+        if port is None:
+            if telemetry:
+                raise ValueError("structured telemetry requires --control-port")
+            return
+        check_port(port, telemetry=telemetry)
+        import uvicorn
+        from starlette.applications import Starlette
+        from starlette.datastructures import Headers
+        from starlette.responses import JSONResponse
+        from starlette.routing import Route, WebSocketRoute
+
+        self.token = secrets.token_urlsafe(32)
+        self.listener = socket.socket()
         try:
             if telemetry:
                 from flapsim.telemetry import Collector
@@ -286,19 +323,7 @@ class ControlServer:
                     "speed": self.clock_metadata(),
                 }
 
-            def journal(entry):
-                with (out / "control.jsonl").open("a") as log:
-                    log.write(
-                        json.dumps(
-                            {"api_version": 1, "run_id": self.run_id, **entry},
-                            separators=(",", ":"),
-                        )
-                        + "\n"
-                    )
-                    log.flush()
-                    os.fsync(log.fileno())
-                if self.telemetry:
-                    self.telemetry.audit(entry)
+            journal = self.journal
 
             async def state(request):
                 # SnapshotClient is blocking, bounded and single-flight. Starlette's
@@ -342,14 +367,16 @@ class ControlServer:
                 if (bus, addr) not in {(m["bus"], m["addr"]) for m in hardware["modules"]}:
                     return JSONResponse({"error": "module_not_found"}, status_code=404)
                 try:
-                    command = validate_command(value, bus, addr)
+                    command = validate_operation("mechanics", value, hardware, bus=bus, addr=addr)
                 except ValueError:
                     return JSONResponse({"error": "invalid_command"}, status_code=422)
                 client = self.client
                 if client is None:
                     return JSONResponse({"error": "backend_unavailable"}, status_code=503)
                 try:
-                    result = await run_in_threadpool(client.dispatch, command, journal)
+                    result = await run_in_threadpool(
+                        self.dispatch, "mechanics", value, bus=bus, addr=addr
+                    )
                 except Unavailable:
                     return JSONResponse(
                         {"error": "result_unknown", "id": command["id"]}, status_code=503
@@ -451,20 +478,13 @@ class ControlServer:
                     command = strict_json(data.decode("utf-8"))
                 except (ValueError, UnicodeError, RecursionError):
                     return JSONResponse({"error": "invalid_json"}, status_code=400)
-                from flapsim.speed import valid_speed
-
-                if (
-                    not isinstance(command, dict)
-                    or set(command)
-                    != ({"id", "speed"} if is_speed else {"id", "on"} if is_power else {"id"})
-                    or type(command["id"]) is not int
-                    or not 1 <= command["id"] <= MAX_CONTROL_ID
-                    or (is_power and type(command["on"]) is not bool)
-                    or (is_speed and not valid_speed(command["speed"]))
-                ):
+                kind = "speed" if is_speed else "power" if is_power else "reset"
+                try:
+                    validate_operation(kind, command, hardware)
+                except ValueError:
                     return JSONResponse({"error": "invalid_command"}, status_code=422)
                 try:
-                    result = await run_in_threadpool(controller.apply, command, journal)
+                    result = await run_in_threadpool(self.dispatch, kind, command)
                 except Unavailable:
                     return JSONResponse(
                         {"error": "result_unknown", "id": command["id"]}, status_code=503
@@ -656,6 +676,34 @@ class ControlServer:
             self.close()
             raise
 
+    def audit(self, entry):
+        with (self.out / "control.jsonl").open("a") as log:
+            log.write(
+                json.dumps(
+                    {"api_version": 1, "run_id": self.run_id, **entry}, separators=(",", ":")
+                )
+                + "\n"
+            )
+            log.flush()
+            os.fsync(log.fileno())
+        if self.telemetry:
+            self.telemetry.audit(entry)
+
+    def dispatch(self, kind, value, *, bus=None, addr=None):
+        """Validate once, then use the same single-flight owner and durable audit."""
+        command = validate_operation(kind, value, self.hardware, bus=bus, addr=addr)
+        if kind == "speed" and self.backend == "qemu":
+            return {"error": "unsupported_capability", "reason": "QEMU timing is fixed at startup"}
+        client = self.client
+        if client is None:
+            return {"error": "backend_unavailable"}
+        if kind == "mechanics":
+            return client.dispatch(command, self.journal)
+        controller = {"reset": self.resets, "power": self.powers, "speed": self.speeds}[kind]
+        if controller is None:
+            return {"error": "backend_unavailable"}
+        return controller.apply(command, self.journal)
+
     def attach(self, connection, *, reset=None, power=None):
         self.detach()
         self.client = SnapshotClient(connection, self.hardware)
@@ -710,7 +758,7 @@ class ControlServer:
             "api_version": 1,
             "run_id": self.run_id,
             "endpoint": self.endpoint,
-            "token_file": str(self.token_path),
+            **({"token_file": str(self.token_path)} if self.token_path else {}),
             **({"channel_failure": self.channel_failure} if self.channel_failure else {}),
             "fault_support": FAULT_SUPPORT,
             **({"telemetry": self.telemetry.metadata()} if self.telemetry else {}),
@@ -732,7 +780,8 @@ class ControlServer:
                 self.server.should_exit = True
                 self.thread.join(4)
         finally:
-            self.listener.close()
+            if self.listener is not None:
+                self.listener.close()
         if self.telemetry:
             self.telemetry.close()
         if self.thread is not None and self.thread.is_alive():

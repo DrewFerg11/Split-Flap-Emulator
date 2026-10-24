@@ -189,7 +189,7 @@ the integration callbacks; direct core API users must serialize their calls.
 ## Injected faults
 
 A module mapping can add `faults`. Each module takes at most one fault of each
-kind (sensor, motor, I²C). This lets a scenario check how the firmware behaves
+kind (sensor, motor, I²C, power). This lets a scenario check how the firmware behaves
 when the hardware misbehaves. Each fault parameter is required when its fault
 is chosen and rejected otherwise.
 
@@ -204,13 +204,43 @@ is chosen and rejected otherwise.
 | `i2c` | `disappear` | `disappear_at` guest seconds > 0 | The address stops ACKing at that guest time |
 | `i2c` | `nack` | `nack` (0, 1] | Each transaction is NACKed with this probability |
 | `i2c` | `corrupt` | `corrupt` (0, 1] | Each read byte has one random bit flipped with this probability |
+| `power` | `lost` | — | The module's rail is down from boot: it is absent from the bus and drives nothing |
+| `power` | `drop` | `power_off_at`, `power_on_at` guest seconds, `0 < off < on` | The rail is down in `[power_off_at, power_on_at)` and returns afterwards |
+| `power` | `brownout` | `brownout` (0, 1] | Each transaction to the module finds the rail sagged below reset with this probability |
+| `power` | `sag` | `sag` (0, 1] | Each transaction to the module is cut short by a controller supply sag with this probability |
 
 ```yaml
 modules:
   - {addr: 0x23, faults: {sensor: stuck_inactive}}
   - {addr: 0x25, faults: {i2c: disappear, disappear_at: 90}}
   - {addr: 0x26, faults: {motor: slip, slip: 0.05, i2c: nack, nack: 0.01}}
+  - {addr: 0x27, faults: {power: drop, power_off_at: 90, power_on_at: 95}}
 ```
+
+**Power faults.** These model the electrical failures a bench build sees, using the same
+per-module stream and evidence as the other faults.
+
+- *Loss.* A module with no rail does not ACK, so it looks like an absent address (and counts
+  in `nacks`, not as an anomaly). Its PCF8575 forgets the latched outputs (`latch` reads `0`),
+  the coils release (`energized` false, rotor phase forgotten) and the drum keeps its angle.
+  A move in progress on that module settles at once.
+- *Restore.* The expander powers up the way the PCF8575 datasheet says: every output high, so
+  `latch` is `0xFFFF`. On this board that energizes all four coils (`energized` is true and
+  the model is not settled) until the firmware next writes the module. The first write
+  after that establishes the rotor phase without inventing a step. It is not an anomaly,
+  because the firmware did not write the invalid pattern.
+- *`brownout`.* A momentary sag below the reset threshold: the transaction that finds it is
+  NACKed and the module is left in its power-on state, exactly like a loss followed at once
+  by a restore. The decision uses the module's own xorshift32 stream, one draw per
+  transaction START (after the `i2c: nack` draw when both are configured).
+- *`sag`.* The controller's supply dips and resets its I²C peripheral part-way through a
+  transaction. The address is acknowledged, then the bytes are lost: a write latches
+  nothing and a read returns `0xFF` for every byte. This is the model's "partial reset"; a
+  full controller reset or power cycle is the audited
+  [control API](control-api.md) reset/power operation, not a fault.
+- *`drop` timing.* The rail change is applied at the first model tick or transaction at or
+  after the instant. It is never applied inside an open transaction. A short window with
+  neither is still applied in order the next time something looks.
 
 Faults act only on what the firmware sees. The snapshot keeps reporting the
 physical angle, displayed flap and electrical `hall`, so a run's output shows
@@ -233,7 +263,10 @@ behavior; their next emitted record upgrades to the versioned extension.
 **Evidence.** When any module has faults, the identity block in state,
 activity and timeline output gains a top-level `faults` list. Each entry has
 `bus`, `addr`, the configured kinds, and `events`, the number of times the fault
-has changed something the firmware saw.
+has changed something the firmware saw. A healthy rail adds nothing to the evidence. A
+module with a power fault adds `power` to its `faults`. `power_losses` and `powered` appear
+in its `fault_counters` once the rail has been faulted, was cut, or is down, and they stay
+after a runtime repair to `power: ok`.
 
 The `esp32-8-single-stuck-sensor` and `esp32-8-single-module-lost` fixtures,
 with the `fault-stuck-sensor-8` and `fault-module-lost-8` scenarios, check the
@@ -241,9 +274,10 @@ firmware's response to a sensor that never sees its magnet and to a module that
 drops off the bus mid-run.
 
 The [control API](control-api.md#deterministic-module-faults) can set or repair
-`stuck_active`/`stuck_inactive` sensors, dead motors and missing modules during a
-run, or return these modes to `ok`. Other startup faults and their PRNG state are
-preserved. Power faults (brown-out, supply sag) are not modeled yet.
+`stuck_active`/`stuck_inactive` sensors, dead motors, missing modules and a lost
+module rail (`power: lost`) during a run, or return these modes to `ok`. Other startup
+faults and their PRNG state are preserved. The timed and random power modes are
+startup-only; patching `power` to `ok` repairs them.
 
 ## Output and freshness contract
 
