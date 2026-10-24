@@ -121,7 +121,8 @@ static struct json_object *snapshot(int64_t guest_ns, bool mechanics) {
             integer(effects, "events", module->faults.events);
             if (fs_power_evidence(module)) {
                 integer(effects, "power_losses", module->power_losses);
-                json_object_object_add(effects, "powered", json_object_new_boolean(module->powered));
+                json_object_object_add(effects, "powered",
+                                       json_object_new_boolean(module->powered));
             }
             json_object_object_add(entry, "fault_counters", effects);
         }

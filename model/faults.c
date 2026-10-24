@@ -45,8 +45,7 @@ struct json_object *fs_faults(const FsModule *module) {
     if (f->power == FS_POWER_DROP) {
         json_object_object_add(object, "power_off_at_ns",
                                json_object_new_int64(f->power_off_at_ns));
-        json_object_object_add(object, "power_on_at_ns",
-                               json_object_new_int64(f->power_on_at_ns));
+        json_object_object_add(object, "power_on_at_ns", json_object_new_int64(f->power_on_at_ns));
     }
     return object;
 }
@@ -92,7 +91,8 @@ bool fs_patch_faults(struct json_object *object, FsModule *module) {
             f->nack = f->corrupt = 0;
             f->disappear_at_ns = 0;
         } else if (!strcmp(key, "power")) {
-            /* Only the rail switch is a runtime control; timed and random modes stay startup-only. */
+            /* Only the rail switch is a runtime control; timed and random modes stay startup-only.
+             */
             if ((mode = literal(value, POWER, 2)) < 0)
                 return false;
             f->power = mode;
@@ -142,8 +142,8 @@ bool fs_load_fault_state(struct json_object *object, FsModule *module) {
         (restored.seed || restored.sensor || restored.motor || restored.i2c || restored.power))
         return false;
     const char *parameters[] = {"sensor_noise", "slip", "nack", "corrupt", "brownout", "sag"};
-    bool required[] = {restored.sensor == FS_SENSOR_NOISY, restored.motor == FS_MOTOR_SLIP,
-                       restored.i2c == FS_I2C_NACK,        restored.i2c == FS_I2C_CORRUPT,
+    bool required[] = {restored.sensor == FS_SENSOR_NOISY,  restored.motor == FS_MOTOR_SLIP,
+                       restored.i2c == FS_I2C_NACK,         restored.i2c == FS_I2C_CORRUPT,
                        restored.power == FS_POWER_BROWNOUT, restored.power == FS_POWER_SAG};
     double *numbers[] = {&restored.sensor_noise, &restored.slip,     &restored.nack,
                          &restored.corrupt,      &restored.brownout, &restored.sag};
@@ -246,11 +246,11 @@ bool fs_parse_faults(struct json_object *entry, FsModule *module) {
         fs_fail("normalized faults must be an object");
         return false;
     }
-    static const char *const KEYS[] = {"sensor",          "motor",    "i2c",
-                                       "power",           "sensor_noise", "slip",
-                                       "nack",            "corrupt",  "brownout",
-                                       "sag",             "seed",     "disappear_at_ns",
-                                       "power_off_at_ns", "power_on_at_ns"};
+    static const char *const KEYS[] = {
+        "sensor",          "motor",         "i2c",  "power",
+        "sensor_noise",    "slip",          "nack", "corrupt",
+        "brownout",        "sag",           "seed", "disappear_at_ns",
+        "power_off_at_ns", "power_on_at_ns"};
     json_object_object_foreach(faults, key, unused) {
         (void)unused;
         size_t i = 0;
@@ -291,7 +291,8 @@ bool fs_parse_faults(struct json_object *entry, FsModule *module) {
         json_object_object_get_ex(faults, "power_off_at_ns", &off);
         json_object_object_get_ex(faults, "power_on_at_ns", &on);
         if (!json_object_is_type(off, json_type_int) || !json_object_is_type(on, json_type_int) ||
-            json_object_get_int64(off) <= 0 || json_object_get_int64(on) <= json_object_get_int64(off))
+            json_object_get_int64(off) <= 0 ||
+            json_object_get_int64(on) <= json_object_get_int64(off))
             fs_fail("normalized faults.power_on_at_ns must follow a positive power_off_at_ns");
         else {
             f->power_off_at_ns = json_object_get_int64(off);
