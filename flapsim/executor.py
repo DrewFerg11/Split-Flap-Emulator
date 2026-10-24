@@ -42,6 +42,7 @@ class RunContext:
     deadline: float
     interrupt: object = None
     services: dict | None = None
+    control: object = None
 
     def checkpoint(self):
         if self.interrupt and (signum := self.interrupt()) is not None:

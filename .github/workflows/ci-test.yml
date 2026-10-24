@@ -52,7 +52,9 @@ jobs:
   native:
     name: Native firmware (${{ matrix.name }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # The expanded control/lifecycle matrix also includes the existing bounded
+    # golden expected-failure scenarios; keep their individual deadlines intact.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -82,6 +84,13 @@ jobs:
           for hardware in esp32-8-single esp32-16-dual; do
             python -m tools.verify_native --build build/native/golden --hardware "$hardware" \
               --case control --timeout ${{ matrix.timeout }} --out "runs/native/control-$hardware"
+          done
+      - name: Verify declarative controls through the shared dispatcher
+        run: |
+          for scenario in runtime-controls-16 runtime-speed-native-16; do
+            flapsim run --mode native --native-build build/native/golden --hardware esp32-16-dual \
+              --scenario "$scenario" --known-issues baselines/v1.4.1-native.yaml \
+              --out "runs/native/$scenario"
           done
       - name: Verify deterministic faults, unaffected modules and recovery
         run: |
@@ -152,9 +161,9 @@ jobs:
               --known-issues baselines/v1.4.1-native.yaml --out "runs/native/fault-$1-8"
           done
       - name: Log native scenario outcomes
-        if: always() && matrix.name != 'sanitizers'
+        if: always()
         run: |
-          for run in smoke-8 smoke-16 mqtt-native-8 clock-dst-native-8 date-rollover-native-8 \
+          for run in runtime-controls-16 runtime-speed-native-16 smoke-8 smoke-16 mqtt-native-8 clock-dst-native-8 date-rollover-native-8 \
                      first-boot-8 first-boot-16 fault-stuck-sensor-8 fault-module-lost-8; do
             python -m tools.summarize_run "runs/native/$run/run.json"
           done
@@ -218,6 +227,12 @@ jobs:
           python -m tools.verify_power --mode qemu \
             --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
             --hardware "${{ matrix.hardware }}" --i2c-history --out runs/power
+      - name: Verify declarative runtime controls with real QEMU firmware
+        if: matrix.name == 'control-16'
+        run: |
+          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+            --hardware esp32-16-dual --scenario runtime-controls-16 \
+            --known-issues baselines/v1.4.1-golden.yaml --out runs/runtime-controls-16
       - name: Verify a disconnected module, unaffected drums and fault recovery
         if: matrix.name == 'control-16'
         run: |
@@ -226,7 +241,10 @@ jobs:
             --out runs/fault-control-16
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
-        run: python -m tools.summarize_run runs/scenario/run.json
+        run: |
+          for run in scenario power runtime-controls-16; do
+            python -m tools.summarize_run "runs/$run/run.json"
+          done
       - name: Log available negative-version outcomes
         if: always() && matrix.name == 'negative-versions'
         run: |

@@ -11,11 +11,12 @@ import time
 from urllib.parse import urlsplit
 
 from flapsim.executor import ExecutionFailed, RunContext, excused, positive_timeout
+from flapsim.scenario_control import ACTIONS as CONTROL_ACTIONS
 from flapsim.state import display_aligned, read_settlement, validate_identity, validate_state
 
 VARIABLE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 MODES = ("qemu", "native")
-STEPS = {
+STEPS = set(CONTROL_ACTIONS) | {
     "wait_serial",
     "expect_serial",
     "wait_display",
@@ -102,7 +103,7 @@ def validate_match(value):
             raise ValueError(f"invalid serial regex: {error}") from error
 
 
-def validate_step(step, hardware, services=()):
+def validate_step(step, hardware, services=(), *, mode="qemu", runtime_faulted=()):
     if not isinstance(step, dict) or len(step.keys() & STEPS) != 1:
         raise ValueError(f"each step needs exactly one supported action: {sorted(STEPS)}")
     kind = next(iter(step.keys() & STEPS))
@@ -112,7 +113,13 @@ def validate_step(step, hardware, services=()):
     if "name" in step and (not isinstance(step["name"], str) or not step["name"]):
         raise ValueError("step name must be a nonempty string")
     value = step[kind]
-    if kind in {"wait_serial", "expect_serial"}:
+    if kind in CONTROL_ACTIONS:
+        from flapsim.scenario_control import commands
+
+        commands(kind, value, hardware)
+        if kind == "set_speed" and mode != "native":
+            raise ValueError("set_speed requires native mode; QEMU timing is fixed at startup")
+    elif kind in {"wait_serial", "expect_serial"}:
         if isinstance(value, str):
             value = {"contains": value}
             step[kind] = value
@@ -165,7 +172,9 @@ def validate_step(step, hardware, services=()):
         if "faulted_modules" in value:
             # Firmware module numbers are I2C addresses, so only modules configured with an
             # injected I2C fault (#19) may have their write failures excused.
-            faulted = {m["addr"] for m in hardware["modules"] if m.get("faults", {}).get("i2c")}
+            faulted = {
+                m["addr"] for m in hardware["modules"] if m.get("faults", {}).get("i2c")
+            } | set(runtime_faulted)
             modules = value["faulted_modules"]
             if (
                 not isinstance(modules, list)
@@ -301,9 +310,17 @@ def json_subset(expected, actual, path="$"):
 def serial_errors(text, policy, known=None, observed=None):
     """Fail on firmware error lines, except explicit policy flags and baseline-tolerated lines."""
     missing = []
+    # Reset may interrupt this known source's UART payload at any byte.
+    # Only its exact source tag and payload prefix followed by the exact ROM
+    # banner qualify; other sources and suffixes still fail.
+    diagnostic = r"\[\s*\d+\]\[E\]\[Preferences.cpp:50\]"
+    payload = " begin(): nvs_open failed: NOT_FOUND"
+    complete = re.compile(diagnostic + re.escape(payload))
+    interrupted = re.compile(diagnostic + r"(.*)ets Jul 29 2019 12:21:46")
     for line in text.splitlines():
-        if policy.get("fresh_nvs") and re.fullmatch(
-            r"\[\s*\d+\]\[E\]\[Preferences.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND", line
+        if policy.get("fresh_nvs") and (
+            complete.fullmatch(line)
+            or ((match := interrupted.fullmatch(line)) and payload.startswith(match[1]))
         ):
             continue
         match = re.fullmatch(r"Error writing data to module (\d+), error code: 2", line)
@@ -477,8 +494,25 @@ class ScenarioExecutor:
         if not isinstance(self.document["steps"], list) or not self.document["steps"]:
             raise ValueError("scenario steps must be a nonempty list")
         self.native_setup = native_setup(self.document)
+        runtime_faulted = set()
         for step in self.document["steps"]:
-            validate_step(step, hardware, self.native_setup["services"])
+            validate_step(
+                step,
+                hardware,
+                self.native_setup["services"],
+                mode=mode,
+                runtime_faulted=runtime_faulted,
+            )
+            # Only preceding validated I2C injections authorize the existing narrow
+            # write-error policy. Repair does not erase earlier serial evidence.
+            if "set_fault" in step and step["set_fault"]["faults"].get("i2c") == "missing":
+                runtime_faulted.add(step["set_fault"]["addr"])
+            if (
+                "set_mechanics" in step
+                and step["set_mechanics"]["patch"].get("faults", {}).get("i2c") == "missing"
+            ):
+                runtime_faulted.add(step["set_mechanics"]["addr"])
+        self.requires_control = any(set(step) & CONTROL_ACTIONS for step in self.document["steps"])
         try:
             json.dumps(self.document, allow_nan=False)
         except (TypeError, ValueError) as error:
@@ -512,6 +546,7 @@ class ScenarioExecutor:
                 deadline,
                 context.interrupt,
                 context.services,
+                context.control,
             )
             result.update(status="running", guest_start_ns=self.guest_ns(context.out))
             try:
@@ -608,7 +643,12 @@ class ScenarioExecutor:
         return value
 
     def action(self, context, kind, value, result):
-        if kind in {"wait_serial", "expect_serial"}:
+        if kind in CONTROL_ACTIONS:
+            from flapsim.scenario_control import execute
+
+            self.command_started(context)
+            execute(context, kind, value, result)
+        elif kind in {"wait_serial", "expect_serial"}:
             while True:
                 serial = context.serial()
                 offset = self.serial_cursor if kind == "wait_serial" else 0
@@ -762,17 +802,20 @@ class ScenarioExecutor:
                     return
             context.pause()
 
+    def command_started(self, context):
+        self.serial_cursor = len(context.serial())
+        activity = self.activity(context)
+        if activity is None:
+            raise ExecutionFailed("cannot establish pre-command model freshness")
+        self.command_baseline = {
+            "movement_id": activity["movement_id"],
+            "state": context.settlement(),
+        }
+
     def http(self, context, value, result):
         method = value.get("method", "GET")
         if method == "POST":
-            self.serial_cursor = len(context.serial())
-            activity = self.activity(context)
-            if activity is None:
-                raise ExecutionFailed("cannot establish pre-command model freshness")
-            self.command_baseline = {
-                "movement_id": activity["movement_id"],
-                "state": context.settlement(),
-            }
+            self.command_started(context)
         data = json.dumps(value["body"]).encode() if "body" in value else None
         while True:
             context.checkpoint()

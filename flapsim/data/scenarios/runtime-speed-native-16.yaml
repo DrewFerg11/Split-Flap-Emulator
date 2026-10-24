@@ -1,0 +1,22 @@
+version: 1
+name: runtime-speed-native-16
+modes: [native]
+timeout: 300
+steps:
+  - wait_serial: "=== Split Flap Display ==="
+    timeout: 120
+  - wait_display: {text: XXXXXXXXXXXXXXXX}
+    timeout: 180
+  - set_speed: {id: 1, speed: 10}
+  - reset: {id: 1}
+  - wait_serial: Homing
+    timeout: 60
+  - wait_display: {text: XXXXXXXXXXXXXXXX}
+    timeout: 180
+  - power_cycle: {off_id: 1, on_id: 2}
+  - wait_serial: Homing
+    timeout: 60
+  - wait_display: {text: XXXXXXXXXXXXXXXX}
+    timeout: 180
+  - set_speed: {id: 2, speed: 2}
+  - assert_no_errors: {fresh_nvs: true}

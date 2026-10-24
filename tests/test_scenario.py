@@ -831,6 +831,43 @@ def test_head_and_late_tail_splices_are_golden_only(context, raw, spliced):
 DIAGNOSTIC = "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
 
 
+def test_reset_banner_joined_to_complete_fresh_nvs_diagnostic(context):
+    raw = DIAGNOSTIC + "ets Jul 29 2019 12:21:46\n\nrst:0x1 (POWERON_RESET)\n"
+    path = context.out / "serial.log"
+    path.write_text(raw)
+    executor([{"assert_no_errors": {"fresh_nvs": True}}]).execute(context)
+    assert path.read_text() == raw
+    with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+        serial_errors(raw, {})
+    for bad in [
+        raw.replace("NOT_FOUND", "INVALID_HANDLE"),
+        raw.replace("NOT_FOUND", "NOT_FOUNDpanic"),
+        raw.replace("12:21:46", "12:21:46 panic"),
+        raw.replace("ets Jul", "panic ets Jul"),
+        raw.replace("Preferences.cpp:50", "Preferences.cpp:51"),
+        raw + "[ 9][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263\n",
+        raw + "Error writing data to module 34, error code: 5\n",
+    ]:
+        with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+            serial_errors(bad, {"fresh_nvs": True})
+
+
+def test_reset_interrupts_each_byte_of_the_known_nvs_payload():
+    banner = "ets Jul 29 2019 12:21:46"
+    header_end = DIAGNOSTIC.index(" begin()")
+    for cut in range(header_end, len(DIAGNOSTIC) + 1):
+        raw = DIAGNOSTIC[:cut] + banner + "\n"
+        serial_errors(raw, {"fresh_nvs": True})
+        for invalid in [
+            raw.replace("Preferences.cpp:50", "Preferences.cpp:51"),
+            raw.replace("Preferences.cpp:50", "Wire.cpp:50"),
+            raw.replace(banner, "panic" + banner),
+            raw.replace(banner, banner + "panic"),
+        ]:
+            with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+                serial_errors(invalid, {"fresh_nvs": True})
+
+
 def test_every_split_point_of_the_diagnostic_is_recognised():
     known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     body = '{"mode":"dual-single","row1":"HELLO"'
@@ -1211,3 +1248,223 @@ def test_settings_stress_detects_raced_reads_and_lost_writes(context, behaviour,
 def test_settings_stress_parameters_are_validated(value):
     with pytest.raises(ValueError):
         executor([{"settings_stress": value}])
+
+
+def test_control_steps_use_shared_dispatcher_preserve_context_and_record_receipts(context):
+    from types import SimpleNamespace
+
+    calls = []
+
+    def dispatch(kind, command, **target):
+        calls.append((kind, command, target))
+        if kind == "mechanics":
+            return {
+                "last_operation": {"command": command, "revision": command["expected_revision"] + 1}
+            }
+        return {"status": "applied", "command": command, "boot_generation": len(calls)}
+
+    context.control = SimpleNamespace(dispatch=dispatch)
+    scenario = executor(
+        [
+            {
+                "set_mechanics": {
+                    "id": 1,
+                    "expected_revision": 0,
+                    "bus": 0,
+                    "addr": 32,
+                    "patch": {"sensor_window": 42},
+                }
+            },
+            {
+                "set_fault": {
+                    "id": 2,
+                    "expected_revision": 1,
+                    "bus": 0,
+                    "addr": 32,
+                    "faults": {"motor": "dead"},
+                }
+            },
+            {"reset": {"id": 1}},
+            {"power_cycle": {"off_id": 1, "on_id": 2, "off_seconds": 0.01}},
+        ]
+    )
+    assert scenario.requires_control
+    result = scenario.execute(context)
+    assert [call[0] for call in calls] == ["mechanics", "mechanics", "reset", "power", "power"]
+    assert calls[1][1]["patch"] == {"faults": {"motor": "dead"}}
+    assert calls[1][2] == {"bus": 0, "addr": 32}
+    assert calls[-2][1] == {"id": 1, "on": False}
+    assert calls[-1][1] == {"id": 2, "on": True}
+    assert all(step["status"] == "passed" for step in result["steps"])
+    assert len(result["steps"][-1]["actual"]["operations"]) == 2
+
+
+@pytest.mark.parametrize(
+    "outcome", ["unavailable", "unknown", "revision_conflict", "backend_unavailable"]
+)
+def test_control_unknown_or_conflict_stops_without_retry(context, outcome):
+    from types import SimpleNamespace
+
+    from flapsim.control import Unavailable
+
+    calls = []
+
+    def dispatch(*args, **kwargs):
+        calls.append(args)
+        if outcome == "unavailable":
+            raise Unavailable("lost acknowledgement")
+        return {"status": "unknown"} if outcome == "unknown" else {"error": outcome}
+
+    context.control = SimpleNamespace(dispatch=dispatch)
+    scenario = executor([{"reset": {"id": 1}}, {"reset": {"id": 2}}])
+    with pytest.raises(RuntimeError):
+        scenario.execute(context)
+    assert len(calls) == 1 and scenario.results[1]["status"] == "not_run"
+
+
+def test_control_retries_only_explicit_unadmitted_busy_and_keeps_same_command(context):
+    from types import SimpleNamespace
+
+    calls = []
+
+    def dispatch(kind, command):
+        calls.append(copy.deepcopy(command))
+        if len(calls) < 3:
+            return {"error": "backend_busy"}
+        return {"status": "applied", "command": command}
+
+    context.control = SimpleNamespace(dispatch=dispatch)
+    scenario = executor([{"reset": {"id": 7}}])
+    result = scenario.execute(context)
+    assert calls == [{"id": 7}] * 3
+    assert result["steps"][0]["actual"]["busy_rejections"] == 2
+
+
+def test_power_cycle_interruption_while_off_never_attempts_power_on(context):
+    from types import SimpleNamespace
+
+    from flapsim.executor import InterruptedRun
+
+    calls = []
+    interrupted = []
+    context.interrupt = lambda: signal.SIGTERM if interrupted else None
+
+    def dispatch(kind, command):
+        calls.append(command)
+        interrupted.append(True)
+        return {"status": "applied", "command": command}
+
+    context.control = SimpleNamespace(dispatch=dispatch)
+    scenario = executor([{"power_cycle": {"off_id": 1, "on_id": 2, "off_seconds": 0.1}}])
+    with pytest.raises(InterruptedRun):
+        scenario.execute(context)
+    assert calls == [{"id": 1, "on": False}]
+    assert len(scenario.results[0]["actual"]["operations"]) == 1
+
+
+@pytest.mark.parametrize(
+    "step",
+    [
+        {
+            "set_fault": {
+                "id": 1,
+                "expected_revision": 0,
+                "bus": 0,
+                "addr": 32,
+                "faults": {"sensor": "noisy"},
+            }
+        },
+        {
+            "set_fault": {
+                "id": True,
+                "expected_revision": 0,
+                "bus": 0,
+                "addr": 32,
+                "faults": {"motor": "dead"},
+            }
+        },
+        {
+            "set_fault": {
+                "id": 1,
+                "expected_revision": 0,
+                "bus": 0,
+                "addr": 99,
+                "faults": {"motor": "dead"},
+            }
+        },
+        {"set_mechanics": {"id": 1, "expected_revision": 0, "bus": 0, "addr": 32, "patch": {}}},
+        {"reset": {"id": 1, "extra": True}},
+        {"set_power": {"id": 1, "on": 1}},
+        {"power_cycle": {"off_id": 2, "on_id": 1}},
+        {"power_cycle": {"off_id": 1, "on_id": 2, "off_seconds": float("nan")}},
+        {"power_cycle": {"off_id": 1, "on_id": 2, "off_seconds": True}},
+        {"set_speed": {"id": 1, "speed": 5}},
+    ],
+)
+def test_control_step_validation_precedes_launch(step):
+    with pytest.raises(ValueError):
+        executor([step])
+
+
+def test_native_speed_step_and_narrow_runtime_i2c_error_policy():
+    step = {"set_speed": {"id": 1, "speed": 2}}
+    assert executor([step], mode="native").requires_control
+    injection = {
+        "set_fault": {
+            "id": 1,
+            "expected_revision": 0,
+            "bus": 0,
+            "addr": 32,
+            "faults": {"i2c": "missing"},
+        }
+    }
+    policy = {"assert_no_errors": {"faulted_modules": [32]}}
+    executor([injection, policy])
+    for steps in [
+        [policy, injection],
+        [{"assert_no_errors": {"faulted_modules": [33]}}, injection],
+    ]:
+        with pytest.raises(ValueError, match="faulted_modules"):
+            executor(steps)
+    with pytest.raises(ExecutionFailed, match="unexpected serial"):
+        serial_errors("[E] unrelated failure", policy["assert_no_errors"])
+
+
+def test_private_dispatcher_needs_no_http_dependencies_listener_or_secret(monkeypatch, tmp_path):
+    import builtins
+
+    from flapsim.control import ControlServer
+
+    original = builtins.__import__
+
+    def without_http(name, *args, **kwargs):
+        if name.split(".")[0] in {"starlette", "uvicorn", "websockets"}:
+            raise AssertionError("private controls imported HTTP extras")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_http)
+    service = ControlServer(None, tmp_path, load_hardware("esp32-16-dual"), backend="native")
+    try:
+        assert service.metadata()["endpoint"] is None
+        assert "token_file" not in service.metadata()
+        assert not (tmp_path / "control-token").exists()
+        assert service.thread is None and service.listener is None
+        assert service.dispatch("reset", {"id": 1}) == {"error": "backend_unavailable"}
+    finally:
+        service.close()
+
+
+def test_control_waits_cannot_reuse_precommand_serial_or_settlement(context):
+    from types import SimpleNamespace
+
+    context.control = SimpleNamespace(dispatch=lambda *a, **k: {"status": "applied"})
+    scenario = executor([{"reset": {"id": 1}}])
+    scenario.execute(context)
+    # Previously recorded fixture text cannot satisfy a post-reset wait.
+    context.deadline = time.monotonic() + 0.02
+    with pytest.raises(TimeoutError):
+        scenario.action(context, "wait_serial", {"contains": "=== Split Flap Display ==="}, {})
+    # Use an immediate test deadline to show that only old fixture evidence is rejected.
+    context.deadline = time.monotonic() + 0.02
+    with pytest.raises(TimeoutError):
+        scenario.action(context, "wait_display", {"text": FIXTURE["states"][1]["text"]}, {})
