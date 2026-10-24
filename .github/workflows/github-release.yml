@@ -103,9 +103,9 @@ jobs:
           # Derived from commit text, which is untrusted: route it through env, never into `run:`.
           AI_SUMMARY: ${{ steps.ai_summary.outcome == 'success' && steps.ai_summary.outputs.response || '' }}
         run: |
-          # No summary file when the step failed or returned only whitespace, so the notes carry no
-          # empty heading; the warning keeps a silent failure visible in the run.
-          : > "$RUNNER_TEMP/ai-summary.txt"
+          # Create the summary file only for real text, so the notes carry no empty heading when the
+          # step failed or returned only whitespace; the warning keeps a silent failure visible in the run.
+          rm -f "$RUNNER_TEMP/ai-summary.txt"
           if [ -n "${AI_SUMMARY//[[:space:]]/}" ]; then
             printf '%s\n' "$AI_SUMMARY" > "$RUNNER_TEMP/ai-summary.txt"
           else
@@ -153,7 +153,7 @@ jobs:
             plat="${platforms//\//%2F}"; plat="${plat//, /%20%7C%20}"
             badge platforms "platforms-${plat}-informational"
             echo; echo
-            if [ -s "$RUNNER_TEMP/ai-summary.txt" ]; then
+            if [ -f "$RUNNER_TEMP/ai-summary.txt" ]; then
               echo "## 📝 Summary"; echo; cat "$RUNNER_TEMP/ai-summary.txt"; echo
             fi
             echo "## 📊 At a glance"; echo
