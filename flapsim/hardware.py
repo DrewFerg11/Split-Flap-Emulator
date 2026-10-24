@@ -6,7 +6,7 @@ from pathlib import Path
 
 import yaml
 
-from flapsim.faults import KINDS, PARAMETERS
+from flapsim.faults import INSTANTS, KINDS, PARAMETERS
 from flapsim.resources import resolve_resource
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,8 +21,11 @@ MECHANICAL_SALTS = {
 
 FAULT_SALT = 0x5BD1E995
 FAULT_KINDS = {name: choices - {"ok"} for name, choices in KINDS.items()}
-# Startup YAML uses seconds; resolved evidence records integer nanoseconds.
-FAULT_PARAMETERS = {**PARAMETERS, "disappear": "disappear_at"}
+# Startup YAML names parameters in seconds; resolved evidence records integer nanoseconds.
+FAULT_PARAMETERS = {
+    **{mode: (name,) for mode, name in PARAMETERS.items()},
+    **{mode: tuple(name.removesuffix("_ns") for name in names) for mode, names in INSTANTS.items()},
+}
 
 
 def probability(value, name):
@@ -33,23 +36,24 @@ def probability(value, name):
 
 def normalize_faults(value, where, seed):
     """Per-module injected faults (#19): at most one sensor, motor and I2C fault each."""
-    mapping(value, f"{where} faults", set(), {*FAULT_KINDS, *FAULT_PARAMETERS.values()})
+    startup = {name for names in FAULT_PARAMETERS.values() for name in names}
+    mapping(value, f"{where} faults", set(), {*FAULT_KINDS, *startup})
     if not value.keys() & FAULT_KINDS.keys():
-        raise ValueError(f"{where} faults must name a sensor, motor or i2c fault")
+        raise ValueError(f"{where} faults must name a sensor, motor, i2c or power fault")
     normalized = {}
     for kind, choices in FAULT_KINDS.items():
         if kind in value:
             if type(value[kind]) is not str or value[kind] not in choices:
                 raise ValueError(f"{where} faults.{kind} must be one of {sorted(choices)}")
             normalized[kind] = value[kind]
-    wanted = {FAULT_PARAMETERS[f] for f in normalized.values() if f in FAULT_PARAMETERS}
-    given = value.keys() & set(FAULT_PARAMETERS.values())
+    wanted = {n for f in normalized.values() for n in FAULT_PARAMETERS.get(f, ())}
+    given = value.keys() & startup
     if wanted != given:
         raise ValueError(
             f"{where} faults need exactly the parameters {sorted(wanted)}, got {sorted(given)}"
         )
-    for name in given:
-        if name == "disappear_at":
+    for name in sorted(given):
+        if name.endswith("_at"):
             seconds = value[name]
             # Checked after rounding: the model needs a positive int64 nanosecond time.
             if (
@@ -57,10 +61,14 @@ def normalize_faults(value, where, seed):
                 or not 0 < seconds < 2**63 / 1_000_000_000
                 or not 0 < round(seconds * 1_000_000_000) < 2**63
             ):
-                raise ValueError(f"{where} faults.disappear_at must be guest seconds > 0")
-            normalized["disappear_at_ns"] = round(seconds * 1_000_000_000)
+                raise ValueError(f"{where} faults.{name} must be guest seconds > 0")
+            normalized[f"{name}_ns"] = round(seconds * 1_000_000_000)
         else:
             normalized[name] = probability(value[name], f"{where} faults.{name}")
+    if normalized.get("power") == "drop" and (
+        normalized["power_on_at_ns"] <= normalized["power_off_at_ns"]
+    ):
+        raise ValueError(f"{where} faults.power_on_at must be later than power_off_at")
     normalized["seed"] = seed
     return normalized
 

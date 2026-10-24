@@ -62,11 +62,28 @@ bool fs_restore_faults(struct json_object *record) {
                 fs_load_fault_state(value, &fs.modules[i]) &&
                 json_object_object_get_ex(entry, "fault_counters", &effects) &&
                 json_object_is_type(effects, json_type_object) &&
-                json_object_object_length(effects) == 4 &&
                 integer(effects, "blocked_steps", 0, INT64_MAX, &blocked) &&
                 integer(effects, "nacks", 0, INT64_MAX, &nacks) &&
                 integer(effects, "rng", 0, UINT32_MAX, &rng) &&
                 integer(effects, "events", 0, INT64_MAX, &events);
+        /* Power evidence is present exactly when it matters (see fs_power_evidence). */
+        struct json_object *powered;
+        int64_t losses = 0;
+        bool extended = valid && json_object_object_get_ex(effects, "power_losses", &powered);
+        FsModule *module = &fs.modules[i];
+        if (valid && extended) {
+            valid = json_object_object_length(effects) == 6 &&
+                    integer(effects, "power_losses", 0, INT64_MAX, &losses) &&
+                    json_object_object_get_ex(effects, "powered", &powered) &&
+                    json_object_is_type(powered, json_type_boolean);
+            module->powered = valid && json_object_get_boolean(powered);
+            module->power_losses = (uint64_t)losses;
+            valid = valid && fs_power_evidence(module);
+        } else if (valid) {
+            module->powered = true;
+            module->power_losses = 0;
+            valid = json_object_object_length(effects) == 4 && !module->faults.power;
+        }
         if (valid) {
             fs.modules[i].blocked_steps = (uint64_t)blocked;
             fs.modules[i].nacks = (uint64_t)nacks;
@@ -306,8 +323,10 @@ char *fs_control_command(const char *request, int64_t guest_ns) {
         json_object_put(fs.operation);
     fs.operation = operation;
     if (changes_faults)
-        changed.observed_nack = changed.observed_block = false;
+        changed.observed_nack = changed.observed_block = changed.observed_power = false;
     fs.modules[index] = changed;
+    /* Cutting or restoring the rail takes effect at once; the edit's own event records it. */
+    fs_power_sync(&fs.modules[index], guest_ns, false);
     if (changes_faults)
         fs.faults_enabled = true;
     fs.mechanics_revision++;

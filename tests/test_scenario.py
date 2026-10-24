@@ -1176,7 +1176,10 @@ def test_report_lists_injected_faults_from_the_newest_model_output(tmp_path):
 
 def settings_device(behaviour):
     """A fake /settings endpoint: `ok`, `raced` (reads during a write see defaults) or `lost`."""
-    state = {"name": "My Display", "writing": threading.Event()}
+    state = {"name": "My Display", "writing": threading.Event(), "gets": 0}
+    get_lock = threading.Lock()
+    second_write = threading.Event()
+    raced_read = threading.Event()
 
     class Handler(BaseHTTPRequestHandler):
         def reply(self, document):
@@ -1187,6 +1190,16 @@ def settings_device(behaviour):
             self.wfile.write(body)
 
         def do_GET(self):
+            with get_lock:
+                state["gets"] += 1
+                index = state["gets"]
+            # Initial read, four round-1 readers, then readback precede round 2.
+            # Hold its batch readers until the write starts; hold that write
+            # until a reader observes defaults. No scheduling/sleep assumption.
+            if behaviour == "raced" and 7 <= index <= 10:
+                assert second_write.wait(5), "second write never started"
+                raced_read.set()
+                return self.reply({"name": "My Display"})
             if behaviour == "raced" and state["writing"].is_set():
                 return self.reply({"name": "My Display"})
             self.reply({"name": state["name"]})
@@ -1194,7 +1207,11 @@ def settings_device(behaviour):
         def do_POST(self):
             name = json.loads(self.rfile.read(int(self.headers["Content-Length"])))["name"]
             state["writing"].set()
-            time.sleep(0.05)
+            if behaviour == "raced" and name == "stress-2":
+                second_write.set()
+                assert raced_read.wait(5), "concurrent reader never arrived"
+            else:
+                time.sleep(0.05)
             if behaviour != "lost" or name == "stress-1":
                 state["name"] = name
             state["writing"].clear()
