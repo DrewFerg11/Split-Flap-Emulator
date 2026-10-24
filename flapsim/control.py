@@ -28,7 +28,7 @@ CAPABILITIES = {
 MAX_SNAPSHOT = 64 * 1024
 
 
-def check_port(port):
+def check_port(port, *, telemetry=False):
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("--control-port must be an integer in [0, 65535]")
     try:
@@ -38,6 +38,16 @@ def check_port(port):
         raise ValueError(
             "control API requires the optional dependencies: pip install 'flapsim[control]'"
         ) from error
+
+    if telemetry:
+        try:
+            from uvicorn.protocols.websockets.websockets_sansio_impl import (  # noqa: F401
+                WebSocketsSansIOProtocol,
+            )
+        except ImportError as error:
+            raise ValueError(
+                "--i2c-history requires WebSocket dependencies: pip install 'flapsim[control]'"
+            ) from error
 
 
 class Unavailable(RuntimeError):
@@ -221,7 +231,7 @@ class ControlServer:
     ):
         if backend not in {"qemu", "native"}:
             raise ValueError("unknown control backend")
-        check_port(port)
+        check_port(port, telemetry=telemetry)
         import uvicorn
         from starlette.applications import Starlette
         from starlette.datastructures import Headers
