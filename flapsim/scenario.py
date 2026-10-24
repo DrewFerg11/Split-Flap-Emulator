@@ -310,14 +310,17 @@ def json_subset(expected, actual, path="$"):
 def serial_errors(text, policy, known=None, observed=None):
     """Fail on firmware error lines, except explicit policy flags and baseline-tolerated lines."""
     missing = []
+    # Reset may interrupt this known source's UART payload at any byte.
+    # Only its exact source tag and payload prefix followed by the exact ROM
+    # banner qualify; other sources and suffixes still fail.
+    diagnostic = r"\[\s*\d+\]\[E\]\[Preferences.cpp:50\]"
+    payload = " begin(): nvs_open failed: NOT_FOUND"
+    complete = re.compile(diagnostic + re.escape(payload))
+    interrupted = re.compile(diagnostic + r"(.*)ets Jul 29 2019 12:21:46")
     for line in text.splitlines():
-        # A reset can stop UART immediately after this known diagnostic and
-        # append the next boot's exact ESP32 ROM banner without a line break.
-        # Keep both parts exact: arbitrary suffixes and other errors still fail.
-        if policy.get("fresh_nvs") and re.fullmatch(
-            r"\[\s*\d+\]\[E\]\[Preferences.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND"
-            r"(?:ets Jul 29 2019 12:21:46)?",
-            line,
+        if policy.get("fresh_nvs") and (
+            complete.fullmatch(line)
+            or ((match := interrupted.fullmatch(line)) and payload.startswith(match[1]))
         ):
             continue
         match = re.fullmatch(r"Error writing data to module (\d+), error code: 2", line)
