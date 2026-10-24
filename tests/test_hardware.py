@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from flapsim.faults import DEFAULT_FAULTS, validate_faults
 from flapsim.hardware import load_hardware, normalize_hardware, positions, write_model_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -309,7 +310,7 @@ def test_faults_normalize_with_reproducible_per_module_streams(document):
 @pytest.mark.parametrize(
     "faults, message",
     [
-        ({}, "must name a sensor, motor or i2c fault"),
+        ({}, "must name a sensor, motor, i2c or power fault"),
         ({"sensor": "melted"}, "faults.sensor must be one of"),
         ({"motor": "slip"}, "need exactly the parameters ['slip']"),
         ({"motor": "dead", "slip": 0.5}, "need exactly the parameters []"),
@@ -323,6 +324,14 @@ def test_faults_normalize_with_reproducible_per_module_streams(document):
         ({"i2c": "disappear", "disappear_at": 2e299}, "guest seconds > 0"),
         ({"i2c": "disappear", "disappear_at": float("nan")}, "guest seconds > 0"),
         ({"sensor": "inverted", "colour": "red"}, "colour"),
+        ({"power": "flicker"}, "faults.power must be one of"),
+        ({"power": "brownout"}, "need exactly the parameters ['brownout']"),
+        ({"power": "sag", "sag": 2}, "probability in (0, 1]"),
+        ({"power": "lost", "brownout": 0.5}, "need exactly the parameters []"),
+        ({"power": "drop", "power_off_at": 5}, "['power_off_at', 'power_on_at']"),
+        ({"power": "drop", "power_off_at": 0, "power_on_at": 5}, "power_off_at must be guest"),
+        ({"power": "drop", "power_off_at": 5, "power_on_at": 5}, "power_on_at must be later"),
+        ({"power": "drop", "power_off_at": 5, "power_on_at": 2}, "power_on_at must be later"),
     ],
 )
 def test_invalid_faults(document, faults, message):
@@ -330,6 +339,33 @@ def test_invalid_faults(document, faults, message):
     with pytest.raises(ValueError) as error:
         normalize_hardware(document, seed=7)
     assert message in str(error.value)
+
+
+def test_power_faults_normalize_to_nanoseconds_and_share_the_module_stream(document):
+    document["buses"][0]["modules"][1] = {
+        "addr": 0x21,
+        "faults": {"power": "drop", "power_off_at": 1.5, "power_on_at": 3},
+    }
+    document["buses"][0]["modules"][2] = {
+        "addr": 0x22,
+        "faults": {"power": "brownout", "brownout": 0.1, "i2c": "nack", "nack": 0.2},
+    }
+    document["buses"][0]["modules"][3] = {"addr": 0x23, "faults": {"power": "lost"}}
+    document["buses"][0]["modules"][4] = {"addr": 0x24, "faults": {"power": "sag", "sag": 1}}
+    faults = {
+        m["addr"]: m["faults"]
+        for m in normalize_hardware(document, seed=7)["modules"]
+        if "faults" in m
+    }
+    without_seed = {a: {k: v for k, v in f.items() if k != "seed"} for a, f in faults.items()}
+    assert without_seed == {
+        0x21: {"power": "drop", "power_off_at_ns": 1_500_000_000, "power_on_at_ns": 3_000_000_000},
+        0x22: {"power": "brownout", "brownout": 0.1, "i2c": "nack", "nack": 0.2},
+        0x23: {"power": "lost"},
+        0x24: {"power": "sag", "sag": 1.0},
+    }
+    for faults_ in faults.values():
+        validate_faults({**DEFAULT_FAULTS, "configured": True, **faults_})
 
 
 def test_fault_fixtures_load():

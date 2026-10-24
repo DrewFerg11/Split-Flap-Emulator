@@ -3,7 +3,13 @@
 import pytest
 
 from flapsim.control import validate_command
-from flapsim.faults import DEFAULT_FAULTS, resolved_faults, validate_faults
+from flapsim.faults import (
+    DEFAULT_FAULTS,
+    resolved_faults,
+    validate_effective_faults,
+    validate_fault_counters,
+    validate_faults,
+)
 from flapsim.hardware import normalize_hardware
 
 
@@ -17,6 +23,10 @@ from flapsim.hardware import normalize_hardware
         {"i2c": 1},
         {"sensor": "inverted"},
         {"read_corruption": True},
+        {"power": "drop"},
+        {"power": "brownout"},
+        {"power": "sag"},
+        {"power": None},
     ],
 )
 def test_fault_registry_rejects_unsupported_values_before_admission(value):
@@ -45,6 +55,138 @@ def test_fault_config_is_literal_resolved_and_does_not_change_mechanical_draws()
     assert configured["i2c"] == "missing" and 0 < configured["seed"] <= 0xFFFFFFFF
     assert faulted == normal
     assert resolved_faults({}) == {**DEFAULT_FAULTS, "seed": 0, "configured": False}
+
+
+def test_runtime_power_support_is_the_rail_switch_only():
+    assert validate_faults({"power": "lost"}, partial=True) == {"power": "lost"}
+    assert validate_faults({"power": "ok", "i2c": "ok"}, partial=True)
+    command = {"id": 1, "expected_revision": 0, "patch": {"faults": {"power": "lost"}}}
+    assert validate_command(command, 0, 32)["patch"] == {"faults": {"power": "lost"}}
+
+
+def test_power_faults_keep_healthy_resolved_evidence_unchanged():
+    healthy = {**DEFAULT_FAULTS, "seed": 9, "configured": True}
+    assert validate_faults({**healthy, "i2c": "missing"})
+    lost = validate_faults({**healthy, "power": "lost"})
+    drop = {"power": "drop", "power_off_at_ns": 5, "power_on_at_ns": 9}
+    assert validate_faults({**healthy, **drop})
+    assert validate_faults({**healthy, "power": "brownout", "brownout": 0.5})
+    for bad in [
+        {**healthy, "power": "ok"},  # A healthy rail is omitted, not spelled out.
+        {**healthy, "power": "drop", "power_off_at_ns": 9, "power_on_at_ns": 9},
+        {**healthy, "power": "drop", "power_off_at_ns": 9},
+        {**healthy, "power": "sag"},
+        {**healthy, "power": "sag", "sag": 1.5},
+        {**healthy, "power": "lost", "sag": 0.5},
+        {**healthy, "brownout": 0.5},
+    ]:
+        with pytest.raises(ValueError):
+            validate_faults(bad)
+    initial = {**healthy, **drop, "power": "drop"}
+    # Startup-only modes can be repaired at runtime but not swapped in.
+    validate_effective_faults(initial, healthy)
+    validate_effective_faults(healthy, lost)
+    with pytest.raises(ValueError):
+        validate_effective_faults(healthy, {**healthy, **drop})
+    with pytest.raises(ValueError):
+        validate_effective_faults(initial, {**initial, "power_on_at_ns": 10})
+
+
+@pytest.mark.parametrize(
+    "effects, faults, valid",
+    [
+        ({"blocked_steps": 0, "nacks": 0, "rng": 5, "events": 0}, {"seed": 5}, True),
+        (
+            {
+                "blocked_steps": 0,
+                "nacks": 1,
+                "rng": 5,
+                "events": 1,
+                "power_losses": 1,
+                "powered": True,
+            },
+            {"seed": 5},
+            True,
+        ),
+        (
+            {
+                "blocked_steps": 0,
+                "nacks": 0,
+                "rng": 5,
+                "events": 0,
+                "power_losses": 0,
+                "powered": False,
+            },
+            {"seed": 5},
+            True,
+        ),
+        (
+            {
+                "blocked_steps": 0,
+                "nacks": 0,
+                "rng": 5,
+                "events": 0,
+                "power_losses": 0,
+                "powered": True,
+            },
+            {"seed": 5, "power": "lost"},
+            True,
+        ),
+        # The power fields appear exactly when they matter, and only together.
+        (
+            {"blocked_steps": 0, "nacks": 0, "rng": 5, "events": 0},
+            {"seed": 5, "power": "lost"},
+            False,
+        ),
+        (
+            {
+                "blocked_steps": 0,
+                "nacks": 0,
+                "rng": 5,
+                "events": 0,
+                "power_losses": 0,
+                "powered": True,
+            },
+            {"seed": 5},
+            False,
+        ),
+        (
+            {"blocked_steps": 0, "nacks": 0, "rng": 5, "events": 0, "power_losses": 1},
+            {"seed": 5},
+            False,
+        ),
+        (
+            {
+                "blocked_steps": 0,
+                "nacks": 0,
+                "rng": 5,
+                "events": 0,
+                "power_losses": 1,
+                "powered": 1,
+            },
+            {"seed": 5},
+            False,
+        ),
+        (
+            {
+                "blocked_steps": 0,
+                "nacks": 2,
+                "rng": 5,
+                "events": 1,
+                "power_losses": 1,
+                "powered": True,
+            },
+            {"seed": 5},
+            False,
+        ),
+    ],
+)
+def test_power_evidence_is_present_exactly_when_it_matters(effects, faults, valid):
+    if valid:
+        validate_fault_counters(effects, faults)
+    else:
+        with pytest.raises(ValueError):
+            validate_fault_counters(effects, faults)
 
 
 def test_reset_uart_fragment_requires_pinned_banner_known_prefix_and_observed_reset():
