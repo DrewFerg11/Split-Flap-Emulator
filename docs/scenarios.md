@@ -199,11 +199,11 @@ model files and a current all-off settlement after stopping QEMU.
 `assert_no_errors` has its own serial cursor, independent of ordinary waits.
 It examines complete new lines and retains an unfinished line for the next
 check. `fresh_nvs: true` permits only the exact known Preferences.cpp:50
-`nvs_open failed: NOT_FOUND` diagnostic. A reset can interrupt its payload:
-a line with the complete exact `Preferences.cpp:50` source tag, a prefix of that
-known payload, and the exact appended ESP32 ROM banner (`ets Jul 29 2019
-12:21:46`) is also recognized. Raw serial evidence is unchanged; other sources,
-suffixes and errors still fail.
+`nvs_open failed: NOT_FOUND` diagnostic. A reset can interrupt either its source
+header or payload: an observed prefix of that exact diagnostic immediately
+followed by the exact ESP32 ROM banner (`ets Jul 29 2019 12:21:46`) is also
+recognized as an interrupted record. Raw serial evidence is unchanged; unknown
+characters, other sources, suffixes and errors still fail.
 `default_missing_bus1: true` requires
 exactly one code-2 write failure for each absent default address 32–39, and is
 valid only for the eight physical bus-0 modules. It is used before single-bus
