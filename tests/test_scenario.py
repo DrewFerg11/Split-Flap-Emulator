@@ -908,6 +908,41 @@ def test_reset_interrupts_each_byte_of_the_known_nvs_payload():
                 serial_errors(invalid, {"fresh_nvs": True})
 
 
+def test_reset_interrupts_each_byte_of_the_known_nvs_header_and_payload():
+    banner = "ets Jul 29 2019 12:21:46"
+    # Start once the error marker is fully visible; shorter tails do not form
+    # an error line even with the strict default policy.
+    for cut in range(DIAGNOSTIC.index("[E]") + 3, len(DIAGNOSTIC) + 1):
+        raw = DIAGNOSTIC[:cut] + banner + "\n"
+        serial_errors(raw, {"fresh_nvs": True})
+        for policy, invalid in [
+            ({}, raw),
+            ({"fresh_nvs": True}, raw.replace(banner, "!" + banner)),
+            ({"fresh_nvs": True}, raw.replace(banner, banner + "panic")),
+        ]:
+            with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+                serial_errors(invalid, policy)
+
+
+def test_container_reset_can_interrupt_nvs_source_header_without_rewriting_evidence(context):
+    raw = "[ 87145][E][Preferences.cets Jul 29 2019 12:21:46\n"
+    path = context.out / "serial.log"
+    path.write_text(raw)
+    executor([{"assert_no_errors": {"fresh_nvs": True}}]).execute(context)
+    assert path.read_text() == raw
+    for invalid in [
+        raw.replace("Preferences.c", "Wire.c"),
+        raw.replace("Preferences.c", "PreferencesXcpp:50"),
+        raw.replace("Preferences.c", "Preferences.cpp:51] begin()"),
+        raw.replace("ets Jul", "panic ets Jul"),
+        raw.replace("ets Jul 29 2019 12:21:46", ""),
+        raw + "Error writing data to module 33, error code: 5\n",
+        raw + "[ 9][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263\n",
+    ]:
+        with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+            serial_errors(invalid, {"fresh_nvs": True})
+
+
 def test_every_split_point_of_the_diagnostic_is_recognised():
     known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     body = '{"mode":"dual-single","row1":"HELLO"'
