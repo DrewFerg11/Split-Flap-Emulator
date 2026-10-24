@@ -840,6 +840,19 @@ def test_head_and_late_tail_splices_are_golden_only(context, raw, spliced):
     assert {r["issue"] for r in records} == {"DrewFerg11/Split-Flap-Display#86"}
 
 
+def test_request_body_head_splice_pairs_with_the_tail_entry_at_every_cut():
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    body = '{"mode":"dual-single","row1":"HELLO"}'
+    diagnostic = "Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
+    for cut in range(len(diagnostic) + 1):
+        head, tail = body + "[ 38172][E][" + diagnostic[:cut], diagnostic[cut:]
+        # A head the baseline absorbs must resume as a tolerated tail, never as a red fragment.
+        if known.tolerated_serial(head) and tail:
+            assert known.tolerated_serial(tail), f"cut {cut}: {head!r} / {tail!r}"
+    assert known.tolerated_serial(body + "[ 38172][E][Preferences.cpp:50] begin(): ")
+    assert known.tolerated_serial(body + "[ 38172][E][Preferences.cpp:50] begin(): n") is None
+
+
 def test_request_body_head_splice_rejects_other_prefixes_and_continuations(context):
     known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     body = '{"mode":"dual-single","row1":"HELLO"}'
