@@ -30,7 +30,7 @@ Every output schema carries an integer `schema_version` (currently `1` everywher
   increments that schema's `schema_version` and ships only in a major release. Readers in flapsim
   reject a `schema_version` they do not understand rather than guess.
 - Scenario files, hardware YAML and the baseline format are broken the same way: an incompatible
-  change is a major release, and the release notes in [CHANGELOG.md](../CHANGELOG.md) say how to
+  change is a major release, and the [release notes](https://github.com/DrewFerg11/Split-Flap-Emulator/releases) say how to
   migrate.
 
 ## Not covered

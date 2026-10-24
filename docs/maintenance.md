@@ -216,15 +216,19 @@ One-time environment settings (Settings → Environments → `release`):
 - **Allow administrators to bypass:** off.
 
 The version is not stored in the repository: setuptools-scm derives it from the git tag, so
-there is no version to bump. To release: first merge a change that renames `## [Unreleased]` in
-[`CHANGELOG.md`](../CHANGELOG.md) to the new version and date (adding a fresh empty
-`## [Unreleased]`) and checks [stability](stability.md) still matches the release (the `validate`
+there is no version to bump. To release: first check [stability](stability.md) still matches the
+release (the `validate`
 job rejects a tag that is not a clean `vX.Y.Z` or `vX.Y.Z-rc.N` resolution of the checkout, and
 the `publish` job refuses a version that is already published, but only after both architectures
 have been built and verified), then push the tag
 (`git tag -a vX.Y.Z -m ... && git push origin vX.Y.Z`), open the run, choose
 **Review deployments → Approve**, then take the digest from the publish job's summary or
-its `container-publication-result` artifact.
+its `container-publication-result` artifact. Once the images are published, the `github-release` job
+creates the GitHub Release (a prerelease for any tag with a `-` suffix): GitHub's generated list of
+merged PRs, an AI summary of the commits, and the GHCR and Docker Hub image locations with their
+digests. There is no changelog file to maintain, so PR titles are the release notes. To create or
+refresh the Release for an already-published tag, run **Release / GitHub Release** by hand and enter
+the tag.
 
 ### Docker Hub mirror
 

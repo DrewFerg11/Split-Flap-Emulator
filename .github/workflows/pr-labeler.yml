@@ -1,0 +1,44 @@
+# Labels PRs from the first word of their title so GitHub's generated release notes can group them
+# (see .github/release.yml). Titles here are plain English ("Add ...", "Fix ..."), not Conventional
+# Commits. Additive only: it never removes a label, so a manual label always wins, and a title that
+# matches nothing is left for the "Other changes" group.
+#
+# pull_request_target gives forks a write-scoped token. It only reads the PR title and never checks
+# out or runs PR code.
+
+name: CI / Labeler
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const rules = [
+              ['bug', /^(fix|resolve|correct|repair)\b/i],
+              ['enhancement', /^(add|implement|support|introduce|allow|enable)\b/i],
+              ['documentation', /^(document|docs?|readme)\b/i],
+              ['ci', /^(ci|release|publish|build|derive|gate|pin)\b/i],
+            ];
+            const hit = rules.find(([, re]) => re.test((pr.title || '').trim()));
+            if (!hit) {
+              core.info(`No label rule matches "${pr.title}"`);
+              return;
+            }
+            if (pr.labels.some((l) => l.name === hit[0])) return;
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: pr.number,
+              labels: [hit[0]],
+            });
