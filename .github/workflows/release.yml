@@ -198,3 +198,14 @@ jobs:
           name: container-publication-result
           retention-days: 90
           path: runs/publication.json
+
+  github-release:
+    name: GitHub Release
+    needs: publish
+    permissions:
+      contents: write
+      packages: read
+      models: read
+    uses: ./.github/workflows/github-release.yml
+    with:
+      tag: ${{ github.ref_name }}
