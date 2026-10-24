@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/live-panel.gif" width="800" alt="The live panel showing real Split-Flap Display firmware spelling SPLIT FLAP on 16 virtual modules, then flipping back to blank" />
+  <img src="docs/images/live-panel.gif" width="800" alt="The live panel showing real Split-Flap Display firmware spelling SPLIT FLAP on 16 virtual modules, going blank, then all modules flipping through to X and back to blank" />
 </p>
 
 <h1 align="center">Split-Flap-Emulator</h1>
