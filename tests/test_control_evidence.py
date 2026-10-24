@@ -1,12 +1,17 @@
 """Installed evidence gates reject incomplete captures and missing acceptance actions."""
 
+import copy
 import json
 
 import pytest
 
 from flapsim.hardware import load_hardware
 from flapsim.telemetry import EVENT, HEADER, MAGIC, Collector
-from tools.control_evidence import verify_action_results, verify_control_artifacts
+from tools.control_evidence import (
+    verify_action_results,
+    verify_control_artifacts,
+    verify_control_audit,
+)
 
 
 @pytest.fixture
@@ -266,3 +271,248 @@ def test_valid_wire_fragment_shapes_remain_accepted(evidence, end):
         row["raw_sequence"] = "8"
     path.write_text("".join(json.dumps(item) + "\n" for item in rows))
     assert verify_control_artifacts(out, manifest, require_i2c=True)["verified"]
+
+
+@pytest.fixture
+def audit_capture(tmp_path):
+    hardware = load_hardware("esp32-8-single")
+    reset = {
+        "command": {"id": 1},
+        "status": "applied",
+        "before_generation": 0,
+        "boot_generation": 1,
+        "guest_ns": 1,
+        "sequence": 1,
+        "fidelity": "native-software-reexec",
+    }
+    off = {
+        "command": {"id": 1, "on": False},
+        "status": "applied",
+        "power_state": "off",
+        "boot_generation": 1,
+        "guest_ns": 2,
+        "sequence": 2,
+        "fidelity": "native-checkpoint-restart",
+    }
+    on = {
+        **off,
+        "command": {"id": 2, "on": True},
+        "power_state": "on",
+        "boot_generation": 2,
+        "guest_ns": 3,
+        "sequence": 3,
+    }
+    steps = [
+        {
+            "action": "reset",
+            "expected": {"id": 1},
+            "status": "passed",
+            "actual": {
+                "busy_rejections": 0,
+                "operations": [{"kind": "reset", **copy.deepcopy(reset)}],
+            },
+        },
+        {
+            "action": "power_cycle",
+            "expected": {"off_id": 1, "on_id": 2},
+            "status": "passed",
+            "actual": {
+                "busy_rejections": 0,
+                "operations": [{"kind": "power", **copy.deepcopy(r)} for r in [off, on]],
+            },
+        },
+    ]
+    manifest = {
+        "mode": "native",
+        "hardware": hardware,
+        "control": {"run_id": "run"},
+        "result": {"steps": steps},
+    }
+    rows = []
+    for kind, receipt in [("reset", reset), ("power", off), ("power", on)]:
+        intent = {
+            "api_version": 1,
+            "run_id": "run",
+            "phase": "intent",
+            "kind": kind,
+            "command": receipt["command"],
+        }
+        rows += [intent, {**intent, "phase": "result", "result": receipt}]
+    return tmp_path, manifest, rows
+
+
+def write_audit(out, rows):
+    (out / "control.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+
+
+def test_matched_audit_receipts_verify(audit_capture):
+    out, manifest, rows = audit_capture
+    write_audit(out, rows)
+    assert verify_control_audit(out, manifest) == 3
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "phase_only",
+        "missing_command",
+        "missing_kind",
+        "foreign",
+        "version_bool",
+        "intent_command",
+        "result_command",
+        "receipt_command",
+        "unknown",
+        "missing_sequence",
+        "sequence_bool",
+        "reset_generation",
+        "backend",
+        "power_state",
+        "step_receipt",
+        "step_command",
+        "missing_result",
+        "missing_intent",
+        "duplicate",
+        "reorder",
+        "partial",
+        "extra_field",
+        "not_object",
+        "unknown_phase",
+        "not_receipt",
+        "empty",
+        "duplicate_key",
+    ],
+)
+def test_audit_corruption_never_verifies(audit_capture, corruption):
+    out, manifest, rows = audit_capture
+    if corruption == "phase_only":
+        rows = [{"phase": row["phase"]} for row in rows]
+    elif corruption == "missing_command":
+        del rows[0]["command"]
+    elif corruption == "missing_kind":
+        del rows[0]["kind"]
+    elif corruption == "foreign":
+        rows[0]["run_id"] = "foreign"
+    elif corruption == "version_bool":
+        rows[0]["api_version"] = True
+    elif corruption == "intent_command":
+        rows[0]["command"] = {"id": 9}
+    elif corruption == "result_command":
+        rows[1]["command"] = {"id": 9}
+    elif corruption == "receipt_command":
+        rows[1]["result"]["command"] = {"id": 9}
+    elif corruption == "unknown":
+        rows[1]["result"]["status"] = "unknown"
+    elif corruption == "missing_sequence":
+        del rows[1]["result"]["sequence"]
+    elif corruption == "sequence_bool":
+        rows[1]["result"]["sequence"] = True
+    elif corruption == "reset_generation":
+        rows[1]["result"]["boot_generation"] = 9
+    elif corruption == "backend":
+        rows[1]["result"]["fidelity"] = "qmp-hard-reset"
+    elif corruption == "power_state":
+        rows[3]["result"]["power_state"] = "on"
+    elif corruption == "step_receipt":
+        manifest["result"]["steps"][0]["actual"]["operations"][0]["sequence"] = 9
+    elif corruption == "step_command":
+        manifest["result"]["steps"][0]["expected"]["id"] = 2
+    elif corruption == "missing_result":
+        rows.pop()
+    elif corruption == "missing_intent":
+        rows.pop(0)
+    elif corruption == "duplicate":
+        rows = rows[:2] + rows
+    elif corruption == "reorder":
+        rows[0], rows[1] = rows[1], rows[0]
+    elif corruption == "extra_field":
+        rows[0]["other"] = True
+    elif corruption == "not_object":
+        rows[0] = []
+    elif corruption == "unknown_phase":
+        rows[0]["phase"] = "unknown"
+    elif corruption == "not_receipt":
+        rows[1]["result"] = []
+    elif corruption == "empty":
+        rows = []
+    write_audit(out, rows)
+    path = out / "control.jsonl"
+    if corruption == "partial":
+        path.write_text(path.read_text().rstrip("\n"))
+    elif corruption == "duplicate_key":
+        path.write_text('{"phase":"intent",' + path.read_text()[1:])
+    with pytest.raises(ValueError):
+        verify_control_audit(out, manifest)
+
+
+@pytest.fixture
+def mechanics_audit(tmp_path):
+    from test_control import recorded_snapshot
+
+    hardware, state = recorded_snapshot()
+    command = {
+        "id": 1,
+        "expected_revision": 0,
+        "bus": 0,
+        "addr": 32,
+        "patch": {"sensor_window": 41},
+    }
+    operation = {
+        "command": command,
+        "revision": 1,
+        "sequence": state["sequence"],
+        "guest_ns": state["guest_ns"],
+    }
+    state.update(
+        mechanics_version=1,
+        initial_flaps=hardware["drum"]["flaps"],
+        mechanics_revision=1,
+        initial_mechanics=[copy.deepcopy(m["mechanics"]) for m in state["modules"]],
+        last_operation=operation,
+    )
+    state["modules"][0]["mechanics"]["sensor_window"] = 41
+    step = {
+        "action": "set_mechanics",
+        "expected": command,
+        "status": "passed",
+        "actual": {
+            "busy_rejections": 0,
+            "operations": [
+                {"kind": "mechanics", "status": "applied", "operation": copy.deepcopy(operation)}
+            ],
+        },
+    }
+    manifest = {
+        "mode": "native",
+        "hardware": hardware,
+        "control": {"run_id": "run"},
+        "result": {"steps": [step]},
+    }
+    intent = {"api_version": 1, "run_id": "run", "phase": "intent", "command": command}
+    return tmp_path, manifest, [intent, {**intent, "phase": "result", "result": state}]
+
+
+def test_mechanics_audit_validates_full_state_and_observed_operation(mechanics_audit):
+    out, manifest, rows = mechanics_audit
+    write_audit(out, rows)
+    assert verify_control_audit(out, manifest) == 1
+    manifest["result"]["steps"][0]["actual"]["operations"][0]["operation"]["revision"] = 2
+    with pytest.raises(ValueError, match="observed receipt"):
+        verify_control_audit(out, manifest)
+
+
+def test_only_reported_unadmitted_model_busy_attempts_can_precede_application(mechanics_audit):
+    out, manifest, rows = mechanics_audit
+    intent, result = rows
+    rows = [
+        intent,
+        {**intent, "phase": "result", "result": {"error": "model_busy"}},
+        intent,
+        result,
+    ]
+    manifest["result"]["steps"][0]["actual"]["busy_rejections"] = 1
+    write_audit(out, rows)
+    assert verify_control_audit(out, manifest) == 1
+    manifest["result"]["steps"][0]["actual"]["busy_rejections"] = 0
+    with pytest.raises(ValueError, match="unreported busy"):
+        verify_control_audit(out, manifest)

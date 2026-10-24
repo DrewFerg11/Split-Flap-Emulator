@@ -4,6 +4,9 @@ import collections
 import json
 import re
 
+from flapsim.control import strict_json, validate_operation
+from flapsim.scenario_control import ACTIONS, commands
+from flapsim.speed import valid_speed
 from flapsim.state import validate_state
 from flapsim.telemetry import ENDS, MAX_BYTES, MAX_RECORDS, History
 
@@ -166,11 +169,7 @@ def verify_control_artifacts(out, manifest, *, require_i2c=False, require_action
             or target["fault_counters"]["nacks"] == 0
         ):
             raise ValueError("missing applied fault/repair/reset/power persistence evidence")
-        phases = collections.Counter()
-        with (out / "control.jsonl").open() as audit:
-            for line in audit:
-                phases[json.loads(line)["phase"]] += 1
-        if phases["unknown"] or phases["intent"] < 7 or phases["result"] != phases["intent"]:
+        if verify_control_audit(out, manifest) < 7:
             raise ValueError("incomplete scenario control audit")
     return {"verified": True, "record_types": dict(counts), "journal_through": journal["through"]}
 
@@ -187,3 +186,147 @@ def verify_action_results(manifest):
                 receipt.get("status") != "applied" for receipt in receipts
             ):
                 raise ValueError("runtime control acceptance is missing applied receipts")
+
+
+def same_json(left, right):
+    return json.dumps(left, sort_keys=True, allow_nan=False) == json.dumps(
+        right, sort_keys=True, allow_nan=False
+    )
+
+
+def audit_command(kind, command, hardware):
+    if not isinstance(command, dict):
+        raise ValueError("invalid audit command")
+    if kind == "mechanics":
+        if set(command) != {"bus", "addr", "id", "expected_revision", "patch"}:
+            raise ValueError("invalid mechanics audit command")
+        return validate_operation(
+            kind,
+            {key: value for key, value in command.items() if key not in {"bus", "addr"}},
+            hardware,
+            bus=command["bus"],
+            addr=command["addr"],
+        )
+    return validate_operation(kind, command, hardware)
+
+
+def verify_lifecycle_receipt(kind, result, command, manifest):
+    fields = {"command", "status", "guest_ns", "sequence", "boot_generation", "fidelity"}
+    fields |= {"reset": {"before_generation"}, "power": {"power_state"}, "speed": {"speed"}}[kind]
+    if (
+        not isinstance(result, dict)
+        or set(result) != fields
+        or result["status"] != "applied"
+        or not same_json(audit_command(kind, result["command"], manifest["hardware"]), command)
+    ):
+        raise ValueError("invalid applied audit receipt")
+    for key in ["guest_ns", "sequence", "boot_generation"]:
+        maximum = 2**63 - 1 if key == "guest_ns" else 2**64 - 1
+        if (
+            type(result[key]) is not int
+            or not (1 if key == "sequence" else 0) <= result[key] <= maximum
+        ):
+            raise ValueError("invalid audit receipt counter")
+    fidelity = {
+        "native": {
+            "reset": "native-software-reexec",
+            "power": "native-checkpoint-restart",
+            "speed": "native-virtual-clock",
+        },
+        "qemu": {"reset": "qmp-hard-reset", "power": "qmp-stop-reset-cont"},
+    }.get(manifest.get("mode"), {}).get(kind)
+    if fidelity is None or result["fidelity"] != fidelity:
+        raise ValueError("invalid audit receipt backend")
+    if kind == "reset":
+        before = result["before_generation"]
+        if (
+            type(before) is not int
+            or not 0 <= before < 2**64 - 1
+            or result["boot_generation"] != before + 1
+        ):
+            raise ValueError("invalid reset audit generation")
+    elif kind == "power" and result["power_state"] != ("on" if command["on"] else "off"):
+        raise ValueError("invalid power audit state")
+    elif kind == "speed" and (
+        not valid_speed(result["speed"]) or result["speed"] != command["speed"]
+    ):
+        raise ValueError("invalid speed audit rate")
+
+
+def verify_control_audit(out, manifest):
+    """Pair every durable attempt and link applied results to observed scenario receipts."""
+    expected = []
+    hardware = manifest["hardware"]
+    for step in manifest.get("result", {}).get("steps", []):
+        if step.get("action") not in ACTIONS:
+            continue
+        actual = step.get("actual", {})
+        busy = actual.get("busy_rejections")
+        if step.get("status") != "passed" or type(busy) is not int or busy < 0:
+            raise ValueError("invalid audited scenario result")
+        budget = {"remaining": busy}
+        operations = commands(step["action"], step.get("expected"), hardware)
+        receipts = actual.get("operations", [])
+        if not isinstance(receipts, list) or len(receipts) != len(operations):
+            raise ValueError("missing audited scenario receipts")
+        for (kind, command, target), receipt in zip(operations, receipts, strict=True):
+            canonical = validate_operation(kind, command, hardware, **target)
+            if (
+                not isinstance(receipt, dict)
+                or receipt.get("kind") != kind
+                or receipt.get("status") != "applied"
+            ):
+                raise ValueError("invalid audited scenario receipt")
+            expected.append((kind, canonical, receipt, budget))
+    index, pending = 0, False
+    with (out / "control.jsonl").open("rb") as audit:
+        for line in audit:
+            if not line.endswith(b"\n"):
+                raise ValueError("partial control audit record")
+            row = strict_json(line)
+            if index >= len(expected) or not isinstance(row, dict):
+                raise ValueError("unexpected control audit record")
+            kind, command, receipt, budget = expected[index]
+            phase = row.get("phase")
+            fields = {"api_version", "run_id", "phase", "command"}
+            if "kind" in row:
+                fields.add("kind")
+            if phase == "result":
+                fields.add("result")
+            if (
+                set(row) != fields
+                or type(row.get("api_version")) is not int
+                or row["api_version"] != 1
+                or row.get("run_id") != manifest["control"]["run_id"]
+                or row.get("kind", "mechanics") != kind
+                or not same_json(audit_command(kind, row["command"], hardware), command)
+            ):
+                raise ValueError("invalid control audit identity or command")
+            if phase == "intent" and not pending:
+                pending = True
+                continue
+            if phase != "result" or not pending:
+                raise ValueError("unpaired control audit record")
+            result = row["result"]
+            if kind == "mechanics" and result == {"error": "model_busy"}:
+                if budget["remaining"] <= 0:
+                    raise ValueError("unreported busy audit rejection")
+                budget["remaining"] -= 1
+                pending = False
+                continue
+            if kind == "mechanics":
+                validate_state(result, hardware, require_settled=False)
+                if result.get("last_operation", {}).get("command") != command or not same_json(
+                    result.get("last_operation"), receipt.get("operation")
+                ):
+                    raise ValueError("mechanics audit does not match observed receipt")
+            else:
+                verify_lifecycle_receipt(kind, result, command, manifest)
+                if not same_json(
+                    result, {key: value for key, value in receipt.items() if key != "kind"}
+                ):
+                    raise ValueError("control audit does not match observed receipt")
+            index, pending = index + 1, False
+    if pending or index != len(expected):
+        raise ValueError("incomplete scenario control audit")
+    return index
