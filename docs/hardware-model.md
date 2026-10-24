@@ -264,8 +264,9 @@ behavior; their next emitted record upgrades to the versioned extension.
 activity and timeline output gains a top-level `faults` list. Each entry has
 `bus`, `addr`, the configured kinds, and `events`, the number of times the fault
 has changed something the firmware saw. A healthy rail adds nothing to the evidence. A
-module that has a power fault, has lost power, or is unpowered adds `power` to its
-`faults` and `power_losses` and `powered` to its `fault_counters`.
+module with a power fault adds `power` to its `faults`. `power_losses` and `powered` appear
+in its `fault_counters` once the rail has been faulted, was cut, or is down, and they stay
+after a runtime repair to `power: ok`.
 
 The `esp32-8-single-stuck-sensor` and `esp32-8-single-module-lost` fixtures,
 with the `fault-stuck-sensor-8` and `fault-module-lost-8` scenarios, check the
