@@ -5,6 +5,7 @@ import http.client
 import json
 import socket
 import stat
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -215,6 +216,22 @@ def test_explicit_port_can_be_reused_after_server_closes_a_keepalive_connection(
 def test_invalid_control_port(port):
     with pytest.raises(ValueError, match="control-port"):
         check_port(port)
+
+
+def test_missing_websocket_dependency_fails_before_server_side_effects(tmp_path, monkeypatch):
+    hardware, _ = recorded_snapshot()
+    # Force the protocol import to run even if another test already loaded it.
+    monkeypatch.delitem(
+        sys.modules, "uvicorn.protocols.websockets.websockets_sansio_impl", raising=False
+    )
+    monkeypatch.setitem(sys.modules, "websockets", None)
+    check_port(0)  # Plain HTTP does not need the optional WebSocket stack.
+    with pytest.raises(ValueError, match="--i2c-history requires WebSocket dependencies"):
+        check_port(0, telemetry=True)
+    monkeypatch.setattr(socket, "socket", lambda *a, **kw: pytest.fail("listener created"))
+    with pytest.raises(ValueError, match="--i2c-history requires WebSocket dependencies"):
+        ControlServer(0, tmp_path, hardware, telemetry=True)
+    assert not list(tmp_path.iterdir())
 
 
 def test_bad_mechanics_cannot_be_exposed_as_valid_live_state():

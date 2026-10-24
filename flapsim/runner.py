@@ -191,7 +191,7 @@ def run(args, *, executor=None, interrupt=None):
     if control_port is not None:
         from flapsim.control import check_port
 
-        check_port(control_port)
+        check_port(control_port, telemetry=getattr(args, "i2c_history", False))
     enable_subreaper()
     out = claim_output(args.out)
     manifest = {
@@ -389,7 +389,7 @@ def run_native(args, *, executor=None, interrupt=None):
     if control_port is not None:
         from flapsim.control import check_port
 
-        check_port(control_port)
+        check_port(control_port, telemetry=getattr(args, "i2c_history", False))
     enable_subreaper()
     if args.firmware_src is None:
         out = claim_output(args.out)
