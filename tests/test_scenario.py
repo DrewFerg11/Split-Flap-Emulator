@@ -814,6 +814,18 @@ def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context
             "(): nvs_open failed: NOT_FOUND\n",
             2,
         ),
+        # Raw serial tail from arm64 container smoke-16 (#84): the request body is followed by the
+        # head of the diagnostic on the same line, and its tail resumes on the next line.
+        (
+            "[ 38172][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
+            "Received text update request\n"
+            "[ 38172][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
+            '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}'
+            "[ 38172][E][Preferences\n"
+            ".cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
+            "[ 38173][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n",
+            2,
+        ),
     ],
 )
 def test_head_and_late_tail_splices_are_golden_only(context, raw, spliced):
@@ -826,6 +838,34 @@ def test_head_and_late_tail_splices_are_golden_only(context, raw, spliced):
     records = result["known_issues"]["tolerated_serial"]
     assert sum(r["count"] for r in records) == spliced
     assert {r["issue"] for r in records} == {"DrewFerg11/Split-Flap-Display#86"}
+
+
+def test_request_body_head_splice_pairs_with_the_tail_entry_at_every_cut():
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    body = '{"mode":"dual-single","row1":"HELLO"}'
+    diagnostic = "Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
+    for cut in range(len(diagnostic) + 1):
+        head, tail = body + "[ 38172][E][" + diagnostic[:cut], diagnostic[cut:]
+        # A head the baseline absorbs must resume as a tolerated tail, never as a red fragment.
+        if known.tolerated_serial(head) and tail:
+            assert known.tolerated_serial(tail), f"cut {cut}: {head!r} / {tail!r}"
+    assert known.tolerated_serial(body + "[ 38172][E][Preferences.cpp:50] begin(): ")
+    assert known.tolerated_serial(body + "[ 38172][E][Preferences.cpp:50] begin(): n") is None
+
+
+def test_request_body_head_splice_rejects_other_prefixes_and_continuations(context):
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    body = '{"mode":"dual-single","row1":"HELLO"}'
+    head = "[ 38172][E][Preferences"
+    assert known.tolerated_serial(body + head)
+    for bad in [
+        body + head + ".cpp:50] begin(): nvs_open failed: INVALID_HANDLE",
+        body.replace("HELLO", "panic") + head,
+        "x" + body + head,
+        body + "[ 38172][E][Wire",
+        "[a]" + body + head,
+    ]:
+        assert known.tolerated_serial(bad) is None, bad
 
 
 DIAGNOSTIC = "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"

@@ -220,13 +220,28 @@ def test_native_baseline_carries_the_golden_firmware_defect_entries():
     def splices(baseline):
         return [e["regex"] for e in baseline.serial if e["issue"].endswith("#86")]
 
-    assert len(splices(golden)) == 3 and splices(native) == splices(golden)
+    assert len(splices(golden)) == 4 and splices(native) == splices(golden)
+    assert any("request-body form" in e["reason"] for e in native.serial)
     key = ("release-smoke-16", 11, "assert_no_errors")
     shared = [
         [e["error"] for e in b.failures if (e["scenario"], e["step"], e["action"]) == key]
         for b in (native, golden)
     ]
     assert len(shared[0]) == 1 and shared[0] == shared[1]
+
+
+def test_native_baseline_covers_only_the_putstring_commit_race():
+    native = load_known_issues(ROOT / "baselines/v1.4.1-native.yaml")
+    prefix = "[ 24922][E][Preferences.cpp:278] putString(): nvs_commit fail: "
+    line = prefix + "wire1Addresses INVALID_HANDLE"
+    assert native.tolerated_serial(line)["issue"] == "DrewFerg11/Split-Flap-Display#54"
+    for bad in [
+        line.replace("INVALID_HANDLE", "NOT_FOUND"),
+        line.replace("putString", "putBytes"),
+        line.replace("nvs_commit", "nvs_set_str"),
+        line + " extra",
+    ]:
+        assert native.tolerated_serial(bad) is None, bad
 
 
 def test_baseline_binding_is_one_validated_identity():
