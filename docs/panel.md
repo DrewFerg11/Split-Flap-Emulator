@@ -10,7 +10,7 @@ Under each tile are the drum-angle dial (needle = drum, dot = magnet), a coil LE
 hall LED. A tile outlined in red is between flaps: its landing error is over 0.25 of a flap
 pitch.
 
-![Live panel homing 16 modules with the real v1.4.1 firmware](images/live-panel.gif)
+![Live panel spelling SPLIT FLAP on 16 modules with the real v1.4.1 firmware, then flipping back to blank](images/live-panel.gif)
 
 ![Live panel during a native release-smoke-16 run](images/live-panel.png)
 
