@@ -1,6 +1,7 @@
 """Real-firmware controller power probe through the public runner-owned API."""
 
 import argparse
+import hashlib
 import json
 import signal
 import socket
@@ -9,6 +10,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from flapsim.baseline import load_known_issues
+from flapsim.executor import excused
 from flapsim.process import survives
 from flapsim.runner import run
 from flapsim.state import display_aligned
@@ -19,7 +22,10 @@ class PowerProbe:
     timeout = 300
     document = {"version": 1, "mode": "power-probe", "timeout": 300}
 
-    def __init__(self, end_off=False, mode="qemu", off_exit="success", telemetry=False):
+    def __init__(
+        self, end_off=False, mode="qemu", off_exit="success", telemetry=False, known_issues=None
+    ):
+        self.known_issues = known_issues
         self.telemetry = telemetry
         self.end_off = end_off
         self.off_exit = off_exit
@@ -100,7 +106,11 @@ class PowerProbe:
                     )
                 if state["settled"] and done:
                     if state["counters"]["stalls"] or state["counters"]["anomalies"]:
-                        raise RuntimeError("model faults after power-on")
+                        # A logged #14 I2C timeout can lose a coil write and stall a drum.
+                        tolerated = excused(state["counters"], self.known_issues, context.serial())
+                        if tolerated is None:
+                            raise RuntimeError("model faults after power-on")
+                        evidence["tolerated_stalls"] = tolerated
                     return value
                 context.pause()
 
@@ -231,6 +241,9 @@ def main():
     parser.add_argument("--firmware", type=Path)
     parser.add_argument("--qemu-prefix", type=Path, default=Path("build/qemu/install"))
     parser.add_argument("--hardware", default="esp32-8-single")
+    parser.add_argument(
+        "--known-issues", type=Path, help="golden baseline whose #14 entries may excuse stalls"
+    )
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--end-off", action="store_true")
     parser.add_argument("--i2c-history", action="store_true")
@@ -238,13 +251,23 @@ def main():
         "--off-exit", choices=["success", "timeout", "interrupt"], default="success"
     )
     args = parser.parse_args()
+    known_issues = None
+    if args.known_issues:
+        if args.mode != "qemu":
+            parser.error("--known-issues needs --mode qemu")
+        known_issues = load_known_issues(args.known_issues)
+        known_issues.check_firmware(hashlib.sha256(args.firmware.read_bytes()).hexdigest())
     args.firmware_src = None
     args.speed, args.scenario, args.seed = 5, "boot", 7
     args.timeout, args.trace, args.control_port, args.timing = 300, False, 0, "ci"
     code = run(
         args,
         executor=PowerProbe(
-            args.end_off or args.off_exit != "success", args.mode, args.off_exit, args.i2c_history
+            args.end_off or args.off_exit != "success",
+            args.mode,
+            args.off_exit,
+            args.i2c_history,
+            known_issues,
         ),
     )
     print((args.out / "run.json").read_text())
