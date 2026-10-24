@@ -311,8 +311,13 @@ def serial_errors(text, policy, known=None, observed=None):
     """Fail on firmware error lines, except explicit policy flags and baseline-tolerated lines."""
     missing = []
     for line in text.splitlines():
+        # A reset can stop UART immediately after this known diagnostic and
+        # append the next boot's exact ESP32 ROM banner without a line break.
+        # Keep both parts exact: arbitrary suffixes and other errors still fail.
         if policy.get("fresh_nvs") and re.fullmatch(
-            r"\[\s*\d+\]\[E\]\[Preferences.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND", line
+            r"\[\s*\d+\]\[E\]\[Preferences.cpp:50\] begin\(\): nvs_open failed: NOT_FOUND"
+            r"(?:ets Jul 29 2019 12:21:46)?",
+            line,
         ):
             continue
         match = re.fullmatch(r"Error writing data to module (\d+), error code: 2", line)

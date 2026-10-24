@@ -242,7 +242,7 @@ jobs:
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'
         run: |
-          for run in scenario power runtime-controls-16 control-lifecycle-timeout control-lifecycle-sigint control-lifecycle-sigterm control-lifecycle-crash; do
+          for run in scenario power runtime-controls-16; do
             python -m tools.summarize_run "runs/$run/run.json"
           done
       - name: Log available negative-version outcomes
