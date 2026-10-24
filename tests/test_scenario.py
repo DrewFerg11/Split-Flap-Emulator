@@ -852,6 +852,22 @@ def test_reset_banner_joined_to_complete_fresh_nvs_diagnostic(context):
             serial_errors(bad, {"fresh_nvs": True})
 
 
+def test_reset_interrupts_each_byte_of_the_known_nvs_payload():
+    banner = "ets Jul 29 2019 12:21:46"
+    header_end = DIAGNOSTIC.index(" begin()")
+    for cut in range(header_end, len(DIAGNOSTIC) + 1):
+        raw = DIAGNOSTIC[:cut] + banner + "\n"
+        serial_errors(raw, {"fresh_nvs": True})
+        for invalid in [
+            raw.replace("Preferences.cpp:50", "Preferences.cpp:51"),
+            raw.replace("Preferences.cpp:50", "Wire.cpp:50"),
+            raw.replace(banner, "panic" + banner),
+            raw.replace(banner, banner + "panic"),
+        ]:
+            with pytest.raises(ExecutionFailed, match="unexpected serial error"):
+                serial_errors(invalid, {"fresh_nvs": True})
+
+
 def test_every_split_point_of_the_diagnostic_is_recognised():
     known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     body = '{"mode":"dual-single","row1":"HELLO"'
