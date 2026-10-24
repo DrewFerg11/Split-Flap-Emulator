@@ -2083,3 +2083,20 @@ def test_native_resume_rejects_inconsistent_power_evidence(make_model, problem):
     record["event"] = "faults_changed"
     (model.out / "timeline.jsonl").write_text(json.dumps(record) + "\n")
     assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0
+
+
+def test_a_module_configured_without_a_rail_starts_unpowered(make_model):
+    model = faulted(make_model, {"power": "lost"}, angles=(100,))
+    boot = model.timeline()[0]["modules"][0]
+    assert (boot["latch"], boot["energized"]) == (0, False)
+    assert boot["fault_counters"]["powered"] is False
+    assert boot["fault_counters"]["power_losses"] == 0
+    validate_state(model.timeline()[0], json.loads(model.config.read_text()))
+    assert model.event(1) == 1
+    model.event(3)
+    assert resume(model, model.now) == 0
+    restored = model.control({"faults": {"power": "ok"}})
+    assert restored["modules"][0]["latch"] == 0xFFFF
+    assert (
+        "power_losses" not in restored["modules"][0]["fault_counters"]
+    )  # Never lost, now healthy.

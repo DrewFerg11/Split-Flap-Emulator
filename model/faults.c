@@ -357,6 +357,14 @@ void fs_power_sync(FsModule *module, int64_t guest_ns, bool emit) {
     power_reset(module, up ? POWER_ON_LATCH : POWER_OFF_LATCH, emit);
 }
 
+/* Boot state: a module configured without a rail starts without one, and not as a loss event. */
+void fs_power_init(FsModule *module) {
+    if (rail_up(&module->faults, 0))
+        return;
+    module->powered = false;
+    module->latch = POWER_OFF_LATCH;
+}
+
 bool fs_fault_absent(FsModule *module, int64_t guest_ns) {
     FsFaults *f = &module->faults;
     fs_power_sync(module, guest_ns, true);

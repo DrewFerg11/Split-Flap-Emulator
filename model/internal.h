@@ -92,6 +92,7 @@ bool fs_restore(const char *timeline_path, bool *recorded_reset);
 bool fs_parse_faults(struct json_object *entry, FsModule *module);
 bool fs_fault_absent(FsModule *module, int64_t guest_ns);
 bool fs_fault_sag(FsModule *module);
+void fs_power_init(FsModule *module);
 void fs_power_sync(FsModule *module, int64_t guest_ns, bool emit);
 bool fs_power_evidence(const FsModule *module);
 int fs_fault_hall(FsModule *module);
