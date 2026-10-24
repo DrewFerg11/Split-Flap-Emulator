@@ -61,6 +61,28 @@ def main():
             print(f"{name}: unavailable or malformed")
     if not value.get("passed"):
         try:
+            state = json.loads((path.parent / "state.json").read_text())
+            for module in state.get("modules", []):
+                counters = module.get("counters", {})
+                if counters.get("stalls") or counters.get("anomalies"):
+                    print("Module with model faults:", json.dumps(module))
+        except (OSError, ValueError):
+            pass
+        try:
+            serial = (path.parent / "serial.log").read_text(errors="replace").splitlines()
+            diagnostics = [
+                line
+                for line in serial
+                if any(
+                    marker in line
+                    for marker in [
+                        "Error writing data to module",
+                        "i2cRead returned",
+                        "i2cWrite returned",
+                    ]
+                )
+            ]
+            print("First 20 I2C diagnostics:", "\n".join(diagnostics[:20]), sep="\n")
             print(
                 "Last 50 serial lines:",
                 "\n".join(
