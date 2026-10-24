@@ -83,9 +83,12 @@ jobs:
         name: AI release summary
         if: steps.commitlog.outputs.log != ''
         continue-on-error: true
-        uses: actions/ai-inference@2c43c91ae16266ca159d311430343c67a5ffa222 # v3
+        # v2.x summarizes through GitHub Models with the workflow token (needs `models: read`). v3 only
+        # supports the Copilot CLI, which this runner does not have, and fails with no output.
+        uses: actions/ai-inference@a7805884c80886efc241e94a5351df715968a0ad # v2.1.1
         with:
           model: openai/gpt-4o-mini
+          max-completion-tokens: 400
           system-prompt: |
             You summarize commit logs for users of Split-Flap-Emulator, a QEMU and native emulator
             that runs Split-Flap-Display firmware against a model of the physical display so it can
@@ -99,7 +102,15 @@ jobs:
         env:
           # Derived from commit text, which is untrusted: route it through env, never into `run:`.
           AI_SUMMARY: ${{ steps.ai_summary.outcome == 'success' && steps.ai_summary.outputs.response || '' }}
-        run: printf '%s\n' "$AI_SUMMARY" > "$RUNNER_TEMP/ai-summary.txt"
+        run: |
+          # No summary file when the step failed or returned only whitespace, so the notes carry no
+          # empty heading; the warning keeps a silent failure visible in the run.
+          : > "$RUNNER_TEMP/ai-summary.txt"
+          if [ -n "${AI_SUMMARY//[[:space:]]/}" ]; then
+            printf '%s\n' "$AI_SUMMARY" > "$RUNNER_TEMP/ai-summary.txt"
+          else
+            echo "::warning::No AI summary was produced; the release notes will omit the Summary section."
+          fi
 
       - name: Build release notes
         env:
