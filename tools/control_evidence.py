@@ -2,9 +2,82 @@
 
 import collections
 import json
+import re
 
 from flapsim.state import validate_state
-from flapsim.telemetry import MAX_BYTES, MAX_RECORDS, History
+from flapsim.telemetry import ENDS, MAX_BYTES, MAX_RECORDS, History
+
+
+def decimal(value, *, minimum=0, maximum=2**64 - 1):
+    if (
+        type(value) is not str
+        or not 1 <= len(value) <= 20
+        or not re.fullmatch(r"0|[1-9][0-9]*", value)
+        or not minimum <= int(value) <= maximum
+    ):
+        raise ValueError("invalid I2C decimal field")
+    return int(value)
+
+
+def byte(value):
+    return type(value) is int and 0 <= value <= 255
+
+
+def verify_i2c_record(row):
+    """Revalidate persisted wire evidence, independently of collection-time checks."""
+    if not isinstance(row.get("source"), str) or not re.fullmatch(r"[0-9a-f]{16}", row["source"]):
+        raise ValueError("invalid I2C source")
+    decimal(row.get("producer_sequence"), minimum=1)
+    decimal(row.get("boot_generation"))
+    guest = decimal(row.get("guest_ns"), maximum=2**63 - 1)
+    raw_sequence = decimal(row.get("raw_sequence"))
+    if "transaction" not in row:
+        raise ValueError("missing I2C transaction")
+    if row["transaction"] is not None:
+        decimal(row["transaction"], minimum=1)
+    events = row.get("events")
+    end = row.get("end")
+    if (
+        not byte(row.get("bus"))
+        or not byte(row.get("addr"))
+        or end not in ENDS.values()
+        or not isinstance(events, list)
+        or len(events) > 8
+        or (end == "fragment" and len(events) != 8)
+        or (end in {"stop", "orphan"} and not events)
+        or (end == "orphan" and (len(events) != 1 or row["transaction"] is not None))
+    ):
+        raise ValueError("invalid I2C transaction fragment")
+    previous = 0
+    when = 0
+    for event in events:
+        if not isinstance(event, dict):
+            raise ValueError("invalid I2C event")
+        sequence = decimal(event.get("sequence"), minimum=1)
+        timestamp = decimal(event.get("guest_ns"), maximum=2**63 - 1)
+        raw = event.get("event")
+        if (
+            not previous < sequence <= raw_sequence
+            or not when <= timestamp <= guest
+            or not byte(event.get("addr"))
+            or type(raw) is not int
+            or not 0 <= raw <= 65535
+            or not byte(event.get("kind"))
+            or event["kind"] != raw & 255
+            or not byte(event.get("data"))
+            or event["data"] != raw >> 8
+            or not byte(event.get("result"))
+        ):
+            raise ValueError("invalid I2C event fields")
+        ack = event["kind"] <= 2 or event["kind"] == 5
+        if (
+            ack and (type(event.get("ack")) is not bool or event["ack"] != (event["result"] == 0))
+        ) or (not ack and "ack" in event):
+            raise ValueError("invalid I2C acknowledgement")
+        previous, when = sequence, timestamp
+    if end == "stop" and events[-1]["kind"] != 3:
+        raise ValueError("I2C stop fragment has no STOP event")
+    return len(events)
 
 
 def verify_control_artifacts(out, manifest, *, require_i2c=False, require_actions=False):
@@ -27,6 +100,8 @@ def verify_control_artifacts(out, manifest, *, require_i2c=False, require_action
     if (
         journal.get("files") != ["i2c.previous.jsonl", "i2c.jsonl"]
         or journal.get("bytes_per_file") != MAX_BYTES
+        or type(journal.get("rotations")) is not int
+        or journal["rotations"] < 0
     ):
         raise ValueError("unexpected telemetry journal retention policy")
     history = History(control["run_id"])
@@ -34,17 +109,22 @@ def verify_control_artifacts(out, manifest, *, require_i2c=False, require_action
     previous = 0
     counts = collections.Counter()
     last = None
+    i2c_events = 0
     for name in journal["files"]:
         path = out / name
-        if not path.exists() and name == "i2c.previous.jsonl":
+        if name == "i2c.previous.jsonl" and journal["rotations"] == 0:
+            if path.exists():
+                raise ValueError("unexpected rotated telemetry journal")
             continue
-        if not path.is_file() or path.stat().st_size > MAX_BYTES:
-            raise ValueError("missing or oversized telemetry journal")
+        if not path.is_file() or not 0 < path.stat().st_size <= MAX_BYTES:
+            raise ValueError("missing, empty or oversized telemetry journal")
         with path.open("rb") as log:
             for line in log:
                 if not line.endswith(b"\n"):
                     raise ValueError("partial final telemetry record after shutdown")
                 row = json.loads(line)
+                if not isinstance(row, dict):
+                    raise ValueError("telemetry journal record is not an object")
                 if row.get("run_id") != control["run_id"] or row.get("schema_version") != 1:
                     raise ValueError("foreign telemetry journal record")
                 kind = row.get("type")
@@ -57,6 +137,8 @@ def verify_control_artifacts(out, manifest, *, require_i2c=False, require_action
                     previous = sequence
                 elif kind != "gap" or row.get("reason") != "journal_retention":
                     raise ValueError("telemetry record has no cursor")
+                if kind == "i2c":
+                    i2c_events += verify_i2c_record(row)
                 if kind == "state":
                     validate_state(row["state"], manifest["hardware"], require_settled=False)
                 counts[kind] += 1
@@ -69,7 +151,7 @@ def verify_control_artifacts(out, manifest, *, require_i2c=False, require_action
         or through == 0
     ):
         raise ValueError("telemetry journal did not flush its terminal cursor")
-    if require_i2c and not counts["i2c"]:
+    if require_i2c and not i2c_events:
         raise ValueError("successful firmware run has no structured I2C evidence")
     if require_actions:
         verify_action_results(manifest)
