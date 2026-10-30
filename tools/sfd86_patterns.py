@@ -9,6 +9,10 @@ entries accept only that request log, or a body (or the start of one) in these s
 - POST /text: {"mode":"<a v1.4.1 mode>", then scalar members the handler reads}.
 - POST /settings: scalar members named after v1.4.1's settings keys ("mode" is a number here).
 
+When only the other task's newline lands inside the diagnostic, the record splits into two bare
+lines (#105): a head ending after any proper prefix of the diagnostic (from "[ ts][E][" on), and a
+tail that is any remainder of it. The complete diagnostic is left to the fresh_nvs policy.
+
 Strings may not contain brackets (the diagnostic starts with "[") or an error keyword, and use only
 the escapes ArduinoJson 7.4.3 writes. Arrays (e.g. "words") are not accepted, so a body with one is
 still reported, and so is one that names a member twice (ArduinoJson merges repeated keys).
@@ -155,19 +159,24 @@ def tail():
     # start of its request log or of a body. Cuts inside the timestamp keep its digits.
     head = re.escape("][E][" + DIAGNOSTIC_HEAD)
     resume = rf"(?:\[? *[0-9]{{1,10}}{head}|(?:{_suffixes('][E][' + DIAGNOSTIC_HEAD)})?)"
-    return (
-        rf"^{DISTINCT_KEYS}(?!{ERROR})(?:{REQUEST_LOG.prefix}|{BODY.prefix}){resume}"
-        + re.escape(DIAGNOSTIC[len(DIAGNOSTIC_HEAD) :])
-        + "$"
+    rest = DIAGNOSTIC[len(DIAGNOSTIC_HEAD) :]
+    resumed = (
+        rf"{DISTINCT_KEYS}(?!{ERROR})(?:{REQUEST_LOG.prefix}|{BODY.prefix}){resume}"
+        + re.escape(rest)
     )
+    # The other task's newline can also be the only insertion, leaving the diagnostic's remainder
+    # alone on its line: any proper suffix of what follows "begin(): ".
+    return rf"^(?:{resumed}|{_suffixes(rest)})$"
 
 
 def head():
     # The diagnostic up to some character, then the rest of the other task's line: its request
-    # log or a body (or the start of one).
+    # log or a body (or the start of one), or nothing when only its newline landed here.
+    # The complete diagnostic on its own is not a splice: the fresh_nvs policy governs it.
+    whole = re.escape(DIAGNOSTIC)
     return (
-        f"^{DISTINCT_KEYS}{TIMESTAMP}{words(DIAGNOSTIC).prefix}"
-        rf"(?:{REQUEST_LOG.full}|(?=\{{){BODY.prefix})$"
+        f"^(?!{TIMESTAMP}{whole}$){DISTINCT_KEYS}{TIMESTAMP}{words(DIAGNOSTIC).prefix}"
+        rf"(?:{REQUEST_LOG.full}|(?=\{{){BODY.prefix}|)$"
     )
 
 
