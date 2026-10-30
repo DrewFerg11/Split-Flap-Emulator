@@ -963,6 +963,9 @@ def test_a_request_body_spliced_inside_the_diagnostic_is_recognised():
         DIAGNOSTIC.replace("NOT_FOUND", '{"ssid":"a"}NOT_FOUN'),
         DIAGNOSTIC.replace("NOT_FOUND", "INVALID_HANDLE").replace("[E][", '[E][{"ssid":"a"}'),
         DIAGNOSTIC.replace("38055", '{"ssid":"a"}'),
+        DIAGNOSTIC.replace("][E]", "]junk" + LOG + "[E]"),
+        DIAGNOSTIC.replace("][E]", "]" + LOG + "junk[E]"),
+        DIAGNOSTIC.replace("][E]", "]Received textx update request[E]"),
         # Two insertions: a body and a request log.
         DIAGNOSTIC.replace("][E]", '][{"ssid":"a"}E]').replace("begin", LOG + "begin"),
     ]:

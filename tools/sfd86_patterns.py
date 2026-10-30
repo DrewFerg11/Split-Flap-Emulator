@@ -170,7 +170,7 @@ def middle():
     # "Received", so the token spans exactly the body (first "{" to last "}") or the log. The
     # main pattern then checks that token's shape once, instead of at every split point.
     rest = "][E][" + DIAGNOSTIC
-    token = r"(?:Received [a-z]+ update request|\{.*\})"
+    token = rf"(?:{REQUEST_LOG.full}|\{{.*\}})"
     splits = [re.escape(rest[:cut]) + token + re.escape(rest[cut:]) for cut in range(len(rest))]
     # Inside the timestamp: among its spaces, or among its digits.
     stamp = rf"(?: *{token} *[0-9]+| *[0-9]+{token}[0-9]*){re.escape(rest)}"
