@@ -88,8 +88,10 @@ jobs:
           python -c 'import pathlib; p=pathlib.Path("runs/container/verification.json"); print(p.read_text() if p.exists() else "Image evidence unavailable")'
           python -m tools.summarize_run runs/container/smoke-8/run/run.json
           python -m tools.summarize_run runs/container/smoke-16/run/run.json
+          python -m tools.summarize_run runs/container/runtime-controls-16/run/run.json
           python -m tools.summarize_run runs/container-native/native-smoke-8/run/run.json
           python -m tools.summarize_run runs/container-native/native-mqtt-8/run/run.json
+          python -m tools.summarize_run runs/container-native/native-runtime-controls-16/run/run.json
       - name: Retain image diagnostics
         if: always()
         uses: actions/upload-artifact@v4
