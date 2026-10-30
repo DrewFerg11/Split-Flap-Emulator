@@ -268,9 +268,14 @@ def test_stalls_are_excused_only_as_far_as_the_golden_baseline_explains_them():
         "Error writing data to module 33, error code: 5\n"
         "Error writing data to module 34, error code: 2"
     )
-    allowance = known.excused_stalls(serial)[0]
-    assert allowance == 1
-    assert not unexcused_faults({"stalls": 1, "anomalies": 0}, allowance)
-    assert unexcused_faults({"stalls": 2, "anomalies": 0}, allowance)
-    assert unexcused_faults({"stalls": 0, "anomalies": 1}, allowance)
-    assert unexcused_faults({"stalls": 1, "anomalies": 0}, 0)
+    assert known.excused_stalls(serial)[0] == 1
+    assert not unexcused_faults({"stalls": 0, "anomalies": 0}, known, serial)
+    assert not unexcused_faults({"stalls": 1, "anomalies": 0}, known, serial)
+    assert unexcused_faults({"stalls": 2, "anomalies": 0}, known, serial)
+    assert unexcused_faults({"stalls": 0, "anomalies": 1}, known, serial)
+    assert unexcused_faults({"stalls": 1, "anomalies": 0}, known, "")
+    assert unexcused_faults({"stalls": 1, "anomalies": 0}, None, serial)
+    # The firmware logs one failed write per module and boot; the model counts the rest (#79).
+    lost = {"stalls": 2, "anomalies": 0, "lost_write_stalls": 2}
+    assert not unexcused_faults(lost, known, serial)
+    assert unexcused_faults(lost, known, "")

@@ -317,7 +317,10 @@ the task's next transfer then has its interrupt ignored and times out. A write t
 times out loses one coil pattern, which can stall one drum. The golden baseline
 records both lines, and each logged write timeout (`explains_stalls: 1`) excuses at
 most one drum stall in the same run; anomalies, other write codes and stalls beyond
-that count still fail. Scenario reports list tolerated stalls under the known issues.
+that count still fail. v1.4.1 logs only a module's first failed write per boot
+(`SplitFlapModule::hasErrored`), so later timeouts on that module are silent. Once
+the run has logged one, the stalls the model counts in `lost_write_stalls` (each
+one followed a write that delivered only its address) are explained too. Scenario reports list tolerated stalls under the known issues.
 A faithful fix needs different core scheduling, tracked in #14.
 
 The checksum-bound golden baseline also records the exact Preferences.begin

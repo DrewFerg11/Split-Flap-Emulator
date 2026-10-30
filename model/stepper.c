@@ -21,6 +21,8 @@ void fs_stepper_write(FsModule *module, uint16_t output) {
         phase = -1;
         break;
     }
+    bool lost = module->write_lost;
+    module->write_lost = false;
     module->latch = output;
     module->counters.writes++;
     module->energized = coils != 0;
@@ -49,6 +51,9 @@ void fs_stepper_write(FsModule *module, uint16_t output) {
             module->counters.backward++;
         } else if (delta == 2) {
             module->counters.stalls++;
+            /* The skipped phase was the pattern an address-only write never delivered. */
+            if (lost)
+                module->counters.lost_write_stalls++;
         }
     }
     /* The first energize establishes phase without inventing a full step. */

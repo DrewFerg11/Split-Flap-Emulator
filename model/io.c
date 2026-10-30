@@ -16,6 +16,8 @@ static struct json_object *counters(FsCounters count) {
     integer(object, "writes", count.writes);
     integer(object, "reads", count.reads);
     integer(object, "anomalies", count.anomalies);
+    if (count.lost_write_stalls)
+        integer(object, "lost_write_stalls", count.lost_write_stalls);
     return object;
 }
 
@@ -47,6 +49,7 @@ static struct json_object *identity(int64_t guest_ns) {
         total.stalls += count->stalls;
         total.writes += count->writes;
         total.reads += count->reads;
+        total.lost_write_stalls += count->lost_write_stalls;
     }
     total.anomalies = fs.totals.anomalies;
     json_object_object_add(object, "counters", counters(total));

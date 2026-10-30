@@ -9,6 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from flapsim.baseline import load_known_issues
+from flapsim.executor import excused
 from flapsim.faults import DEFAULT_FAULTS
 from flapsim.runner import run
 from flapsim.scenario import serial_errors
@@ -65,9 +66,10 @@ def interrupted_reset_lines(text, observed_resets):
     return "\n".join(lines), fragments
 
 
-def unexcused_faults(counters, stall_allowance):
-    """Anomalies are never excused; stalls only up to what the known-issues baseline explains."""
-    return bool(counters["anomalies"]) or counters["stalls"] > stall_allowance
+def unexcused_faults(counters, known, serial):
+    """Anomalies are never excused; stalls only as far as the known-issues baseline explains."""
+    faulty = counters["anomalies"] or counters["stalls"]
+    return bool(faulty) and excused(counters, known, serial) is None
 
 
 class FaultProbe:
@@ -94,12 +96,11 @@ class FaultProbe:
         native = manifest["mode"] == "native"
         self.native = native
 
-        def stall_allowance():
-            # Known emulator scheduling artifacts (#14) can lose a coil pattern: one stall each.
-            if self.known is None or not (context.out / "serial.log").exists():
-                return 0
-            serial = (context.out / "serial.log").read_text(errors="replace")
-            return self.known.excused_stalls(serial)[0]
+        def unexcused(counters):
+            # Known emulator scheduling artifacts (#14) can lose coil patterns and stall drums.
+            path = context.out / "serial.log"
+            serial = path.read_text(errors="replace") if path.exists() else ""
+            return unexcused_faults(counters, self.known, serial)
 
         def record():
             (context.out / "fault-verification.json").write_text(
@@ -178,7 +179,7 @@ class FaultProbe:
                 # The snapshot is physical truth; events count a changed firmware read.
                 observed = effects["events"] > 0 and target["counters"]["reads"] > 0
             if healthy and observed:
-                if unexcused_faults(state["counters"], stall_allowance()):
+                if unexcused(state["counters"]):
                     raise RuntimeError("unexpected model faults alongside injection")
                 break
             context.pause()
@@ -226,7 +227,7 @@ class FaultProbe:
                 and state["sequence"] > recovery["sequence"]
                 and display_aligned(state, text)
             ):
-                if unexcused_faults(state["counters"], stall_allowance()):
+                if unexcused(state["counters"]):
                     raise RuntimeError("unexpected model faults during recovery")
                 break
             context.pause()

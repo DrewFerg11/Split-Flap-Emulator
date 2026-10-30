@@ -36,7 +36,9 @@ serial:
     reason: >-
       The write-side form of the same emulator scheduling artifact: Wire endTransmission code 5
       (timeout). Only the address reached the module, so its coil pattern was lost and one drum
-      stall may follow; each such line excuses one stall. Other write codes (e.g. 2, missing module)
+      stall may follow; each such line excuses one stall. v1.4.1 logs only a module's first failed
+      write per boot, so once a line is logged, the stalls the model saw follow an address-only
+      write (lost_write_stalls, #79) are excused too. Other write codes (e.g. 2, missing module)
       are not covered.
     explains_stalls: 1
     regex: '^Error writing data to module \d+, error code: 5$'
