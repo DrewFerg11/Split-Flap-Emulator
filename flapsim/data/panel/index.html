@@ -14,6 +14,10 @@ pre.console { margin: 0; height: 260px; overflow: auto; white-space: pre-wrap; o
   font: 12px/1.45 ui-monospace, Menlo, monospace; }
 .monitor { max-height: 260px; overflow: auto; }
 .monitor td { font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding: 3px 10px; }
+.command { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.command > span:first-child { min-width: 90px; color: var(--muted); }
+select, input[type=text] { background: var(--tile); color: var(--ink); border: 1px solid var(--rule);
+  border-radius: 6px; padding: 5px 8px; font: inherit; }
 </style>
 </head>
 <body>
@@ -29,6 +33,20 @@ pre.console { margin: 0; height: 260px; overflow: auto; white-space: pre-wrap; o
   </div>
   <div class="tablewrap" id="modules"></div>
   <p class="meta" id="meta"></p>
+  <section class="panel" id="controls" hidden>
+    <h2><span>Controls</span><span>commands go to the run's control API</span></h2>
+    <div class="command"><span>Controller</span><button data-command="reset">Reset</button>
+      <button data-command="off">Power off</button><button data-command="on">Power on</button></div>
+    <div class="command"><span>Fault</span><select id="fault-module" aria-label="Module"></select>
+      <select id="fault-kind" aria-label="Fault"></select>
+      <select id="fault-value" aria-label="Fault mode"></select>
+      <button data-command="fault">Apply</button></div>
+    <div class="command"><span>Mechanics</span><select id="mech-module" aria-label="Module"></select>
+      <select id="mech-field" aria-label="Field"></select>
+      <input type="text" id="mech-value" aria-label="Value" size="8">
+      <button data-command="mech">Apply</button></div>
+    <p class="notice" id="control-result" aria-live="polite"></p>
+  </section>
   <section class="panel">
     <h2><span>Serial console</span><span id="serial-status"></span></h2>
     <pre class="console" id="serial" aria-live="off"></pre>
@@ -51,8 +69,10 @@ const board = FlapUI.display(document.getElementById("board"));
 const modules = FlapUI.table(document.getElementById("modules"));
 document.getElementById("legend").append(FlapUI.legend());
 
+let lastModules = [];
 function render(envelope) {
   const state = envelope.state;
+  lastModules = state.modules;
   board.update(state.modules, true);
   modules.update(state.modules);
   status.className = "pill live";
@@ -76,20 +96,111 @@ async function poll() {
 }
 poll();
 
+// A panel started with --controls prints a URL whose fragment carries its key. Keep the key
+// for this tab only, and take it out of the address bar so it is not copied or bookmarked.
+let panelKey = null;
+try {
+  panelKey = new URLSearchParams(location.hash.slice(1)).get("key") ||
+    sessionStorage.getItem("flapsim-panel-key");
+  if (panelKey) sessionStorage.setItem("flapsim-panel-key", panelKey);
+} catch (error) { /* storage unavailable: the key lasts until reload */ }
+if (location.hash) history.replaceState(null, "", location.pathname);
+
 const firmware = document.getElementById("firmware");
 async function links() {
   try {
     const response = await fetch("/run", { cache: "no-store" });
     const value = await response.json();
-    if (response.ok && value.firmware_url) {
-      firmware.href = value.firmware_url;
-      firmware.hidden = false;
+    if (response.ok) {
+      if (value.controls && panelKey) setupControls();
+      if (value.firmware_url) {
+        firmware.href = value.firmware_url;
+        firmware.hidden = false;
+      }
       return;
     }
   } catch (error) { /* the run has not started yet */ }
   setTimeout(links, 2000);
 }
 links();
+
+const FAULTS = {
+  sensor: ["ok", "stuck_active", "stuck_inactive"],
+  motor: ["ok", "dead"],
+  i2c: ["ok", "missing"],
+  power: ["ok", "lost"],
+};
+const MECHANICS = ["sensor_window", "magnet_position", "flap_offset", "steps_per_rotation",
+  "sensor_polarity"];
+function options(select, values) {
+  select.replaceChildren(...values.map(([value, text]) => {
+    const option = FlapUI.el("option", null, text);
+    option.value = value;
+    return option;
+  }));
+}
+function setupControls() {
+  const controls = document.getElementById("controls");
+  if (!controls.hidden) return;
+  controls.hidden = false;
+  const result = document.getElementById("control-result");
+  const kind = document.getElementById("fault-kind");
+  const value = document.getElementById("fault-value");
+  options(kind, Object.keys(FAULTS).map((k) => [k, k]));
+  const values = () => options(value, FAULTS[kind.value].map((v) => [v, v]));
+  kind.addEventListener("change", values);
+  values();
+  options(document.getElementById("mech-field"), MECHANICS.map((f) => [f, f]));
+  const modules = () => {
+    const list = lastModules.map((m) => [m.bus + ":" + m.addr, "bus" + m.bus + " 0x" +
+      m.addr.toString(16)]);
+    for (const id of ["fault-module", "mech-module"]) {
+      const select = document.getElementById(id);
+      if (select.options.length !== list.length) options(select, list);
+    }
+    if (!list.length) setTimeout(modules, 500);
+  };
+  modules();
+  const target = (id) => {
+    const [bus, addr] = document.getElementById(id).value.split(":").map(Number);
+    return { bus, addr };
+  };
+  async function send(path, body, label) {
+    result.textContent = label + "…";
+    try {
+      const response = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Flapsim-Panel-Key": panelKey },
+        body: JSON.stringify(body),
+      });
+      const answer = await response.json();
+      result.textContent = label + ": " + (response.ok ? answer.status || "done" :
+        "HTTP " + response.status + " " + (answer.error || "") + " " + (answer.detail || ""));
+    } catch (error) {
+      result.textContent = label + ": " + String(error.message || error);
+    }
+  }
+  controls.addEventListener("click", (event) => {
+    const which = event.target.dataset && event.target.dataset.command;
+    if (which === "reset") send("/control/reset", {}, "reset");
+    else if (which === "off" || which === "on") {
+      send("/control/power", { on: which === "on" }, "power " + which);
+    } else if (which === "fault") {
+      send("/control/mech", { ...target("fault-module"),
+        patch: { faults: { [kind.value]: value.value } } }, kind.value + " " + value.value);
+    } else if (which === "mech") {
+      const field = document.getElementById("mech-field").value;
+      const raw = document.getElementById("mech-value").value.trim();
+      const parsed = field === "sensor_polarity" ? raw : Number(raw);
+      if (field !== "sensor_polarity" && (!raw || !Number.isInteger(parsed))) {
+        result.textContent = field + ": enter a whole number";
+        return;
+      }
+      send("/control/mech", { ...target("mech-module"), patch: { [field]: parsed } },
+        field + " = " + raw);
+    }
+  });
+}
 
 // The serial console follows serial.log; only its last lines are kept.
 const serial = document.getElementById("serial");
@@ -107,7 +218,9 @@ async function pollSerial() {
     serialStatus.textContent = value.available ? "" : "no serial log yet";
     if (value.text) {
       const follow = serial.scrollTop + serial.clientHeight >= serial.scrollHeight - 4;
-      const lines = (serial.textContent + value.text).split("\n");
+      const skipped = value.skipped ?
+        "\n… " + value.skipped + " bytes skipped (kept in serial.log) …\n" : "";
+      const lines = (serial.textContent + skipped + value.text).split("\n");
       serial.textContent = lines.slice(-SERIAL_LINES).join("\n");
       if (follow) serial.scrollTop = serial.scrollHeight;
     }
