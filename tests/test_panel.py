@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from flapsim import panel as panel_module
 from flapsim.panel import start
 
 TOKEN = "fixture-control-token"
@@ -412,11 +413,27 @@ def test_controls_send_mechanics_with_the_current_revision(tmp_path, control, co
         ("/control/mech", {"bus": 0, "addr": 32}),
         ("/control/reset", b'{"a":1,"a":2}'),
         ("/control/reset", b"not json"),
+        ("/control/mech", b'{"bus":0,"addr":32,"patch":{"x":NaN}}'),
+        ("/control/mech", b'{"bus":0,"addr":32,"patch":{"x":-Infinity}}'),
     ],
 )
 def test_controls_reject_malformed_commands(tmp_path, control, controls_panel, path, body):
     write_run(tmp_path, control[0])
     status, answer = post(controls_panel, path, body)
+    assert status == 400 and answer["error"] == "invalid_command"
+    assert not commands_sent(control[1])
+
+
+def test_a_command_that_overflows_the_json_stack_is_a_bad_request(
+    tmp_path, control, controls_panel, monkeypatch
+):
+    # Nesting that fits the 2 KiB cap can still exhaust the interpreter's recursion limit.
+    def overflow(*args):
+        raise RecursionError
+
+    monkeypatch.setattr(panel_module, "command", overflow)
+    write_run(tmp_path, control[0])
+    status, answer = post(controls_panel, "/control/reset", {})
     assert status == 400 and answer["error"] == "invalid_command"
     assert not commands_sent(control[1])
 

@@ -237,7 +237,10 @@ def strict_json(data):
             raise ValueError("duplicate JSON key")
         return dict(pairs)
 
-    return json.loads(data, object_pairs_hook=unique)
+    def constant(name):
+        raise ValueError(f"{name} is not valid JSON")
+
+    return json.loads(data, object_pairs_hook=unique, parse_constant=constant)
 
 
 class PanelServer(ThreadingHTTPServer):
@@ -364,6 +367,10 @@ class PanelHandler(BaseHTTPRequestHandler):
             self.send_json(408, {"error": "body_timeout"})
         except ValueError as error:
             self.send_json(400, {"error": "invalid_command", "detail": str(error)})
+        except RecursionError:
+            self.send_json(
+                400, {"error": "invalid_command", "detail": "the command nests too deeply"}
+            )
         except PanelError as error:
             self.send_json(503, {"error": str(error)})
         else:
