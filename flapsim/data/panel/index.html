@@ -6,13 +6,22 @@
 <title>Split-Flap Emulator</title>
 <style>
 /*@SHARED_CSS@*/
+header a { color: var(--ink); margin-left: 8px; }
+section.panel { margin-top: 14px; background: var(--panel); border-radius: 10px; padding: 10px 14px; }
+section.panel h2 { font-size: 13px; font-weight: 500; color: var(--muted); margin: 0 0 8px;
+  display: flex; justify-content: space-between; gap: 8px; }
+pre.console { margin: 0; height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 12px/1.45 ui-monospace, Menlo, monospace; }
+.monitor { max-height: 260px; overflow: auto; }
+.monitor td { font-family: ui-monospace, Menlo, monospace; font-size: 12px; padding: 3px 10px; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
     <h1>Split-Flap Emulator</h1>
-    <div class="meta"><span id="clock"></span><span id="status" class="pill">connecting…</span></div>
+    <div class="meta"><span id="clock"></span><span id="status" class="pill">connecting…</span><a
+      id="firmware" target="_blank" rel="noopener noreferrer" hidden>Firmware web UI</a></div>
   </header>
   <div class="frame">
     <div id="board" aria-label="Virtual display"></div>
@@ -20,6 +29,15 @@
   </div>
   <div class="tablewrap" id="modules"></div>
   <p class="meta" id="meta"></p>
+  <section class="panel">
+    <h2><span>Serial console</span><span id="serial-status"></span></h2>
+    <pre class="console" id="serial" aria-live="off"></pre>
+  </section>
+  <section class="panel">
+    <h2><span>I²C traffic</span><span id="i2c-status"></span></h2>
+    <div class="monitor"><table><thead><tr><th>guest t</th><th>bus</th><th>addr</th><th>dir</th>
+      <th>bytes</th><th>ack</th><th>end</th></tr></thead><tbody id="i2c"></tbody></table></div>
+  </section>
 </div>
 <script>
 /*@SHARED_JS@*/
@@ -57,6 +75,105 @@ async function poll() {
   setTimeout(poll, 250);
 }
 poll();
+
+const firmware = document.getElementById("firmware");
+async function links() {
+  try {
+    const response = await fetch("/run", { cache: "no-store" });
+    const value = await response.json();
+    if (response.ok && value.firmware_url) {
+      firmware.href = value.firmware_url;
+      firmware.hidden = false;
+      return;
+    }
+  } catch (error) { /* the run has not started yet */ }
+  setTimeout(links, 2000);
+}
+links();
+
+// The serial console follows serial.log; only its last lines are kept.
+const serial = document.getElementById("serial");
+const serialStatus = document.getElementById("serial-status");
+const SERIAL_LINES = 2000;
+let serialOffset = null;
+async function pollSerial() {
+  let delay = 500;
+  try {
+    const query = serialOffset === null ? "" : "?since=" + serialOffset;
+    const response = await fetch("/serial" + query, { cache: "no-store" });
+    const value = await response.json();
+    if (!response.ok) throw new Error(value.error || "HTTP " + response.status);
+    if (value.restarted) serial.textContent = "";
+    serialStatus.textContent = value.available ? "" : "no serial log yet";
+    if (value.text) {
+      const follow = serial.scrollTop + serial.clientHeight >= serial.scrollHeight - 4;
+      const lines = (serial.textContent + value.text).split("\n");
+      serial.textContent = lines.slice(-SERIAL_LINES).join("\n");
+      if (follow) serial.scrollTop = serial.scrollHeight;
+    }
+    if (value.offset > (serialOffset || 0) + 60000) delay = 0;  // still catching up
+    serialOffset = value.offset;
+  } catch (error) {
+    serialStatus.textContent = String(error.message || error);
+  }
+  setTimeout(pollSerial, delay);
+}
+pollSerial();
+
+// The I2C monitor starts at the newest record and shows the latest transactions.
+const i2c = document.getElementById("i2c");
+const i2cStatus = document.getElementById("i2c-status");
+const I2C_ROWS = 200;
+let i2cCursor = null;
+function cell(row, text) { row.append(FlapUI.el("td", null, text)); }
+function i2cRow(record) {
+  const row = FlapUI.el("tr");
+  if (record.type === "gap") {
+    cell(row, "");
+    const gap = FlapUI.el("td", "warn", "gap: " + (record.reason || "records lost"));
+    gap.colSpan = 6;
+    row.append(gap);
+    return row;
+  }
+  const start = record.events.find((e) => e.kind <= 2);
+  const bytes = record.events.filter((e) => e.kind === 5 || e.kind === 6)
+    .map((e) => (e.kind === 5 ? e.data : e.result).toString(16).padStart(2, "0")).join(" ");
+  const acks = record.events.filter((e) => "ack" in e);
+  cell(row, (Number(record.guest_ns) / 1e9).toFixed(3));
+  cell(row, String(record.bus));
+  cell(row, "0x" + record.addr.toString(16));
+  cell(row, start ? (start.kind === 0 ? "read" : "write") : "…");
+  cell(row, bytes);
+  cell(row, acks.length ? (acks.every((e) => e.ack) ? "ack" : "nack") : "");
+  cell(row, record.end);
+  return row;
+}
+async function pollI2c() {
+  let delay = 500;
+  try {
+    const query = i2cCursor === null ? "" : "?since=" + encodeURIComponent(i2cCursor);
+    const response = await fetch("/i2c" + query, { cache: "no-store" });
+    const page = await response.json();
+    if (!response.ok) throw new Error(page.error || "HTTP " + response.status);
+    if (i2cCursor === null) {
+      i2cCursor = page.latest || page.next;  // monitor from now, not from the run's start
+    } else {
+      if (page.gap) i2c.prepend(i2cRow({ type: "gap", reason: page.gap.reason }));
+      for (const record of page.records) {
+        if (record.type === "i2c" || record.type === "gap") i2c.prepend(i2cRow(record));
+      }
+      while (i2c.childElementCount > I2C_ROWS) i2c.lastElementChild.remove();
+      i2cCursor = page.next || i2cCursor;
+      if (page.more) delay = 0;
+    }
+    i2cStatus.textContent = page.stopped ? "stream stopped" : "";
+  } catch (error) {
+    i2cStatus.textContent = String(error.message || error);
+    delay = 2000;
+  }
+  setTimeout(pollI2c, delay);
+}
+pollI2c();
 </script>
 </body>
 </html>

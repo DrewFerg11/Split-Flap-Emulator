@@ -21,21 +21,33 @@ STATE = {
 }
 
 
+I2C_PAGE = {"api_version": 1, "records": [], "next": "run:7", "latest": "run:7", "more": False}
+# Control API answers for paths other than the state route: (status, JSON body).
+I2C = {}
+
+
 @pytest.fixture
 def control():
     seen = []
+    I2C.clear()
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             seen.append((self.path, self.headers.get("Host"), self.headers.get("Authorization")))
             port = self.server.server_address[1]
-            ok = (
-                self.path == "/api/emu/state"
-                and self.headers.get("Host") == f"127.0.0.1:{port}"
+            authorized = (
+                self.headers.get("Host") == f"127.0.0.1:{port}"
                 and self.headers.get("Authorization") == "Bearer " + TOKEN
             )
-            body = json.dumps(STATE if ok else {"error": "unauthorized"}).encode()
-            self.send_response(200 if ok else 401)
+            status, value = 404, {"error": "not_found"}
+            if not authorized:
+                status, value = 401, {"error": "unauthorized"}
+            elif self.path == "/api/emu/state":
+                status, value = 200, STATE
+            elif self.path in I2C:
+                status, value = I2C[self.path]
+            body = json.dumps(value).encode()
+            self.send_response(status)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -171,3 +183,102 @@ def test_panel_and_replay_share_one_self_contained_style(tmp_path, control, pane
             r"<link|<img|src=|@import|url\(|https?://(?!www\.w3\.org/2000/svg)", document
         )
     assert assemble("/*@SHARED_CSS@*/|/*@SHARED_JS@*/").count("FlapUI") > 0
+
+
+def test_serial_console_tails_the_runs_log(tmp_path, panel):
+    response, body = request(panel, "/serial")
+    assert response.status == 200
+    assert json.loads(body) == {"offset": 0, "text": "", "restarted": False, "available": False}
+    log = tmp_path / "serial.log"
+    log.write_bytes(b"x" * 70_000 + b"boot\n")
+    first = json.loads(request(panel, "/serial")[1])
+    # Without an offset, only the last chunk: a long log is not sent whole.
+    assert first["offset"] == 70_005 and first["text"].endswith("boot\n")
+    assert len(first["text"]) == 64 * 1024
+    with log.open("ab") as out:
+        out.write("Homing \u00b0\n".encode())
+    after = json.loads(request(panel, f"/serial?since={first['offset']}")[1])
+    assert after["text"] == "Homing \u00b0\n" and not after["restarted"]
+    # A shorter log was replaced by a startup retry: start over.
+    log.write_bytes(b"retry\n")
+    again = json.loads(request(panel, f"/serial?since={after['offset']}")[1])
+    assert again == {"offset": 6, "text": "retry\n", "restarted": True, "available": True}
+
+
+def test_serial_console_keeps_a_split_character_for_the_next_read(tmp_path, panel):
+    degree = "\u00b0".encode()
+    (tmp_path / "serial.log").write_bytes(b"a" * (64 * 1024 - 1) + degree + b"z")
+    first = json.loads(request(panel, "/serial?since=0")[1])
+    assert first["offset"] == 64 * 1024 - 1 and "\ufffd" not in first["text"]
+    second = json.loads(request(panel, f"/serial?since={first['offset']}")[1])
+    assert second["text"] == "\u00b0z"
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/serial?since=-1", "/serial?since=abc", "/serial?since=1&since=2", "/serial?x=1",
+     "/serial?since=" + "9" * 19, "/i2c?since=a%26b", "/i2c?since=", "/state?x=1", "/?x"],
+)  # fmt: skip
+def test_panel_queries_are_validated(tmp_path, control, panel, path):
+    write_run(tmp_path, control[0])
+    response, body = request(panel, path)
+    assert response.status == 400 and json.loads(body) == {"error": "invalid_query"}
+    assert not control[1]
+
+
+def test_i2c_monitor_pages_history_with_the_runs_token(tmp_path, control, panel):
+    port, seen = control
+    write_run(tmp_path, port)
+    I2C["/api/emu/i2c?limit=128"] = (200, I2C_PAGE)
+    I2C["/api/emu/i2c?limit=128&since=run%3A7"] = (200, {**I2C_PAGE, "records": [{"x": 1}]})
+    response, body = request(panel, "/i2c")
+    assert response.status == 200 and json.loads(body) == I2C_PAGE
+    response, body = request(panel, "/i2c?since=run:7")
+    assert json.loads(body)["records"] == [{"x": 1}]
+    assert [path for path, _, auth in seen if auth == "Bearer " + TOKEN] == [
+        "/api/emu/i2c?limit=128",
+        "/api/emu/i2c?limit=128&since=run%3A7",
+    ]
+    assert TOKEN.encode() not in body
+
+
+@pytest.mark.parametrize(
+    "answer, message",
+    [
+        ((409, {"error": "unsupported_capability"}), "start it with --i2c-history"),
+        ((409, {"error": "future_cursor"}), "HTTP 409"),
+        ((503, {"error": "journal failed"}), "HTTP 503"),
+    ],
+)
+def test_i2c_monitor_reports_unavailable_history(tmp_path, control, panel, answer, message):
+    write_run(tmp_path, control[0])
+    I2C["/api/emu/i2c?limit=128"] = answer
+    response, body = request(panel, "/i2c")
+    assert response.status == 503 and message in json.loads(body)["error"]
+
+
+@pytest.mark.parametrize(
+    "endpoint, url",
+    [
+        ("http://127.0.0.1:8080", "http://127.0.0.1:8080"),
+        ("http://example.com:8080", None),
+        ("javascript:alert(1)", None),
+        ("http://127.0.0.1:8080/x?y", None),
+        (None, None),
+    ],
+)
+def test_firmware_link_is_only_the_runs_loopback_web_ui(tmp_path, control, panel, endpoint, url):
+    write_run(tmp_path, control[0])
+    manifest = json.loads((tmp_path / "run.json").read_text())
+    (tmp_path / "run.json").write_text(json.dumps({**manifest, "endpoint": endpoint}))
+    response, body = request(panel, "/run")
+    assert response.status == 200 and json.loads(body) == {"firmware_url": url}
+
+
+def test_page_renders_firmware_output_as_text_only(tmp_path, control, panel):
+    write_run(tmp_path, control[0])
+    page = request(panel, "/")[1].decode()
+    for section in ['id="serial"', 'id="i2c"', 'id="firmware"']:
+        assert section in page
+    # Serial and I2C data come from the firmware: never parsed as HTML.
+    assert "innerHTML" not in page and "insertAdjacentHTML" not in page
