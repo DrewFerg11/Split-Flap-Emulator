@@ -85,6 +85,18 @@ serial:
     regex: '^(?!(?:"(?:[^"\\]|\\.)*"|[^"])*?[{,]"(?P<key>(?:mode|row1|row2|center|delay|stepSize|name|mdns|otaPass|timezone|dateFormat|timeFormat|ssid|password|mqtt_server|mqtt_port|mqtt_user|mqtt_pass|wireAddresses|wireOffsets|sdaPin|sclPin|wire1Addresses|wire1Offsets|sda2Pin|scl2Pin|magnetPosition|displayOffset|stepsPerRot|maxVel|charset))":(?:"(?:[^"\\]|\\.)*"|[^"])*?,"(?P=key)":)(?:\{"mode":"(?:single|multiple|dual\-single|dual\-multiple|accuracy)"(?:,"(?:row1|row2|center|delay|stepSize)":(?:"(?:(?:(?!(?i:error|failed|panic|abort|exception))[^"\\\[\]]|(?:\\"|\\\\|\\b|\\f|\\n|\\r|\\t|\\u0000)))*"|(?:\-)?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e(?:\-)?[1-9][0-9]*)?|(?:true|false|null)))*\}|\{"(?:(?:name|mdns|otaPass|timezone|dateFormat|timeFormat|ssid|password|mqtt_server|mqtt_port|mqtt_user|mqtt_pass|wireAddresses|wireOffsets|sdaPin|sclPin|wire1Addresses|wire1Offsets|sda2Pin|scl2Pin|magnetPosition|displayOffset|stepsPerRot|maxVel|charset)":(?:"(?:(?:(?!(?i:error|failed|panic|abort|exception))[^"\\\[\]]|(?:\\"|\\\\|\\b|\\f|\\n|\\r|\\t|\\u0000)))*"|(?:\-)?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e(?:\-)?[1-9][0-9]*)?|(?:true|false|null))|mode":(?:\-)?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e(?:\-)?[1-9][0-9]*)?)(?:,"(?:(?:name|mdns|otaPass|timezone|dateFormat|timeFormat|ssid|password|mqtt_server|mqtt_port|mqtt_user|mqtt_pass|wireAddresses|wireOffsets|sdaPin|sclPin|wire1Addresses|wire1Offsets|sda2Pin|scl2Pin|magnetPosition|displayOffset|stepsPerRot|maxVel|charset)":(?:"(?:(?:(?!(?i:error|failed|panic|abort|exception))[^"\\\[\]]|(?:\\"|\\\\|\\b|\\f|\\n|\\r|\\t|\\u0000)))*"|(?:\-)?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e(?:\-)?[1-9][0-9]*)?|(?:true|false|null))|mode":(?:\-)?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:e(?:\-)?[1-9][0-9]*)?))*\})\[ *[0-9]+\]\[E\]\[(?:P(?:r(?:e(?:f(?:e(?:r(?:e(?:n(?:c(?:e(?:s(?:\.(?:c(?:p(?:p(?::(?:5(?:0(?:\](?:\ (?:b(?:e(?:g(?:i(?:n(?:\((?:\)(?::(?:\ )?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?)?$'
 
 expected_failures:
+  - issue: DrewFerg11/Split-Flap-Emulator#94
+    reason: >-
+      Boot homing in a 16-module dual-bus run can stall when the #14 scheduling artifact times out
+      a coil write during homing: v1.4.1 latches that module's hasErrored flag, after which its
+      hall reads return false and further failed writes are silent. Expected only when the run
+      also logged a #14 write timeout (requires_serial); a homing timeout without one, or any
+      model anomaly, still fails.
+    scenario: release-smoke-16
+    step: 3
+    action: wait_display
+    error: timeout
+    requires_serial: '^Error writing data to module \d+, error code: 5$'
   - issue: DrewFerg11/Split-Flap-Display#54
     reason: >-
       Item 1 race: GET /settings intermittently returns compiled defaults although the saved

@@ -139,7 +139,9 @@ class ScenarioExecutor:
                 result["status"] = "passed"
             except BaseException as error:
                 result.update(status="failed", error=str(error) or type(error).__name__)
-                entry = self.expected_failure(error, result, deadline, context.deadline)
+                entry = self.expected_failure(
+                    error, result, deadline, context.deadline, context.out
+                )
                 if entry is None:
                     raise
                 result.update(status="xfail", known_issue=entry["issue"])
@@ -163,7 +165,7 @@ class ScenarioExecutor:
             "known_issues": self.known_issue_summary(),
         }
 
-    def expected_failure(self, error, result, step_deadline, run_deadline):
+    def expected_failure(self, error, result, step_deadline, run_deadline, out):
         """Only assertion failures and the step's own timeout can match a baseline entry."""
         if self.known_issues is None or not isinstance(error, (ExecutionFailed, TimeoutError)):
             return None
@@ -177,12 +179,19 @@ class ScenarioExecutor:
         )
         if isinstance(error, TimeoutError) and not step_timed_out:
             return None
+        try:
+            # Read directly: the run deadline may already have passed, which context.serial()
+            # would turn into a new error.
+            serial = (out / "serial.log").read_text(errors="replace")
+        except OSError:
+            serial = ""
         return self.known_issues.expected_failure(
             self.document["name"],
             result["index"],
             result["action"],
             result["error"],
             step_timed_out=step_timed_out,
+            serial=serial,
         )
 
     def known_issue_summary(self):

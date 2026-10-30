@@ -1264,6 +1264,55 @@ def golden_baseline():
     return load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
 
 
+def requiring(regex):
+    entry = {**baseline().failures[0], "requires_serial": regex}
+    for key in ("compiled", "requires"):
+        entry.pop(key, None)
+    entry["error"] = "timeout"
+    return baseline(expected_failures=[entry])
+
+
+@pytest.mark.parametrize("serial, expected", [(WRITE_TIMEOUT, True), ("", False)])
+def test_an_expected_failure_can_require_its_cause_in_the_serial_log(context, serial, expected):
+    # #94: a boot-homing timeout is expected only when the run logged a #14 write timeout.
+    (context.out / "serial.log").write_text(FIXTURE["serial"] + serial + "\n")
+    steps = [{"wait_display": {"text": "HELLOXXX"}, "timeout": 0.1}, {"assert_no_errors": {}}]
+    known = requiring(r"^Error writing data to module \d+, error code: 5$")
+    engine = executor(steps, firmware_sha256=GOLDEN_SHA256, known_issues=known)
+    if not expected:
+        with pytest.raises(TimeoutError):
+            engine.execute(context)
+        return
+    result = engine.execute(context)
+    assert [s["status"] for s in result["steps"]] == ["xfail", "skipped_known_issue"]
+    described = known.describe()["expected_failures"][0]
+    assert described["requires_serial"].startswith("^Error writing") and "requires" not in described
+
+
+@pytest.mark.parametrize("regex", ["error code: 5", "^.*$", "^(unclosed$"])
+def test_required_serial_lines_are_anchored_narrow_regexes(regex):
+    with pytest.raises(ValueError, match="requires_serial"):
+        requiring(regex)
+
+
+def test_the_golden_homing_expectation_needs_a_logged_write_timeout():
+    known = golden_baseline()
+    for serial, step, timed_out, expected in [
+        (WRITE_TIMEOUT, 3, True, True),
+        ("", 3, True, False),
+        (READ_TIMEOUT, 3, True, False),
+        (WRITE_TIMEOUT.replace("code: 5", "code: 2"), 3, True, False),
+        (WRITE_TIMEOUT, 3, False, False),
+        (WRITE_TIMEOUT, 4, True, False),
+    ]:
+        entry = known.expected_failure(
+            "release-smoke-16", step, "wait_display", "x", step_timed_out=timed_out, serial=serial
+        )
+        assert bool(entry) is expected, (serial, step, timed_out)
+        if entry:
+            assert entry["issue"] == "DrewFerg11/Split-Flap-Emulator#94"
+
+
 def test_only_logged_write_timeouts_excuse_stalls():
     known = golden_baseline()
     assert known.excused_stalls("") == (0, [])
