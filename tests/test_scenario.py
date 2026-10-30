@@ -2,6 +2,7 @@
 
 import copy
 import json
+import re
 import signal
 import subprocess
 import threading
@@ -867,6 +868,70 @@ def test_request_body_head_splice_rejects_other_prefixes_and_continuations(conte
         "[a]" + body + head,
     ]:
         assert known.tolerated_serial(bad) is None, bad
+
+
+@pytest.mark.parametrize("name", ["golden", "native"])
+def test_a_newline_alone_can_split_the_diagnostic_at_every_cut(name):
+    # The other task's body went out before, and only its newline landed inside the diagnostic
+    # (#105): the head and the tail are each a bare line of the one fresh-NVS diagnostic. Every
+    # line the serial check would flag, at every cut, must be tolerated.
+    known = load_known_issues(Path(__file__).parents[1] / f"baselines/v1.4.1-{name}.yaml")
+    diagnostic = "[ 38085][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
+    flagged = re.compile(r"\[E\]|\b(error|failed|panic|abort|exception)\b", re.IGNORECASE)
+    seen = 0
+    for cut in range(1, len(diagnostic)):
+        for line in (diagnostic[:cut], diagnostic[cut:]):
+            if flagged.search(line):
+                seen += 1
+                assert known.tolerated_serial(line), f"cut {cut}: {line!r}"
+    assert seen > 60  # most cuts leave a flagged line on each side
+
+
+@pytest.mark.parametrize("name", ["golden", "native"])
+def test_the_bare_diagnostic_fragments_reject_anything_else(name):
+    known = load_known_issues(Path(__file__).parents[1] / f"baselines/v1.4.1-{name}.yaml")
+    for bad in [
+        "[ 38085][E][Prex",  # a character the diagnostic does not have
+        "[ 38085][E][WiFi",  # another error line, cut short
+        "[ 38085][E][Preferences.cpp:51] begin(): nvs_open failed: NOT_FOUND",
+        "[E][Pref",  # no timestamp
+        "[ 38085][E",  # not yet the marker the serial check flags
+        "[ 38085][E]x",
+        "[ 38085][E][Preferences.cpp:50] begin(): nvs_open failed: INVALID_HANDLE",
+        "_open failed: NOT_FOUNX",
+        "xopen failed: NOT_FOUND",
+        "_open failed: NOT_FOUND!",
+    ]:
+        assert known.tolerated_serial(bad) is None, bad
+    adversarial = [
+        "[ 1][E][Preferences.cpp:50] begin(): " + "{" * 20000,
+        "_open failed: NOT_" + "x" * 20000,
+        "[ 1][E][" + "P" * 20000,
+    ]
+    started = time.monotonic()
+    for line in adversarial:
+        known.tolerated_serial(line)
+    assert time.monotonic() - started < 2
+
+
+def test_the_split_lines_seen_in_ci_are_tolerated():
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    # Raw serial from the container smoke-16 run on #103: the body went out ahead of one
+    # diagnostic and its newline landed a few diagnostics later, inside "Preferences".
+    for line in [
+        '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}'
+        "[ 38084][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
+        "[ 38085][E][Pref",
+        "erences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
+        # The golden smoke-16 run on #98: the request log and body spliced inside "nvs_open".
+        "[ 38075][E][Preferences.cpp:50] begin(): nvsReceived text update request",
+        "_open failed: NOT_FOUND",  # the body between them is a line of its own, never an error
+        # The native runs on #100 and #101: a reset or cut left a bare head.
+        "[ 25075][E][Preferences.cpp:50] begin(): nvs_o",
+        "[ 24486][E][Preferen",
+        "[ 43925][E]",  # the golden control-16 run on this PR: cut right after the marker
+    ]:
+        assert known.tolerated_serial(line), line
 
 
 def test_sfd86_entries_are_the_generated_request_shape_patterns():
