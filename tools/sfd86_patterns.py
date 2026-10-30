@@ -11,7 +11,7 @@ entries accept only that request log, or a body (or the start of one) in these s
 
 Strings may not contain brackets (the diagnostic starts with "[") or an error keyword, and use only
 the escapes ArduinoJson 7.4.3 writes. Arrays (e.g. "words") are not accepted, so a body with one is
-still reported.
+still reported, and so is one that names a member twice (ArduinoJson merges repeated keys).
 
 python -m tools.sfd86_patterns prints the four regexes, and --write puts them in both baselines;
 tests/test_scenario.py checks both baselines carry exactly these.
@@ -130,6 +130,14 @@ SETTING = _members(SETTINGS_KEYS, SETTINGS_NUMBERS)
 SETTINGS_BODY = seq(words("{"), SETTING, _more(SETTING), words("}"))
 BODY = alt(TEXT_BODY, SETTINGS_BODY)
 REQUEST_LOG = seq(words("Received "), words(*ENDPOINTS), words(" update request"))
+# ArduinoJson's deserializer merges a repeated key into its first member (the last value wins),
+# so a logged body never names a member twice. Each pattern checks this once, from the line's start:
+# neither the diagnostic nor a request log has a '"', so walking whole strings and other characters
+# finds only the body's own keys (a "{" or "," then a string then ":"), never text inside a value.
+# Only the keys the bodies accept are captured, so a line can start at most that many inner scans.
+_TOKEN = r'(?:"(?:[^"\\]|\\.)*"|[^"])'
+_KEY = words("mode", *TEXT_KEYS, *SETTINGS_KEYS).full
+DISTINCT_KEYS = rf'(?!{_TOKEN}*?[{{,]"(?P<key>{_KEY})":{_TOKEN}*?,"(?P=key)":)'
 ERROR = r"\[ *[0-9]+\]\[E\]"
 TIMESTAMP = ERROR + r"\["
 
@@ -148,7 +156,7 @@ def tail():
     head = re.escape("][E][" + DIAGNOSTIC_HEAD)
     resume = rf"(?:\[? *[0-9]{{1,10}}{head}|(?:{_suffixes('][E][' + DIAGNOSTIC_HEAD)})?)"
     return (
-        rf"^(?!{ERROR})(?:{REQUEST_LOG.prefix}|{BODY.prefix}){resume}"
+        rf"^{DISTINCT_KEYS}(?!{ERROR})(?:{REQUEST_LOG.prefix}|{BODY.prefix}){resume}"
         + re.escape(DIAGNOSTIC[len(DIAGNOSTIC_HEAD) :])
         + "$"
     )
@@ -158,7 +166,7 @@ def head():
     # The diagnostic up to some character, then the rest of the other task's line: its request
     # log or a body (or the start of one).
     return (
-        f"^{TIMESTAMP}{words(DIAGNOSTIC).prefix}"
+        f"^{DISTINCT_KEYS}{TIMESTAMP}{words(DIAGNOSTIC).prefix}"
         rf"(?:{REQUEST_LOG.full}|(?=\{{){BODY.prefix})$"
     )
 
@@ -175,12 +183,13 @@ def middle():
     # Inside the timestamp: among its spaces, or among its digits.
     stamp = rf"(?: *{token} *[0-9]+| *[0-9]+{token}[0-9]*){re.escape(rest)}"
     where = rf"\[(?:{stamp}| *[0-9]+(?:" + "|".join(splits) + "))"
-    return f"^(?={where}$)(?:[^{{}}]*{BODY.full}[^{{}}]*|[^{{}}]*{REQUEST_LOG.full}[^{{}}]*)$"
+    shape = rf"[^{{}}]*{BODY.full}[^{{}}]*|[^{{}}]*{REQUEST_LOG.full}[^{{}}]*"
+    return f"^{DISTINCT_KEYS}(?={where}$)(?:{shape})$"
 
 
 def request_body():
     # A whole body, then the diagnostic's head up to "begin(): " (the last cut tail() resumes).
-    return f"^{BODY.full}{TIMESTAMP}{words(DIAGNOSTIC_HEAD).prefix}$"
+    return f"^{DISTINCT_KEYS}{BODY.full}{TIMESTAMP}{words(DIAGNOSTIC_HEAD).prefix}$"
 
 
 def patterns():

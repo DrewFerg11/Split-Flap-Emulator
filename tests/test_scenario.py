@@ -889,6 +889,7 @@ LOGGED_BODIES = [
     '{"name":"raw\x01"}',  # other control characters are written raw
     '{"maxVel":1.5e-7,"stepsPerRot":-2.25e9,"name":null}',  # exponents; NaN is null
     '{"maxVel":0.05,"displayOffset":0}',
+    r'{"name":"a,\"ssid\":","ssid":"b"}',  # key-like text in a value is not a key
 ]
 OTHER_BODIES = [
     "{not-json}",
@@ -911,6 +912,10 @@ OTHER_BODIES = [
     '{"stepsPerRot":-2\u0662}',
     '{"maxVel":NaN}',
     "{}",
+    # ArduinoJson merges a repeated key, so a logged body names each member once.
+    '{"ssid":"a","ssid":"b"}',
+    '{"mode":3,"name":"x","mode":4}',
+    '{"mode":"single","row1":"A","row2":"B","row1":"C"}',
 ]
 TAILS = [
     "8055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
@@ -943,6 +948,15 @@ def test_sfd86_splices_reject_other_braced_text(body):
         assert known.tolerated_serial(line) is None, line
 
 
+def test_sfd86_splices_reject_a_repeated_key_before_the_cut():
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    body = '{"ssid":"a","ssid":"b"}'
+    for cut in range(body.index(',"ssid":') + len(',"ssid":'), len(body) + 1):
+        assert known.tolerated_serial("[ 38172][E][Pref" + body[:cut]) is None, cut
+        for tail in TAILS:
+            assert known.tolerated_serial(body[:cut] + tail) is None, (cut, tail)
+
+
 def test_a_request_body_spliced_inside_the_diagnostic_is_recognised():
     known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     # Raw line from CI40994611944, golden smoke-16: the body lands inside "[ timestamp][E]".
@@ -960,6 +974,7 @@ def test_a_request_body_spliced_inside_the_diagnostic_is_recognised():
         DIAGNOSTIC.replace("][E]", "]{not-json}[E]"),
         DIAGNOSTIC.replace("][E]", '][{"mode":"bogus"}E]'),
         DIAGNOSTIC.replace("][E]", '][{"ssid":"a"}{"ssid":"b"}E]'),
+        DIAGNOSTIC.replace("][E]", '][{"ssid":"a","ssid":"b"}E]'),
         DIAGNOSTIC.replace("NOT_FOUND", '{"ssid":"a"}NOT_FOUN'),
         DIAGNOSTIC.replace("NOT_FOUND", "INVALID_HANDLE").replace("[E][", '[E][{"ssid":"a"}'),
         DIAGNOSTIC.replace("38055", '{"ssid":"a"}'),
