@@ -940,6 +940,32 @@ def test_sfd86_splices_reject_other_braced_text(body):
         assert known.tolerated_serial(line) is None, line
 
 
+def test_a_request_body_spliced_inside_the_diagnostic_is_recognised():
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    # Raw line from CI40994611944, golden smoke-16: the body lands inside "[ timestamp][E]".
+    observed = (
+        '[ 38085][{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}'
+        "E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
+    )
+    assert known.tolerated_serial(observed)["issue"] == "DrewFerg11/Split-Flap-Display#86"
+    for body in LOGGED_BODIES:
+        for cut in range(1, len(DIAGNOSTIC)):
+            line = DIAGNOSTIC[:cut] + body + DIAGNOSTIC[cut:]
+            assert known.tolerated_serial(line), (cut, body)
+    LOG = "Received text update request"
+    for line in [
+        DIAGNOSTIC.replace("][E]", "]{not-json}[E]"),
+        DIAGNOSTIC.replace("][E]", '][{"mode":"bogus"}E]'),
+        DIAGNOSTIC.replace("][E]", '][{"ssid":"a"}{"ssid":"b"}E]'),
+        DIAGNOSTIC.replace("NOT_FOUND", '{"ssid":"a"}NOT_FOUN'),
+        DIAGNOSTIC.replace("NOT_FOUND", "INVALID_HANDLE").replace("[E][", '[E][{"ssid":"a"}'),
+        DIAGNOSTIC.replace("38055", '{"ssid":"a"}'),
+        # Two insertions: a body and a request log.
+        DIAGNOSTIC.replace("][E]", '][{"ssid":"a"}E]').replace("begin", LOG + "begin"),
+    ]:
+        assert known.tolerated_serial(line) is None, line
+
+
 def test_sfd86_splices_accept_only_the_logged_request_logs():
     known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
     diagnostic = "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"

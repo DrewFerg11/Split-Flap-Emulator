@@ -162,12 +162,18 @@ def head():
 
 
 def middle():
-    # The request log, without its newline, inside the diagnostic, which then finishes unchanged.
-    splits = [
-        re.escape(DIAGNOSTIC[:cut]) + REQUEST_LOG.full + re.escape(DIAGNOSTIC[cut:])
-        for cut in range(len(DIAGNOSTIC))
-    ]
-    return f"^{TIMESTAMP}(?:" + "|".join(splits) + ")$"
+    # The other task's request log or whole body, without its newline, anywhere inside the
+    # diagnostic after its "[", which then finishes unchanged. The lookahead pins where the
+    # insertion sits, with the insertion as an opaque token: the diagnostic has no braces and no
+    # "Received", so the token spans exactly the body (first "{" to last "}") or the log. The
+    # main pattern then checks that token's shape once, instead of at every split point.
+    rest = "][E][" + DIAGNOSTIC
+    token = r"(?:Received [a-z]+ update request|\{.*\})"
+    splits = [re.escape(rest[:cut]) + token + re.escape(rest[cut:]) for cut in range(len(rest))]
+    # Inside the timestamp: among its spaces, or among its digits.
+    stamp = rf"(?:\s*{token}\s*\d+|\s*\d+{token}\d*){re.escape(rest)}"
+    where = rf"\[(?:{stamp}|\s*\d+(?:" + "|".join(splits) + "))"
+    return f"^(?={where}$)(?:[^{{}}]*{BODY.full}[^{{}}]*|[^{{}}]*{REQUEST_LOG.full}[^{{}}]*)$"
 
 
 def request_body():
