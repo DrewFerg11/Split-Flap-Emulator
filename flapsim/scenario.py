@@ -198,7 +198,7 @@ class ScenarioExecutor:
         if self.known_issues is None:
             return None
         expected = [
-            {k: v for k, v in e.items() if k != "compiled"}
+            self.known_issues.public(e)
             for e in self.known_issues.failures
             if e["scenario"] == self.document["name"]
         ]

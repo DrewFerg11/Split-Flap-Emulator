@@ -1282,8 +1282,13 @@ def test_an_expected_failure_can_require_its_cause_in_the_serial_log(context, se
     if not expected:
         with pytest.raises(TimeoutError):
             engine.execute(context)
+        # The run manifest still records the summary, without the compiled requirement.
+        summary = engine.known_issue_summary()
+        json.dumps(summary)
+        assert "requires" not in summary["expected_failures_not_observed"][0]
         return
     result = engine.execute(context)
+    json.dumps(result)
     assert [s["status"] for s in result["steps"]] == ["xfail", "skipped_known_issue"]
     described = known.describe()["expected_failures"][0]
     assert described["requires_serial"].startswith("^Error writing") and "requires" not in described

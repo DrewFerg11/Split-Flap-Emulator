@@ -176,6 +176,11 @@ class KnownIssues:
                 return entry
         return None
 
+    @staticmethod
+    def public(entry):
+        """An entry as evidence records it: without its compiled regexes."""
+        return {k: v for k, v in entry.items() if k not in {"compiled", "requires"}}
+
     def expected_failure(self, scenario, step, action, error, *, step_timed_out, serial=""):
         for entry in self.failures:
             if (entry["scenario"], entry["step"], entry["action"]) != (scenario, step, action):
@@ -197,11 +202,8 @@ class KnownIssues:
             "source": self.source,
             "firmware_sha256": self.firmware_sha256,
             "firmware_source_commit": self.firmware_source_commit,
-            "serial": [{k: v for k, v in e.items() if k != "compiled"} for e in self.serial],
-            "expected_failures": [
-                {k: v for k, v in e.items() if k not in {"compiled", "requires"}}
-                for e in self.failures
-            ],
+            "serial": [self.public(e) for e in self.serial],
+            "expected_failures": [self.public(e) for e in self.failures],
         }
 
 
