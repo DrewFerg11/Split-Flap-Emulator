@@ -410,6 +410,8 @@ recovery); and container smoke, lifecycle and native-in-image verification on am
 and arm64. That completes the cross-backend, packaging, container and lifecycle
 acceptance this plan required, and #20 is complete.
 
-Later intermittent red lanes on main come from the #14 emulator scheduling artifact
-(see #79 and #94), not from the control API. The live panel (#21) and `flapsim serve`
+Later intermittent red lanes on main come from separately tracked causes, not from the
+control API's merged scope: the #14 emulator scheduling artifact (#79, #94), a boot-time
+model-channel timeout in the power probe (#104), the SFD#86 splice of the fresh-NVS diagnostic
+(#105) and an arm64 container deadline (#106). The live panel (#21) and `flapsim serve`
 build on this API without changing it.
