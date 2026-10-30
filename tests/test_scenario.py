@@ -2,6 +2,7 @@
 
 import copy
 import json
+import re
 import signal
 import subprocess
 import threading
@@ -872,17 +873,18 @@ def test_request_body_head_splice_rejects_other_prefixes_and_continuations(conte
 @pytest.mark.parametrize("name", ["golden", "native"])
 def test_a_newline_alone_can_split_the_diagnostic_at_every_cut(name):
     # The other task's body went out before, and only its newline landed inside the diagnostic
-    # (#105): the head and the tail are each a bare line of the one fresh-NVS diagnostic.
+    # (#105): the head and the tail are each a bare line of the one fresh-NVS diagnostic. Every
+    # line the serial check would flag, at every cut, must be tolerated.
     known = load_known_issues(Path(__file__).parents[1] / f"baselines/v1.4.1-{name}.yaml")
     diagnostic = "[ 38085][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
-    for cut in range(len(diagnostic)):
-        head, tail = diagnostic[:cut], diagnostic[cut:]
-        # Only a line that is flagged as an error needs the baseline: a head from the "[ ts][E]"
-        # on, a tail that keeps "failed" or "NOT_FOUND" or the "[E]" marker.
-        if cut >= len("[ 38085][E]") and head:
-            assert known.tolerated_serial(head), f"head {head!r}"
-        if tail and cut >= len("[ 38085][E][Preferences.cpp:50] begin(): nvs_"):
-            assert known.tolerated_serial(tail), f"tail {tail!r}"
+    flagged = re.compile(r"\[E\]|\b(error|failed|panic|abort|exception)\b", re.IGNORECASE)
+    seen = 0
+    for cut in range(1, len(diagnostic)):
+        for line in (diagnostic[:cut], diagnostic[cut:]):
+            if flagged.search(line):
+                seen += 1
+                assert known.tolerated_serial(line), f"cut {cut}: {line!r}"
+    assert seen > 60  # most cuts leave a flagged line on each side
 
 
 @pytest.mark.parametrize("name", ["golden", "native"])
