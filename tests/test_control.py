@@ -75,6 +75,105 @@ def reply_once(peer, response):
         peer.sendall(response)
 
 
+def test_the_client_times_every_valid_exchange_and_the_failed_attempt():
+    hardware, state = recorded_snapshot()
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    client = SnapshotClient(parent, hardware)
+    assert client.latency() is None
+    worker = threading.Thread(target=reply_once, args=(child, json.dumps(state).encode()))
+    worker.start()
+    try:
+        client.snapshot()
+        worker.join(1)
+        first = client.latency()
+        assert first["exchanges"] == 1 and 0 <= first["slowest_ms"] < 500
+        # The peer is gone: the next attempt fails after the one valid exchange.
+        with pytest.raises(Unavailable):
+            client.snapshot()
+        assert client.failure["exchanges"] == 1
+        assert client.failure["slowest_ms"] == first["slowest_ms"]
+    finally:
+        client.close()
+        child.close()
+
+
+def test_a_timed_out_exchange_records_how_long_it_waited():
+    hardware, _ = recorded_snapshot()
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    client = SnapshotClient(parent, hardware)
+    try:
+        with pytest.raises(Unavailable):
+            client.snapshot()
+        assert client.failure["error"] == "TimeoutError"
+        # The 500 ms socket deadline, as measured; no reply ever counted.
+        assert 400 <= client.failure["elapsed_ms"] < 5000
+        assert "exchanges" not in client.failure and client.latency() is None
+    finally:
+        client.close()
+        child.close()
+
+
+def test_a_failure_before_the_exchange_carries_no_elapsed_time_from_an_earlier_one():
+    hardware, state = recorded_snapshot()
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    client = SnapshotClient(parent, hardware)
+    worker = threading.Thread(target=reply_once, args=(child, json.dumps(state).encode()))
+    worker.start()
+    command = {"id": 1, "expected_revision": 0, "bus": 0, "addr": 32, "patch": {"flap_offset": 5}}
+
+    def unwritable(entry):
+        raise OSError("injected audit failure")
+
+    try:
+        client.snapshot()
+        worker.join(1)
+        with pytest.raises(Unavailable):
+            client.dispatch(command, unwritable)
+        assert client.failure["stage"] == "intent_audit"
+        assert "elapsed_ms" not in client.failure  # that attempt never reached the model
+        assert client.failure["exchanges"] == 1  # the earlier valid reply still counts
+    finally:
+        client.close()
+        child.close()
+
+
+def test_the_control_metadata_reports_the_exchange_timing_while_running_and_after(tmp_path):
+    hardware, state = recorded_snapshot()
+    server = ControlServer(0, tmp_path, hardware)
+    parent, peer = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    worker = threading.Thread(target=reply_once, args=(peer, json.dumps(state).encode()))
+    worker.start()
+    try:
+        assert "channel_latency" not in server.metadata()
+        server.attach(parent)
+        assert request(server)[0] == 200
+        worker.join(1)
+        live = server.metadata()["channel_latency"]
+        assert live["exchanges"] == 1 and live["slowest_ms"] >= 0
+        server.detach()
+        assert server.metadata()["channel_latency"] == live
+    finally:
+        server.close()
+
+
+def test_the_run_summary_prints_the_control_channel_record(tmp_path, monkeypatch, capsys):
+    from tools import summarize_run
+
+    channel = {
+        "channel_failure": {
+            "stage": "model_exchange",
+            "error": "TimeoutError",
+            "elapsed_ms": 501.2,
+        },
+        "channel_latency": {"exchanges": 3, "slowest_ms": 212.4},
+    }
+    manifest = tmp_path / "run.json"
+    manifest.write_text(json.dumps({"mode": "qemu", "passed": False, "control": channel}))
+    monkeypatch.setattr("sys.argv", ["summarize_run", str(manifest)])
+    summarize_run.main()
+    assert f"control channel {json.dumps(channel)}" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("failure", ["timeout", "truncated", "invalid", "forged", "eof"])
 def test_channel_failure_is_bounded_and_does_not_reuse_a_late_reply(failure):
     hardware, state = recorded_snapshot()

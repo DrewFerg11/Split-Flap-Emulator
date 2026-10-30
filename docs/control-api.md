@@ -304,6 +304,13 @@ by the client. The private dispatcher validates the resulting geometry independe
 blocks on a slow consumer; transport failure disables that connection without
 stopping firmware. Only one request is in flight, with a 500 ms host deadline;
 a timeout closes the channel so a late reply cannot satisfy another request.
+The run's control metadata records how long the model took (`channel_latency`: the
+number of valid exchanges and the slowest, in milliseconds), and a channel failure
+adds the failed attempt's wait (`elapsed_ms`, present only when the attempt reached
+the model exchange) to the same figures, so a slow model can be told from a stuck one
+(#104). The figures belong to one connection: a later attach replaces them, and until
+its first valid reply the metadata keeps showing the previous connection's. A reply that
+is not valid JSON is not counted.
 This narrow packet protocol replaces the plan's tentative framed-stream proposal
 for this Linux-only implementation. Streaming must use a separate channel so
 telemetry cannot starve command replies.

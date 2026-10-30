@@ -4,6 +4,7 @@ import copy
 import json
 import socket
 import threading
+import time
 
 from flapsim.state import validate_state
 
@@ -24,6 +25,10 @@ class SnapshotClient:
         self.closed = False
         self.failure = None
         self.power = None
+        # How long the model took to answer (#104): every valid exchange, and the last attempt.
+        self.exchanges = 0
+        self.slowest = 0.0
+        self.elapsed = None
         connection.settimeout(0.5)
 
     def close(self):
@@ -47,12 +52,25 @@ class SnapshotClient:
                 raise ValueError("invalid model coils")
         return state
 
+    def latency(self):
+        """Exchange timing for the run's evidence, or None before the first valid reply."""
+        if not self.exchanges:
+            return None
+        return {"exchanges": self.exchanges, "slowest_ms": round(self.slowest * 1000, 1)}
+
     def _exchange(self, request):
-        self.connection.sendall(request)
-        data, _, flags, _ = self.connection.recvmsg(MAX_SNAPSHOT)
+        started = time.monotonic()
+        try:
+            self.connection.sendall(request)
+            data, _, flags, _ = self.connection.recvmsg(MAX_SNAPSHOT)
+        finally:
+            self.elapsed = time.monotonic() - started
         if not data or flags & socket.MSG_TRUNC:
             raise ValueError("incomplete or oversized model reply")
-        return json.loads(data)
+        reply = json.loads(data)
+        self.exchanges += 1
+        self.slowest = max(self.slowest, self.elapsed)
+        return reply
 
     def snapshot(self):
         return self.dispatch()
@@ -72,6 +90,8 @@ class SnapshotClient:
                 frozen = copy.deepcopy(self.power.frozen)
                 return (frozen, "off") if with_power else frozen
             stage = "intent_audit"
+            # The timing of this attempt only: a failure before the exchange has none.
+            self.elapsed = None
             try:
                 if command is not None:
                     journal({"phase": "intent", "command": command})
@@ -113,6 +133,10 @@ class SnapshotClient:
                     "stage": stage,
                     "error": type(error).__name__,
                     "detail": str(error)[:160],
+                    # The failing attempt, and the earlier replies' timing, to tell a slow model
+                    # from a stuck one (#104).
+                    **({"elapsed_ms": round(self.elapsed * 1000, 1)} if self.elapsed else {}),
+                    **(self.latency() or {}),
                 }
                 self.closed = True
                 self.connection.close()
