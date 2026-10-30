@@ -28,6 +28,7 @@ from flapsim.scenario import (
     validate_step,
 )
 from flapsim.state import validate_state
+from tools import sfd86_patterns
 from tools.verify_boot import GOLDEN
 
 GOLDEN_SHA256 = GOLDEN["sha256"]
@@ -866,6 +867,82 @@ def test_request_body_head_splice_rejects_other_prefixes_and_continuations(conte
         "[a]" + body + head,
     ]:
         assert known.tolerated_serial(bad) is None, bad
+
+
+def test_sfd86_entries_are_the_generated_request_shape_patterns():
+    for name in ("golden", "native"):
+        known = load_known_issues(Path(__file__).parents[1] / f"baselines/v1.4.1-{name}.yaml")
+        regexes = [e["regex"] for e in known.serial if e["issue"].endswith("#86")]
+        assert regexes == sfd86_patterns.patterns(), name
+
+
+# Bodies as v1.4.1 logs them (ArduinoJson, compact): scenarios, the firmware's web UI and the
+# settings schema's value types, including a brace-formatted default and an escaped password.
+LOGGED_BODIES = [
+    '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}',
+    '{"mode":"accuracy","delay":2,"stepSize":1}',
+    '{"wireOffsets":"-210,-160,-110,-60,10,60,110,160"}',
+    '{"wire1Addresses":"","wire1Offsets":""}',
+    '{"dateFormat":"{dd}-{mm}-{yy}","maxVel":15.5,"mqtt_port":1884,"mode":3}',
+    r'{"password":"a\"b\\c"}',
+]
+OTHER_BODIES = [
+    "{not-json}",
+    '{"mode":"bogus"}',
+    '{"mode":"single","words":["HELLO"]}',
+    '{"row1":"HELLO"}',
+    '{"unknown":"x"}',
+    '{"mode": "single"}',
+    '{"mode":"single",}',
+    '{"mode":"single","row1":"panic"}',
+    '{"ssid":tru}',
+    r'{"name":"x\q"}',
+    "{}",
+]
+TAILS = [
+    "8055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
+    " 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
+    "p:50] begin(): nvs_open failed: NOT_FOUND",
+    "nvs_open failed: NOT_FOUND",
+]
+
+
+@pytest.mark.parametrize("body", LOGGED_BODIES)
+def test_sfd86_splices_accept_logged_request_bodies(body):
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    assert known.tolerated_serial(body + "[ 38172][E][Preferences")
+    assert known.tolerated_serial("[ 38172][E][Preferences.cp" + body)
+    # A splice can cut the body anywhere; only its start precedes or follows the diagnostic.
+    for cut in range(1, len(body) + 1):
+        assert known.tolerated_serial("[ 38172][E][Pref" + body[:cut]), cut
+        for tail in TAILS:
+            assert known.tolerated_serial(body[:cut] + tail), (cut, tail)
+
+
+@pytest.mark.parametrize("body", OTHER_BODIES)
+def test_sfd86_splices_reject_other_braced_text(body):
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    for line in [
+        body + "[ 38172][E][Preferences",
+        "[ 38172][E][Preferences.cp" + body,
+        *(body + tail for tail in TAILS),
+    ]:
+        assert known.tolerated_serial(line) is None, line
+
+
+def test_sfd86_splices_accept_only_the_logged_request_logs():
+    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    diagnostic = "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
+    for endpoint in ("text", "settings"):
+        log = f"Received {endpoint} update request"
+        assert known.tolerated_serial("[ 38055][E][Preferences.cpp:5" + log)
+        assert known.tolerated_serial(diagnostic.replace("NOT_FOUND", log + "NOT_FOUND"))
+        for cut in range(len(log) + 1):
+            assert known.tolerated_serial(log[:cut] + TAILS[2]), cut
+    for other in ["Received mqtt update request", "Received text update request!", "hello"]:
+        assert known.tolerated_serial("[ 38055][E][Preferences.cpp:5" + other) is None
+        assert known.tolerated_serial(diagnostic.replace("NOT_FOUND", other + "NOT_FOUND")) is None
+        assert known.tolerated_serial(other + TAILS[2]) is None
 
 
 DIAGNOSTIC = "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
