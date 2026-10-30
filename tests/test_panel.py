@@ -203,6 +203,11 @@ def test_serial_console_tails_the_runs_log(tmp_path, panel):
     log.write_bytes(b"retry\n")
     again = json.loads(request(panel, f"/serial?since={after['offset']}")[1])
     assert again == {"offset": 6, "text": "retry\n", "restarted": True, "available": True}
+    # The retry unlinks the log before recreating it: a poll in the gap clears the old text too.
+    log.unlink()
+    gap = json.loads(request(panel, f"/serial?since={again['offset']}")[1])
+    assert gap == {"offset": 0, "text": "", "restarted": True, "available": False}
+    assert not json.loads(request(panel, "/serial?since=0")[1])["restarted"]
 
 
 def test_serial_console_keeps_a_split_character_for_the_next_read(tmp_path, panel):

@@ -119,7 +119,8 @@ def fetch_i2c(run_dir, since=None):
 
 def read_serial(run_dir, offset=None):
     """New serial output after a byte offset. Without one, the last chunk of the log. A log
-    shorter than the offset was replaced (a QEMU startup retry), so reading starts over."""
+    shorter than the offset was replaced (a QEMU startup retry), so reading starts over; so does a
+    missing one, which the retry unlinks before recreating it."""
     path = run_dir / "serial.log"
     try:
         with path.open("rb") as log:
@@ -130,7 +131,7 @@ def read_serial(run_dir, offset=None):
             log.seek(offset)
             data = log.read(SERIAL_CHUNK)
     except FileNotFoundError:
-        return {"offset": 0, "text": "", "restarted": False, "available": False}
+        return {"offset": 0, "text": "", "restarted": bool(offset), "available": False}
     except OSError as error:
         raise PanelError(f"serial log unreadable: {error}") from error
     # Keep a multibyte character split by the chunk end for the next read.
