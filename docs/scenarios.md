@@ -81,6 +81,25 @@ The manifest (`status`, `known_issues`), `report.md`, JUnit (`skipped` with the
 issue link) and the Actions job summary all show the baseline prominently.
 Remove entries as their issues are fixed, and delete the file when it is empty.
 
+### Retiring the SFD#54 and SFD#86 entries
+
+Split-Flap Display fixed the settings race on its `main` (`ef65640`, SFD#91: one locked
+Preferences handle, and unset keys no longer logged). That also removes the fresh-NVS
+diagnostic that SFD#86 splices into. Measured natively without any baseline, with seeds
+1-3 on each layout:
+
+| Firmware | `release-smoke-8` / `-16`, strict | Fresh-NVS diagnostic lines (smoke-16) |
+|---|---|---|
+| golden v1.4.1 | 0/4 pass (lost settings writes time out) | 28,363 |
+| `ef65640` | 6/6 pass | 0 |
+
+No firmware release contains the fix yet, so the golden image and its baseline stay as
+they are. The nightly `firmware-main-strict` job (`ci-nightly.yml`) builds firmware
+`main` and runs both release smokes with no baseline. When a release carrying the fix
+becomes the golden image and that job is green, remove the SFD#54 and SFD#86 entries,
+along with `tools/sfd86_patterns.py` and its tests. The #14 entries stay until the
+scheduling artifact itself is fixed.
+
 ### Native-only setup and MQTT steps
 
 Native scenarios that declare `modes: [native]` may also prepare the device:
