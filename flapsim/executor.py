@@ -77,14 +77,22 @@ class Executor(Protocol):
 
 def excused(counters, known_issues, serial):
     """Whether a baseline explains every model fault: only drum stalls, each matched by a logged
-    known I2C timeout (#14). Returns the tolerated-stall record, or None."""
+    known I2C timeout (#14). Returns the tolerated-stall record, or None.
+
+    v1.4.1 logs only a module's first failed write per boot (SplitFlapModule::hasErrored), so
+    one logged timeout can stand for several lost writes. Once the run has logged one, stalls
+    the model saw follow an address-only write (lost_write_stalls, #79) are explained as well."""
     stalls = counters["stalls"]
     if counters["anomalies"] or not stalls or known_issues is None:
         return None
     allowance, issues = known_issues.excused_stalls(serial)
-    if stalls > allowance:
+    lost = counters.get("lost_write_stalls", 0)
+    if not allowance or stalls > max(allowance, lost):
         return None
-    return {"stalls": stalls, "allowance": allowance, "issues": issues}
+    record = {"stalls": stalls, "allowance": allowance, "issues": issues}
+    if lost:
+        record["lost_write_stalls"] = lost
+    return record
 
 
 @dataclass

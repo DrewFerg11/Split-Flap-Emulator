@@ -124,6 +124,12 @@ def validate_counters(value):
         type(value.get(k)) is not int or value[k] < 0 for k in COUNTERS
     ):
         raise ValueError("missing or invalid model counters")
+    # Stalls the model attributes to a lost coil write (#79); reported only when nonzero.
+    if "lost_write_stalls" in value and (
+        type(value["lost_write_stalls"]) is not int
+        or not 1 <= value["lost_write_stalls"] <= value["stalls"]
+    ):
+        raise ValueError("invalid model lost_write_stalls")
 
 
 def read_settlement(out: Path, hardware):
@@ -233,7 +239,10 @@ def validate_state(state, hardware, *, require_settled=True):
     )
     if state.get("text") != text or state.get("rows") != rows:
         raise ValueError("model text/row data does not match module order")
-    if any(sum(m["counters"][k] for m in modules) != state["counters"][k] for k in COUNTERS):
+    if any(
+        sum(m["counters"].get(k, 0) for m in modules) != state["counters"].get(k, 0)
+        for k in COUNTERS | {"lost_write_stalls"}
+    ):
         raise ValueError("model aggregate counters do not match module counters")
     if state["settled"] != (not any(m["energized"] for m in modules)):
         raise ValueError("model settled flag does not match coils")

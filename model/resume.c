@@ -27,8 +27,14 @@ static bool counters(struct json_object *object, FsCounters *out) {
         if (!integer(value, keys[i], 0, INT64_MAX, &parts[i]))
             return false;
     }
-    *out = (FsCounters){(uint64_t)parts[0], (uint64_t)parts[1], (uint64_t)parts[2],
-                        (uint64_t)parts[3], (uint64_t)parts[4], (uint64_t)parts[5]};
+    /* Written only when nonzero, and each one is also a stall. */
+    int64_t lost = 0;
+    if (json_object_object_get_ex(value, "lost_write_stalls", NULL) &&
+        !integer(value, "lost_write_stalls", 1, parts[2], &lost))
+        return false;
+    *out =
+        (FsCounters){(uint64_t)parts[0], (uint64_t)parts[1], (uint64_t)parts[2], (uint64_t)parts[3],
+                     (uint64_t)parts[4], (uint64_t)parts[5], (uint64_t)lost};
     return true;
 }
 

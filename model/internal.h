@@ -10,6 +10,9 @@
 #define FS_TICK_NS 100000000LL
 typedef struct {
     uint64_t forward, backward, stalls, writes, reads, anomalies;
+    /* Stalls at the first coil write after an address-only write: the pattern before it was lost
+     * (#79). Reported only when nonzero, so evidence without lost writes is unchanged. */
+    uint64_t lost_write_stalls;
 } FsCounters;
 /* Injected faults (#19); all zero for a healthy module. */
 enum {
@@ -37,7 +40,8 @@ typedef struct {
     bool energized, active_low;
     uint16_t latch;
     bool observed_nack, observed_block, observed_power;
-    bool powered; /* false while the module rail is down; the model starts powered */
+    bool powered;    /* false while the module rail is down; the model starts powered */
+    bool write_lost; /* an address-only write finished since the last committed coil write */
     uint64_t blocked_steps, nacks, power_losses;
     FsCounters counters;
     FsFaults faults;

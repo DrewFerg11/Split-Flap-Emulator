@@ -2,6 +2,10 @@
 #include "internal.h"
 
 void fs_pcf_finish(FsBus *bus, FsModule *module) {
+    /* A bus scan sends only the address, and so does a coil write whose data an I2C timeout
+     * dropped (#14: the driver queues the data for an interrupt that never runs). */
+    if (bus->direction != 0 && !bus->writes)
+        module->write_lost = true;
     if (bus->writes && bus->writes != 2)
         fs_anomaly(module, "write length must be two bytes");
     if (bus->reads && bus->reads != 2)

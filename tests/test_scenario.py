@@ -1282,29 +1282,37 @@ def test_explains_stalls_must_be_a_non_negative_integer(value):
         baseline(serial=[entry])
 
 
-def stalled(context, stalls, anomalies=0):
+def stalled(context, stalls, anomalies=0, lost=0):
     state = copy.deepcopy(FIXTURE["states"][1])
     for counters in [state["counters"], state["modules"][0]["counters"]]:
         counters.update(stalls=stalls, anomalies=anomalies)
+        if lost:
+            counters["lost_write_stalls"] = lost
     write_state(context.out, state)
 
 
 @pytest.mark.parametrize(
-    "lines,stalls,anomalies,tolerated",
+    "lines,stalls,anomalies,lost,tolerated",
     [
-        ([WRITE_TIMEOUT], 1, 0, True),
-        ([WRITE_TIMEOUT, WRITE_TIMEOUT], 2, 0, True),
-        ([WRITE_TIMEOUT], 2, 0, False),  # more stalls than lost writes
-        ([WRITE_TIMEOUT], 1, 1, False),  # anomalies are never excused
-        ([READ_TIMEOUT], 1, 0, False),  # a lost read moves no coil
-        ([], 1, 0, False),
+        ([WRITE_TIMEOUT], 1, 0, 0, True),
+        ([WRITE_TIMEOUT, WRITE_TIMEOUT], 2, 0, 0, True),
+        ([WRITE_TIMEOUT], 2, 0, 0, False),  # more stalls than lost writes
+        ([WRITE_TIMEOUT], 1, 1, 0, False),  # anomalies are never excused
+        ([READ_TIMEOUT], 1, 0, 0, False),  # a lost read moves no coil
+        ([], 1, 0, 0, False),
+        # v1.4.1 logs only a module's first failed write per boot; the model saw both (#79).
+        ([WRITE_TIMEOUT], 2, 0, 2, True),
+        ([WRITE_TIMEOUT], 3, 0, 2, False),  # one stall followed no lost write
+        ([WRITE_TIMEOUT], 2, 1, 2, False),
+        ([READ_TIMEOUT], 2, 0, 2, False),  # the firmware reported no lost write
+        ([], 2, 0, 2, False),
     ],
 )
 def test_stalls_are_known_only_when_logged_write_timeouts_explain_them(
-    context, lines, stalls, anomalies, tolerated
+    context, lines, stalls, anomalies, lost, tolerated
 ):
     (context.out / "serial.log").write_text(FIXTURE["serial"] + "".join(f"{x}\n" for x in lines))
-    stalled(context, stalls, anomalies)
+    stalled(context, stalls, anomalies, lost)
     step = [{"assert_no_errors": {"fresh_nvs": True, "default_missing_bus1": True}}]
     with pytest.raises(ExecutionFailed, match="model faults|unexpected serial error"):
         executor(step).execute(context)  # without a baseline, every fault fails
@@ -1319,6 +1327,7 @@ def test_stalls_are_known_only_when_logged_write_timeouts_explain_them(
         "stalls": stalls,
         "allowance": len(lines),
         "issues": ["DrewFerg11/Split-Flap-Emulator#14"],
+        **({"lost_write_stalls": lost} if lost else {}),
     }
     assert result["known_issues"]["applied"]
     engine.verify_final(context.out, context.hardware)

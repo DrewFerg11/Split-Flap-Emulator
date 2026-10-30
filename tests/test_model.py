@@ -111,7 +111,8 @@ class Model:
             },
             "start_angles": list(angles),
         }
-        self.config = write_model_config(normalize_hardware(document), out)
+        self.hardware = normalize_hardware(document)
+        self.config = write_model_config(self.hardware, out)
         assert library.fs_model_init(str(self.config).encode()) == 0, library.fs_model_error()
 
     def event(self, kind, bus=0, addr=32):
@@ -203,6 +204,103 @@ def test_reverse_wrap_and_opposite_phase_stall(make_model):
         "reads": 0,
         "anomalies": 0,
     }
+
+
+def address_only_write(model, bus=0, addr=32):
+    # What the module sees of a write whose data an I2C timeout dropped (#14), or of a bus scan.
+    assert model.event(1, bus, addr) == 0
+    model.event(3, bus, addr)
+
+
+def test_a_stall_after_an_address_only_write_is_attributed_to_the_lost_write(make_model):
+    model = make_model(angles=(100, 200), buses=(0, 0))
+    model.write(COILS[0])
+    address_only_write(model)  # COILS[1] was lost
+    model.write(COILS[2])
+    model.write(COILS[2], addr=33)
+    model.write(COILS[0], addr=33)  # an opposite-phase jump with no lost write
+    model.write(OFF)
+    model.write(OFF, addr=33)
+    state = model.state()
+    lost, other = state["modules"]
+    assert lost["counters"]["stalls"] == 1 and lost["counters"]["lost_write_stalls"] == 1
+    assert other["counters"]["stalls"] == 1 and "lost_write_stalls" not in other["counters"]
+    assert state["counters"]["stalls"] == 2 and state["counters"]["lost_write_stalls"] == 1
+    assert model.activity()["counters"]["lost_write_stalls"] == 1
+    assert validate_state(state, model.hardware) is state
+
+
+def test_only_the_next_coil_write_can_be_a_lost_write_stall(make_model):
+    model = make_model()
+    address_only_write(model)  # a boot scan before the first energize
+    model.write(COILS[0])
+    model.write(COILS[1])
+    address_only_write(model)
+    model.write(COILS[2])  # delivered after all: the motor steps
+    model.write(COILS[0])  # a later opposite-phase jump is not the lost write's
+    model.read()
+    assert model.event(1, 0, 33) != 0  # an absent address is never selected
+    model.event(3, 0, 33)
+    model.write(OFF)
+    counters = model.state()["modules"][0]["counters"]
+    assert counters["stalls"] == 1 and "lost_write_stalls" not in counters
+    assert "lost_write_stalls" not in model.state()["counters"]
+
+
+def lost_write_stall(model):
+    model.write(COILS[0])
+    address_only_write(model)
+    model.write(COILS[2])
+    model.write(OFF)
+
+
+@pytest.mark.parametrize("value", [0, 2, True, 1.0, None])
+def test_state_rejects_inconsistent_lost_write_stalls(make_model, value):
+    model = make_model()
+    lost_write_stall(model)
+    state = model.state()
+    for counters in [state["counters"], state["modules"][0]["counters"]]:
+        counters["lost_write_stalls"] = value
+    with pytest.raises(ValueError, match="lost_write_stalls"):
+        validate_state(state, model.hardware)
+    state = model.state()
+    del state["counters"]["lost_write_stalls"]
+    with pytest.raises(ValueError, match="aggregate counters"):
+        validate_state(state, model.hardware)
+
+
+def test_native_resume_keeps_lost_write_stalls(make_model):
+    model = make_model()
+    lost_write_stall(model)
+    assert resume(model, model.now + 1_000_000) == 0, model.lib.fs_model_error()
+    reset = model.timeline()[-1]
+    assert reset["event"] == "guest_reset"
+    assert reset["modules"][0]["counters"]["lost_write_stalls"] == 1
+    assert reset["counters"]["lost_write_stalls"] == 1
+    validate_state(reset, model.hardware)
+
+
+@pytest.mark.parametrize("value", [0, 2, "1"])
+def test_native_resume_rejects_forged_lost_write_stalls(make_model, value):
+    model = make_model()
+    lost_write_stall(model)
+    model.lib.fs_model_close()
+    timeline = model.out / "timeline.jsonl"
+    records = timeline.read_text().splitlines()
+    last = json.loads(records[-1])
+    last["modules"][0]["counters"]["lost_write_stalls"] = value
+    timeline.write_text("\n".join([*records[:-1], json.dumps(last)]) + "\n")
+    assert model.lib.fs_model_resume(str(model.config).encode(), model.now) != 0
+
+
+def test_reads_never_count_as_lost_writes(make_model):
+    model = make_model()
+    model.write(COILS[0])
+    model.event(0)
+    model.event(3)
+    model.write(COILS[2])
+    model.write(OFF)
+    assert "lost_write_stalls" not in model.state()["modules"][0]["counters"]
 
 
 def test_latch_byte_order_and_readback(make_model):

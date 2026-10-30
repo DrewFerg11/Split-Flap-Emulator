@@ -175,6 +175,12 @@ Counters per module and in aggregate are `forward`, `backward`, `stalls`,
 transactions. Malformed lengths, data without the matching START, direction
 errors and START while open are diagnosed. The golden boot records one backward
 transition per module; the regression gate requires zero stalls and anomalies.
+A stall at the first coil write after a zero-byte write also counts in
+`lost_write_stalls`, which appears only when nonzero. Bus scans send no data
+bytes, and neither does a coil write whose data an emulated I2C timeout dropped
+([#14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14)): the
+pattern before that stall never arrived
+([#79](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/79)).
 
 The adapter prepares the physical model before `qemu_init`, registers reset and
 virtual-time timer hooks after QEMU's subsystems exist, and keeps the original
