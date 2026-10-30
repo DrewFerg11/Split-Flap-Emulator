@@ -72,7 +72,11 @@ tracked in [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15).
 - `expected_failures` entries match one scenario name, step number and action,
   plus either an error regex or `timeout` (the step's own deadline only, never
   the run deadline). A match marks that step `xfail`, marks the remaining steps
-  `skipped_known_issue`, and the run passes as **passed_with_known_issues**.
+  `skipped_known_issue`, and the run passes as **passed_with_known_issues**. An entry may
+  add `requires_serial`, an anchored regex: it then applies only when some line of the run's
+  serial log matches, i.e. when the failure's known cause was observed. The golden baseline
+  uses it for the 16-module boot-homing timeout that follows a #14 write timeout
+  ([#94](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/94)).
 - Expectations are non-strict because the race is intermittent. Entries that
   did not occur are listed as "not observed" in the report.
 - Runtime failures, QEMU exits, model stalls and anomalies are never tolerated.

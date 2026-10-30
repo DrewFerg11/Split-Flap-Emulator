@@ -104,7 +104,12 @@ class KnownIssues:
         self.failures = []
         for index, entry in enumerate(document.get("expected_failures") or []):
             where = f"{source}.expected_failures[{index}]"
-            _fields(entry, where, {"issue", "reason", "scenario", "step", "action", "error"})
+            _fields(
+                entry,
+                where,
+                {"issue", "reason", "scenario", "step", "action", "error"},
+                {"requires_serial"},
+            )
             if type(entry["step"]) is not int or entry["step"] < 1:
                 raise ValueError(f"{where}.step must be a positive integer")
             if entry["action"] not in ACTIONS:
@@ -126,6 +131,12 @@ class KnownIssues:
                     "compiled": compiled,
                 }
             )
+            if "requires_serial" in entry:
+                # Expected only when the run also logged this line: the failure's known cause.
+                self.failures[-1]["requires_serial"] = entry["requires_serial"]
+                self.failures[-1]["requires"] = _regex(
+                    entry["requires_serial"], f"{where}.requires_serial"
+                )
         if not self.serial and not self.failures:
             raise ValueError(f"{source}: an empty baseline should be deleted, not loaded")
 
@@ -165,9 +176,18 @@ class KnownIssues:
                 return entry
         return None
 
-    def expected_failure(self, scenario, step, action, error, *, step_timed_out):
+    @staticmethod
+    def public(entry):
+        """An entry as evidence records it: without its compiled regexes."""
+        return {k: v for k, v in entry.items() if k not in {"compiled", "requires"}}
+
+    def expected_failure(self, scenario, step, action, error, *, step_timed_out, serial=""):
         for entry in self.failures:
             if (entry["scenario"], entry["step"], entry["action"]) != (scenario, step, action):
+                continue
+            if "requires" in entry and not any(
+                entry["requires"].fullmatch(line) for line in serial.splitlines()
+            ):
                 continue
             if entry["compiled"] is None:
                 if step_timed_out:
@@ -182,10 +202,8 @@ class KnownIssues:
             "source": self.source,
             "firmware_sha256": self.firmware_sha256,
             "firmware_source_commit": self.firmware_source_commit,
-            "serial": [{k: v for k, v in e.items() if k != "compiled"} for e in self.serial],
-            "expected_failures": [
-                {k: v for k, v in e.items() if k != "compiled"} for e in self.failures
-            ],
+            "serial": [self.public(e) for e in self.serial],
+            "expected_failures": [self.public(e) for e in self.failures],
         }
 
 
