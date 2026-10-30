@@ -37,6 +37,8 @@ SETTINGS_KEYS = (
 )  # fmt: skip
 SETTINGS_NUMBERS = ("mode",)  # an integer setting, unlike /text's "mode" string
 KEYWORDS = r"(?!(?i:error|failed|panic|abort|exception))"
+# Digits and padding are ASCII, as the firmware prints them: Python's \d and \s also match
+# other scripts' digits and spaces.
 
 
 class Pattern:
@@ -100,12 +102,12 @@ STRING = seq(words('"'), star(alt(raw(rf'{KEYWORDS}[^"\\\[\]]', ""), ESCAPES)), 
 # TextFormatter::writeFloat: [-]integral[.decimals][e[-]exponent]; NaN and infinities are null.
 # writeInteger never pads, so only the decimals may start with zeros, and a written exponent is
 # never zero.
-INTEGER = raw(r"(?:0|[1-9]\d*)", r"(?:0|[1-9]\d*)?")
+INTEGER = raw(r"(?:0|[1-9][0-9]*)", r"(?:0|[1-9][0-9]*)?")
 NUMBER = seq(
     optional(words("-")),
     INTEGER,
-    optional(seq(words("."), raw(r"\d+", r"\d*"))),
-    optional(seq(words("e"), optional(words("-")), raw(r"[1-9]\d*", r"(?:[1-9]\d*)?"))),
+    optional(seq(words("."), raw(r"[0-9]+", r"[0-9]*"))),
+    optional(seq(words("e"), optional(words("-")), raw(r"[1-9][0-9]*", r"(?:[1-9][0-9]*)?"))),
 )
 SCALAR = alt(STRING, NUMBER, words("true", "false", "null"))
 
@@ -128,7 +130,7 @@ SETTING = _members(SETTINGS_KEYS, SETTINGS_NUMBERS)
 SETTINGS_BODY = seq(words("{"), SETTING, _more(SETTING), words("}"))
 BODY = alt(TEXT_BODY, SETTINGS_BODY)
 REQUEST_LOG = seq(words("Received "), words(*ENDPOINTS), words(" update request"))
-ERROR = r"\[\s*\d+\]\[E\]"
+ERROR = r"\[ *[0-9]+\]\[E\]"
 TIMESTAMP = ERROR + r"\["
 
 
@@ -144,7 +146,7 @@ def tail():
     # The diagnostic resumes anywhere up to "nvs_open", after the other task's partial line: the
     # start of its request log or of a body. Cuts inside the timestamp keep its digits.
     head = re.escape("][E][" + DIAGNOSTIC_HEAD)
-    resume = rf"(?:\[?\s*\d{{1,10}}{head}|(?:{_suffixes('][E][' + DIAGNOSTIC_HEAD)})?)"
+    resume = rf"(?:\[? *[0-9]{{1,10}}{head}|(?:{_suffixes('][E][' + DIAGNOSTIC_HEAD)})?)"
     return (
         rf"^(?!{ERROR})(?:{REQUEST_LOG.prefix}|{BODY.prefix}){resume}"
         + re.escape(DIAGNOSTIC[len(DIAGNOSTIC_HEAD) :])
@@ -171,8 +173,8 @@ def middle():
     token = r"(?:Received [a-z]+ update request|\{.*\})"
     splits = [re.escape(rest[:cut]) + token + re.escape(rest[cut:]) for cut in range(len(rest))]
     # Inside the timestamp: among its spaces, or among its digits.
-    stamp = rf"(?:\s*{token}\s*\d+|\s*\d+{token}\d*){re.escape(rest)}"
-    where = rf"\[(?:{stamp}|\s*\d+(?:" + "|".join(splits) + "))"
+    stamp = rf"(?: *{token} *[0-9]+| *[0-9]+{token}[0-9]*){re.escape(rest)}"
+    where = rf"\[(?:{stamp}| *[0-9]+(?:" + "|".join(splits) + "))"
     return f"^(?={where}$)(?:[^{{}}]*{BODY.full}[^{{}}]*|[^{{}}]*{REQUEST_LOG.full}[^{{}}]*)$"
 
 

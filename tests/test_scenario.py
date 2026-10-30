@@ -906,6 +906,9 @@ OTHER_BODIES = [
     '{"maxVel":1e+7}',  # ArduinoJson writes no "+" exponent
     '{"maxVel":01}',  # nor leading zeros
     '{"maxVel":1e07}',
+    '{"maxVel":1\u0662}',  # digits are ASCII; Python's \d would take Arabic-Indic ones
+    '{"maxVel":1.\u0662}',
+    '{"stepsPerRot":-2\u0662}',
     '{"maxVel":NaN}',
     "{}",
 ]
