@@ -391,3 +391,27 @@ These are review and CI gates, not a claim that the issue is merged or closed.
 Keep #20 open until the telemetry, scenario and final acceptance PRs have merged
 and their final-head checks pass. Runtime stochastic mutation and electrical faults
 remain separate #19 scope.
+
+## Final acceptance
+
+Every slice has merged: state (#34, #37), mechanics (#36), reset (#43), controller
+power (#51), runtime speed (#53), runtime faults (#54), I²C history and WebSocket
+telemetry (#78), declarative scenario controls (#80) and installed-package, image and
+lifecycle acceptance (#81). #81's final CI exposed one UART reset-framing case in
+amd64 installed runtime-controls acceptance; its follow-up (#89) merged as `113cc7d`.
+
+CI on that commit ([run 40112147620](https://github.com/DrewFerg11/Split-Flap-Emulator/actions/runs/40112147620))
+passed all 12 jobs: fast checks; native golden and sanitizer lanes (control and
+mechanics across reset, declarative controls, deterministic faults and recovery,
+runtime speed, controller power and checkpoint resume, bounded WebSocket cleanup, the
+golden scenarios); every QEMU lane, including control-8 and control-16 (live state,
+mechanics, pause and reset, power, WebSocket cleanup, declarative controls, fault
+recovery); and container smoke, lifecycle and native-in-image verification on amd64
+and arm64. That completes the cross-backend, packaging, container and lifecycle
+acceptance this plan required, and #20 is complete.
+
+Later intermittent red lanes on main come from separately tracked causes, not from the
+control API's merged scope: the #14 emulator scheduling artifact (#79, #94), a boot-time
+model-channel timeout in the power probe (#104), the SFD#86 splice of the fresh-NVS diagnostic
+(#105) and an arm64 container deadline (#106). The live panel (#21) and `flapsim serve`
+build on this API without changing it.
