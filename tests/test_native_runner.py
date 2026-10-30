@@ -407,14 +407,14 @@ def test_source_build_timeout_stops_the_whole_build_tree(monkeypatch, tmp_path):
 
 
 def test_control_admission_stops_before_child_but_http_join_follows_child(native_args, monkeypatch):
-    from flapsim import control, runner
+    from flapsim import control, runner_native
 
     native_args.control_port = 0
     events, services = [], []
     attach, close, stop = (
         control.ControlServer.attach,
         control.ControlServer.close,
-        runner.stop_group,
+        runner_native.stop_group,
     )
 
     def attached(self, *args, **kwargs):
@@ -432,7 +432,7 @@ def test_control_admission_stops_before_child_but_http_join_follows_child(native
 
     monkeypatch.setattr(control.ControlServer, "attach", attached)
     monkeypatch.setattr(control.ControlServer, "close", closed)
-    monkeypatch.setattr(runner, "stop_group", stopped)
+    monkeypatch.setattr(runner_native, "stop_group", stopped)
     # NativePower owns the actual child with control enabled.
     monkeypatch.setattr("flapsim.power.stop_group", stopped)
     assert run(native_args) == 0

@@ -1,7 +1,9 @@
-"""Runner-owned control service; firmware HTTP remains a separate endpoint."""
+"""Runner-owned control service; firmware HTTP remains a separate endpoint.
+
+Command schemas live in control_commands and the private model channel in control_channel.
+"""
 
 import asyncio
-import copy
 import hmac
 import json
 import os
@@ -12,8 +14,9 @@ import time
 import uuid
 from contextlib import contextmanager, nullcontext
 
-from flapsim.faults import FAULT_SUPPORT, validate_faults
-from flapsim.state import MAX_CONTROL_ID, MECHANICS, validate_state
+from flapsim.control_channel import SnapshotClient, Unavailable
+from flapsim.control_commands import strict_json, validate_command, validate_operation
+from flapsim.faults import FAULT_SUPPORT
 
 CAPABILITIES = {
     "snapshot": True,
@@ -25,7 +28,6 @@ CAPABILITIES = {
     "i2c_history": False,
     "stream": False,
 }
-MAX_SNAPSHOT = 64 * 1024
 
 
 def check_port(port, *, telemetry=False):
@@ -50,10 +52,6 @@ def check_port(port, *, telemetry=False):
             ) from error
 
 
-class Unavailable(RuntimeError):
-    pass
-
-
 def accepts_authority(hosts, origins, port):
     """Accept equivalent HTTP default-port authorities, never foreign/duplicate headers."""
     allowed = {f"127.0.0.1:{port}"}
@@ -64,191 +62,6 @@ def accepts_authority(hosts, origins, port):
         and hosts[0] in allowed
         and (not origins or (len(origins) == 1 and origins[0] in {"http://" + h for h in allowed}))
     )
-
-
-class SnapshotClient:
-    """One request in flight. A timeout poisons the channel so replies cannot be misattributed."""
-
-    def __init__(self, connection, hardware):
-        self.connection = connection
-        self.hardware = hardware
-        self.lock = threading.Lock()
-        self.closed = False
-        self.failure = None
-        self.power = None
-        connection.settimeout(0.5)
-
-    def close(self):
-        # Close admission immediately, including handlers that already captured
-        # this client but are still uploading a body. An admitted request may
-        # finish under the lock before its transport is closed.
-        self.closed = True
-        with self.lock:
-            self.connection.close()
-
-    def _validate_snapshot(self, state):
-        validate_state(state, self.hardware, require_settled=False)
-        if type(state.get("guest_resets")) is not int or state["guest_resets"] < 0:
-            raise ValueError("invalid model reset count")
-        for actual in state["modules"]:
-            if (
-                type(actual.get("coils")) is not int
-                or actual["coils"] != (actual["latch"] >> 1) & 15
-                or actual["energized"] != bool(actual["coils"])
-            ):
-                raise ValueError("invalid model coils")
-        return state
-
-    def _exchange(self, request):
-        self.connection.sendall(request)
-        data, _, flags, _ = self.connection.recvmsg(MAX_SNAPSHOT)
-        if not data or flags & socket.MSG_TRUNC:
-            raise ValueError("incomplete or oversized model reply")
-        return json.loads(data)
-
-    def snapshot(self):
-        return self.dispatch()
-
-    def view(self):
-        return self.dispatch(with_power=True)
-
-    def dispatch(self, command=None, journal=None, *, with_power=False):
-        if not self.lock.acquire(blocking=False):
-            raise Unavailable("model request already in progress")
-        try:
-            if self.closed:
-                raise Unavailable("model channel is unavailable")
-            if self.power is not None and self.power.state == "off":
-                if command is not None:
-                    return {"error": "controller_off"}
-                frozen = copy.deepcopy(self.power.frozen)
-                return (frozen, "off") if with_power else frozen
-            stage = "intent_audit"
-            try:
-                if command is not None:
-                    journal({"phase": "intent", "command": command})
-                request = (
-                    b"FLAPSIM_STATE/1"
-                    if command is None
-                    else (b"FLAPSIM_MECH/1 " + json.dumps(command, separators=(",", ":")).encode())
-                )
-                stage = "model_exchange"
-                result = self._exchange(request)
-                stage = "reply_validation"
-                if command is not None and isinstance(result, dict) and set(result) == {"error"}:
-                    if result["error"] not in {
-                        "module_not_found",
-                        "invalid_mechanics",
-                        "revision_conflict",
-                        "model_busy",
-                        "stale_or_reused_id",
-                        "revision_exhausted",
-                        "backend_unavailable",
-                        "controller_off",
-                    }:
-                        raise ValueError("invalid model rejection")
-                else:
-                    self._validate_snapshot(result)
-                    if (
-                        command is not None
-                        and result.get("last_operation", {}).get("command") != command
-                    ):
-                        raise ValueError("model reply does not identify the command")
-                if command is not None:
-                    stage = "result_audit"
-                    journal({"phase": "result", "command": command, "result": result})
-                if with_power:
-                    return result, self.power.state if self.power else "on"
-                return result
-            except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
-                self.failure = {
-                    "stage": stage,
-                    "error": type(error).__name__,
-                    "detail": str(error)[:160],
-                }
-                self.closed = True
-                self.connection.close()
-                if command is not None:
-                    try:
-                        journal(
-                            {
-                                "phase": "unknown",
-                                "command": command,
-                                "stage": stage,
-                                "error": type(error).__name__,
-                                "channel": "closed",
-                            }
-                        )
-                    except (OSError, ValueError, TypeError, KeyError, RecursionError):
-                        # The audit sink itself may be broken; never invent a durable outcome.
-                        pass
-                # An intent without a result is also unknown, never automatically retried.
-                raise Unavailable("model reply unavailable") from error
-        finally:
-            self.lock.release()
-
-
-def strict_json(data):
-    def pairs(items):
-        result = {}
-        for key, value in items:
-            if key in result:
-                raise ValueError("duplicate JSON field")
-            result[key] = value
-        return result
-
-    def constant(value):
-        raise ValueError("non-finite JSON value")
-
-    return json.loads(data, object_pairs_hook=pairs, parse_constant=constant)
-
-
-def validate_command(value, bus, addr):
-    if not isinstance(value, dict) or set(value) != {"id", "expected_revision", "patch"}:
-        raise ValueError("expected id, expected_revision and patch")
-    for key, lo, hi in [("id", 1, MAX_CONTROL_ID), ("expected_revision", 0, MAX_CONTROL_ID - 1)]:
-        if type(value[key]) is not int or not lo <= value[key] <= hi:
-            raise ValueError("invalid " + key)
-    patch = value["patch"]
-    if not isinstance(patch, dict) or not patch or set(patch) - (MECHANICS | {"faults"}):
-        raise ValueError("empty or unknown mechanics fields")
-    for key, part in patch.items():
-        if key == "faults":
-            validate_faults(part, partial=True)
-        elif key == "sensor_polarity":
-            if part not in ("active-high", "active-low"):
-                raise ValueError("invalid sensor polarity")
-        elif type(part) is not int or not 0 <= part <= 1000000:
-            raise ValueError("mechanics require literal integers in range")
-    return {**value, "bus": bus, "addr": addr}
-
-
-def validate_operation(kind, value, hardware, *, bus=None, addr=None):
-    """One typed command schema for HTTP and declarative scenario callers."""
-    if kind == "mechanics":
-        if (
-            type(bus) is not int
-            or type(addr) is not int
-            or (bus, addr)
-            not in {(module["bus"], module["addr"]) for module in hardware["modules"]}
-        ):
-            raise ValueError("module_not_found")
-        return validate_command(value, bus, addr)
-    if kind not in {"reset", "power", "speed"}:
-        raise ValueError("unknown control operation")
-    from flapsim.speed import valid_speed
-
-    if (
-        not isinstance(value, dict)
-        or set(value)
-        != ({"id", "speed"} if kind == "speed" else {"id", "on"} if kind == "power" else {"id"})
-        or type(value["id"]) is not int
-        or not 1 <= value["id"] <= MAX_CONTROL_ID
-        or (kind == "power" and type(value["on"]) is not bool)
-        or (kind == "speed" and not valid_speed(value["speed"]))
-    ):
-        raise ValueError("invalid_command")
-    return copy.deepcopy(value)
 
 
 class ControlServer:
@@ -806,3 +619,17 @@ def channel(service):
             )
         finally:
             service.detach()
+
+
+# Callers and tests import these from here.
+__all__ = [
+    "ControlServer",
+    "SnapshotClient",
+    "Unavailable",
+    "accepts_authority",
+    "channel",
+    "check_port",
+    "strict_json",
+    "validate_command",
+    "validate_operation",
+]

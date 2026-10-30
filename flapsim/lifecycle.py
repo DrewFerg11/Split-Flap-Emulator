@@ -4,7 +4,7 @@ import json
 import socket
 import time
 
-from flapsim.control import Unavailable
+from flapsim.control_channel import Unavailable
 
 
 def qmp_commands(path, commands):

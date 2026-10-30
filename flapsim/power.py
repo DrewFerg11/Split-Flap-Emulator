@@ -6,7 +6,7 @@ import struct
 import threading
 import time
 
-from flapsim.control import Unavailable
+from flapsim.control_channel import Unavailable
 from flapsim.lifecycle import qmp_commands, qmp_reset
 from flapsim.process import start_time, stop_group
 
