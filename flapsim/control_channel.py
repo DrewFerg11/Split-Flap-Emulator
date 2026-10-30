@@ -90,6 +90,8 @@ class SnapshotClient:
                 frozen = copy.deepcopy(self.power.frozen)
                 return (frozen, "off") if with_power else frozen
             stage = "intent_audit"
+            # The timing of this attempt only: a failure before the exchange has none.
+            self.elapsed = None
             try:
                 if command is not None:
                     journal({"phase": "intent", "command": command})

@@ -113,6 +113,30 @@ def test_a_timed_out_exchange_records_how_long_it_waited():
         child.close()
 
 
+def test_a_failure_before_the_exchange_carries_no_elapsed_time_from_an_earlier_one():
+    hardware, state = recorded_snapshot()
+    parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    client = SnapshotClient(parent, hardware)
+    worker = threading.Thread(target=reply_once, args=(child, json.dumps(state).encode()))
+    worker.start()
+    command = {"id": 1, "expected_revision": 0, "bus": 0, "addr": 32, "patch": {"flap_offset": 5}}
+
+    def unwritable(entry):
+        raise OSError("injected audit failure")
+
+    try:
+        client.snapshot()
+        worker.join(1)
+        with pytest.raises(Unavailable):
+            client.dispatch(command, unwritable)
+        assert client.failure["stage"] == "intent_audit"
+        assert "elapsed_ms" not in client.failure  # that attempt never reached the model
+        assert client.failure["exchanges"] == 1  # the earlier valid reply still counts
+    finally:
+        client.close()
+        child.close()
+
+
 def test_the_control_metadata_reports_the_exchange_timing_while_running_and_after(tmp_path):
     hardware, state = recorded_snapshot()
     server = ControlServer(0, tmp_path, hardware)
