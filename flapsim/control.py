@@ -79,6 +79,7 @@ class ControlServer:
         self.powers = None
         self.power_metadata = None
         self.channel_failure = None
+        self.channel_latency = None
         self.speeds = None
         self.initial_speed = speed
         self.speed_metadata = None
@@ -547,6 +548,7 @@ class ControlServer:
         if client is not None:
             client.close()
             self.channel_failure = client.failure
+            self.channel_latency = client.latency()
         if power is not None:
             self.power_metadata = power.metadata()
         if speeds is not None:
@@ -566,6 +568,10 @@ class ControlServer:
             or {"current": self.initial_speed, "min": 0.25, "max": 50, "runtime": False}
         )
 
+    def exchange_latency(self):
+        client = self.client
+        return (client.latency() if client else None) or self.channel_latency
+
     def metadata(self):
         return {
             "api_version": 1,
@@ -573,6 +579,7 @@ class ControlServer:
             "endpoint": self.endpoint,
             **({"token_file": str(self.token_path)} if self.token_path else {}),
             **({"channel_failure": self.channel_failure} if self.channel_failure else {}),
+            **({"channel_latency": latency} if (latency := self.exchange_latency()) else {}),
             "fault_support": FAULT_SUPPORT,
             **({"telemetry": self.telemetry.metadata()} if self.telemetry else {}),
             "speed": self.clock_metadata(),

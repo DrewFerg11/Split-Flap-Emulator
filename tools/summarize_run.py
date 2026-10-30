@@ -30,6 +30,10 @@ def main():
             }
         )
     )
+    control = value.get("control") or {}
+    channel = {k: control[k] for k in ["channel_failure", "channel_latency"] if k in control}
+    if channel:
+        print("control channel", json.dumps(channel))
     for step in value.get("steps", []):
         summary = {
             k: step.get(k)
