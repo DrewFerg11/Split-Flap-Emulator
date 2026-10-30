@@ -314,6 +314,8 @@ async function pollI2c() {
     const response = await fetch("/i2c" + query, { cache: "no-store" });
     const page = await response.json();
     if (!response.ok) throw new Error(page.error || "HTTP " + response.status);
+    // A replay from the start (first poll, or after an error) must not stack on the rows shown.
+    if (i2cCursor === null) i2c.replaceChildren();
     if (page.gap) i2c.prepend(i2cRow({ type: "gap", reason: page.gap.reason }));
     for (const record of page.records) {
       if (record.type === "i2c" || record.type === "gap") i2c.prepend(i2cRow(record));
@@ -324,7 +326,7 @@ async function pollI2c() {
     i2cStatus.textContent = page.stopped ? "stream stopped" : "";
   } catch (error) {
     i2cStatus.textContent = String(error.message || error);
-    i2cCursor = null;  // a restarted run rejects the old run's cursor: start again from now
+    i2cCursor = null;  // a restarted run rejects the old run's cursor: replay from the start
     delay = 2000;
   }
   setTimeout(pollI2c, delay);
