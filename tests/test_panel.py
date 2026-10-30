@@ -413,6 +413,8 @@ def test_controls_send_mechanics_with_the_current_revision(tmp_path, control, co
         ("/control/mech", {"bus": 0, "addr": 32}),
         ("/control/reset", b'{"a":1,"a":2}'),
         ("/control/reset", b"not json"),
+        ("/control/reset", b"\xff"),
+        ("/control/mech", b'{"bus":0,"addr":32,"patch":{"x":"\xc3("}}'),
         ("/control/mech", b'{"bus":0,"addr":32,"patch":{"x":NaN}}'),
         ("/control/mech", b'{"bus":0,"addr":32,"patch":{"x":-Infinity}}'),
     ],
