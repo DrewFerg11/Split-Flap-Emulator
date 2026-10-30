@@ -97,13 +97,15 @@ def raw(full, prefix):
 # (TextFormatter::writeChar): the short escapes, \u0000 for NUL, every other byte raw.
 ESCAPES = words(*(f"\\{c}" for c in '"\\bfnrt'), "\\u0000")
 STRING = seq(words('"'), star(alt(raw(rf'{KEYWORDS}[^"\\\[\]]', ""), ESCAPES)), words('"'))
-DIGITS = raw(r"\d+", r"\d*")
 # TextFormatter::writeFloat: [-]integral[.decimals][e[-]exponent]; NaN and infinities are null.
+# writeInteger never pads, so only the decimals may start with zeros, and a written exponent is
+# never zero.
+INTEGER = raw(r"(?:0|[1-9]\d*)", r"(?:0|[1-9]\d*)?")
 NUMBER = seq(
     optional(words("-")),
-    DIGITS,
-    optional(seq(words("."), DIGITS)),
-    optional(seq(words("e"), optional(words("-")), DIGITS)),
+    INTEGER,
+    optional(seq(words("."), raw(r"\d+", r"\d*"))),
+    optional(seq(words("e"), optional(words("-")), raw(r"[1-9]\d*", r"(?:[1-9]\d*)?"))),
 )
 SCALAR = alt(STRING, NUMBER, words("true", "false", "null"))
 

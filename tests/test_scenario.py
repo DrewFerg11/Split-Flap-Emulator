@@ -888,6 +888,7 @@ LOGGED_BODIES = [
     r'{"name":"NUL\u0000"}',  # ArduinoJson's only \u escape
     '{"name":"raw\x01"}',  # other control characters are written raw
     '{"maxVel":1.5e-7,"stepsPerRot":-2.25e9,"name":null}',  # exponents; NaN is null
+    '{"maxVel":0.05,"displayOffset":0}',
 ]
 OTHER_BODIES = [
     "{not-json}",
@@ -903,6 +904,8 @@ OTHER_BODIES = [
     r'{"name":"a\/b"}',  # ArduinoJson never escapes "/"
     r'{"name":"\u0001"}',
     '{"maxVel":1e+7}',  # ArduinoJson writes no "+" exponent
+    '{"maxVel":01}',  # nor leading zeros
+    '{"maxVel":1e07}',
     '{"maxVel":NaN}',
     "{}",
 ]
