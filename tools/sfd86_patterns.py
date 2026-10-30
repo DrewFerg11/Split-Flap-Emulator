@@ -85,6 +85,10 @@ def star(part):
     return Pattern(f"(?:{part.full})*", f"(?:{part.full})*{part.prefix}")
 
 
+def optional(part):
+    return Pattern(f"(?:{part.full})?", part.prefix)
+
+
 def raw(full, prefix):
     return Pattern(full, prefix)
 
@@ -93,8 +97,15 @@ def raw(full, prefix):
 # (TextFormatter::writeChar): the short escapes, \u0000 for NUL, every other byte raw.
 ESCAPES = words(*(f"\\{c}" for c in '"\\bfnrt'), "\\u0000")
 STRING = seq(words('"'), star(alt(raw(rf'{KEYWORDS}[^"\\\[\]]', ""), ESCAPES)), words('"'))
-NUMBER = raw(r"-?\d+(?:\.\d+)?", r"(?:-?\d+(?:\.\d*)?|-)?")
-SCALAR = alt(STRING, NUMBER, words("true", "false"))
+DIGITS = raw(r"\d+", r"\d*")
+# TextFormatter::writeFloat: [-]integral[.decimals][e[-]exponent]; NaN and infinities are null.
+NUMBER = seq(
+    optional(words("-")),
+    DIGITS,
+    optional(seq(words("."), DIGITS)),
+    optional(seq(words("e"), optional(words("-")), DIGITS)),
+)
+SCALAR = alt(STRING, NUMBER, words("true", "false", "null"))
 
 
 def _members(keys, numbers=()):
