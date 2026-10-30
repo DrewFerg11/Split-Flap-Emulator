@@ -78,6 +78,62 @@ sends its own IDs to the same run after the panel has will see `409 stale_or_reu
 
 Without `--controls` the panel answers every POST with 501 and forwards nothing.
 
+## Home-lab mode: `flapsim serve`
+
+`flapsim serve` keeps one emulator running with this panel and its controls, until
+Ctrl-C or SIGTERM (`docker stop`):
+
+```sh
+flapsim serve --hardware esp32-16-dual --firmware-release v1.4.1
+# Serving esp32-16-dual (qemu) from runs/serve: http://127.0.0.1:8765/#key=…
+
+flapsim serve --mode native --native-build build/native/golden --hardware esp32-8-single
+```
+
+It supervises a `flapsim run --scenario hold --control-port 0 --i2c-history` child, so
+every run keeps the runner's isolation, evidence and clean shutdown; the runs are
+`runs/serve/run-1`, `run-2`, … (with each one's console output in `run-N.log`). A
+`hold` run (also usable with `flapsim run --scenario hold`) has no steps and no checks:
+it runs until interrupted. Stopping serve stops the current run with SIGINT and waits
+for it to finish its evidence.
+
+Besides the [controls](#controls), the panel then shows a **Run** line (the current run,
+its firmware and SHA-256, and whether it is still running) with *Restart run*, and in
+QEMU mode a **Firmware** line:
+
+- *Load image* uploads a factory image (`application/octet-stream`, at most the 4 MiB
+  flash, with an ESP32 bootloader at `0x1000`).
+- *Load release* downloads `splitflap-esp32_n4-<tag>-factory.bin` from that
+  [Split-Flap Display release](https://github.com/DrewFerg11/Split-Flap-Display/releases)
+  (`--firmware-release <tag>` does the same at startup).
+
+Either way the image is kept under `runs/serve/firmware/<sha256>.bin`, the current run
+is stopped and a new run starts from a fresh flash with it. Settings saved in the old
+run's flash do not carry over. Native mode builds firmware from source, so it offers
+*Restart run* only.
+
+v1.4.1 logs its fresh-NVS diagnostic continuously until settings are first saved, so
+`serial.log` grows quickly on a new flash (hundreds of MB per guest minute natively).
+Save the settings once in the firmware's web UI, or restart the run, to keep it small.
+
+### Beyond loopback
+
+By default serve listens on `127.0.0.1:8765` only. To use it from another machine,
+for example a Proxmox LXC or VM:
+
+```sh
+flapsim serve --hardware esp32-16-dual --firmware-release v1.4.1 \
+  --bind 0.0.0.0 --allow-host splitflap.lan:8765
+```
+
+`--allow-host` adds the `Host` (and `Origin`) the browser will send; requests for any
+other name are still refused, which keeps the DNS-rebinding defence. Open the printed
+`http://splitflap.lan:8765/#key=…` URL. Anyone who can reach the port can watch the
+display, serial and I²C traffic; commands still need the key, which travels without
+TLS, so use this on a trusted network or behind a TLS reverse proxy. The *Firmware web
+UI* link points at the firmware's loopback server and only works on the machine
+running serve.
+
 ## One look across the UIs
 
 The live panel and the run's `replay.html` share one dark style and one display script
@@ -124,9 +180,8 @@ same container, or use `--network host` on Linux.
 
 ## Not yet
 
-Remaining #21 items:
+Remaining #21 item:
 
-- loading firmware and a long-running `serve` mode for the Docker image
 - what the firmware *should* be showing next to what is physically showing. v1.4.1
   exposes no target position (no route, I²C or serial signal reports it), and the
   emulator does not reimplement firmware logic, so this needs a firmware-side signal

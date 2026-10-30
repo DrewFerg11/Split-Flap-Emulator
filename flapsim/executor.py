@@ -4,7 +4,7 @@ import json
 import math
 import signal
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -126,6 +126,23 @@ class BootExecutor:
             context.pause()
 
 
+# A hold runs until it is interrupted; its deadline only keeps the runner's arithmetic finite.
+HOLD_TIMEOUT = 10 * 365 * 24 * 3600.0
+
+
+@dataclass
+class HoldExecutor:
+    """Keep the firmware running, without checks, until the run is interrupted (`flapsim serve`
+    and interactive use with the control API and panel)."""
+
+    timeout: float = HOLD_TIMEOUT
+    document: dict = field(default_factory=lambda: {"version": 1, "mode": "hold"})
+
+    def execute(self, context):
+        while True:
+            context.pause()
+
+
 def load_executor(
     path,
     hardware,
@@ -137,6 +154,10 @@ def load_executor(
     mode="qemu",
     implicit_variables=None,
 ):
+    if str(path) == "hold":
+        if variables or known_issues is not None:
+            raise ValueError("variables and known issues require a step-based scenario")
+        return HoldExecutor()
     if str(path) == "boot":
         document = {"version": 1, "mode": "boot", "timeout": 240}
     else:

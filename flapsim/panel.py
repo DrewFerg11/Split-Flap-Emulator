@@ -19,7 +19,7 @@ from importlib.resources import files
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 
-from flapsim.control import accepts_authority
+from flapsim.runner import FLASH_SIZE
 from flapsim.ui import assemble
 
 STATE_TIMEOUT = 2.0
@@ -27,6 +27,9 @@ STATE_TIMEOUT = 2.0
 COMMAND_TIMEOUT = 15.0
 MAX_COMMAND = 2048
 KEY_HEADER = "X-Flapsim-Panel-Key"
+NAME_HEADER = "X-Flapsim-Firmware-Name"
+FIRMWARE_NAME = re.compile(r"[ -~]{1,100}")
+SERVE_ROUTES = {"/control/firmware", "/control/firmware-release", "/control/restart"}
 MAX_STATE = 1024 * 1024
 SERIAL_CHUNK = 64 * 1024
 # A reader further behind than this skips to the newest output instead of chasing a flood.
@@ -246,15 +249,35 @@ def strict_json(data):
 class PanelServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, run_dir, port=0, controls=False):
-        self.run_dir = Path(run_dir)
+    def __init__(self, run_dir, port=0, controls=False, supervisor=None, bind=None, hosts=()):
+        """`supervisor` (flapsim serve) provides the current run and firmware loading. `bind`
+        and `hosts` let serve listen beyond loopback, answering only those Host names."""
+        self.fixed_run_dir = Path(run_dir) if run_dir is not None else None
+        self.supervisor = supervisor
         # Only a page opened from the printed URL learns the key: it is in the fragment,
         # which browsers never send, so another local client can't read it from the panel.
         self.key = secrets.token_urlsafe(24) if controls else None
         self.ids = CommandIds()
         template = files("flapsim").joinpath("data/panel/index.html").read_text(encoding="utf-8")
         self.page = assemble(template).encode()
-        super().__init__(("127.0.0.1", port), PanelHandler)
+        super().__init__((bind or "127.0.0.1", port), PanelHandler)
+        self.authorities = {f"127.0.0.1:{self.server_address[1]}", *hosts}
+
+    @property
+    def run_dir(self):
+        return self.supervisor.run_dir if self.supervisor else self.fixed_run_dir
+
+    def accepts(self, hosts, origins, require_origin=False):
+        """The control API's DNS-rebinding and cross-site defence, for this panel's names."""
+        return (
+            len(hosts) == 1
+            and hosts[0] in self.authorities
+            and (bool(origins) or not require_origin)
+            and (
+                not origins
+                or (len(origins) == 1 and origins[0] in {"http://" + h for h in self.authorities})
+            )
+        )
 
     @property
     def url(self):
@@ -293,10 +316,8 @@ class PanelHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         # Same DNS-rebinding and cross-site defence as the control API itself.
-        if not accepts_authority(
-            self.headers.get_all("Host") or [],
-            self.headers.get_all("Origin") or [],
-            self.server.server_address[1],
+        if not self.server.accepts(
+            self.headers.get_all("Host") or [], self.headers.get_all("Origin") or []
         ):
             self.send_json(403, {"error": "forbidden_origin_or_host"})
             return
@@ -308,7 +329,7 @@ class PanelHandler(BaseHTTPRequestHandler):
         routes = {
             "/": (set(), lambda: None),
             "/state": (set(), lambda: fetch_state(self.server.run_dir)),
-            "/run": (set(), lambda: run_links(self.server.run_dir, self.server.key is not None)),
+            "/run": (set(), self.run_info),
             "/serial": ({"since"}, lambda: read_serial(self.server.run_dir, since_offset(query))),
             "/i2c": ({"since"}, lambda: fetch_i2c(self.server.run_dir, since_cursor(query))),
         }
@@ -331,38 +352,54 @@ class PanelHandler(BaseHTTPRequestHandler):
 
     do_HEAD = do_GET
 
+    def run_info(self):
+        info = run_links(self.server.run_dir, self.server.key is not None)
+        if self.server.supervisor:
+            info["serve"] = self.server.supervisor.describe()
+        return info
+
     def do_POST(self):
         if self.server.key is None:
             self.send_json(501, {"error": "read_only_panel"})
             return
-        port = self.server.server_address[1]
-        origins = self.headers.get_all("Origin") or []
         # A browser always sends Origin with a POST; anything else is not the panel's page.
-        if not origins or not accepts_authority(self.headers.get_all("Host") or [], origins, port):
+        hosts, origins = self.headers.get_all("Host") or [], self.headers.get_all("Origin") or []
+        if not self.server.accepts(hosts, origins, require_origin=True):
             self.send_json(403, {"error": "forbidden_origin_or_host"})
             return
         keys = self.headers.get_all(KEY_HEADER) or []
         if len(keys) != 1 or not hmac.compare_digest(keys[0].encode(), self.server.key.encode()):
             self.send_json(403, {"error": "forbidden_panel_key"})
             return
-        if self.path not in {"/control/reset", "/control/power", "/control/mech"}:
+        routes = {"/control/reset", "/control/power", "/control/mech"}
+        if self.server.supervisor:
+            routes |= SERVE_ROUTES
+        if self.path not in routes:
             self.send_json(404, {"error": "not_found"})
             return
+        upload = self.path == "/control/firmware"
+        expected = "application/octet-stream" if upload else "application/json"
         content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
-        if content_type != "application/json":
+        if content_type != expected:
             self.send_json(415, {"error": "unsupported_media_type"})
             return
         length = self.headers.get("Content-Length")
         if length is None or not length.isascii() or not length.isdigit():
             self.send_json(411, {"error": "length_required"})
             return
-        if int(length) > MAX_COMMAND:
+        if int(length) > (FLASH_SIZE if upload else MAX_COMMAND):
             self.send_json(413, {"error": "body_too_large"})
             return
-        self.connection.settimeout(1.0)
+        self.connection.settimeout(5.0 if upload else 1.0)
         try:
-            body = strict_json(self.rfile.read(int(length)))
-            status, answer = command(self.server.run_dir, self.server.ids, self.path, body)
+            data = self.rfile.read(int(length))
+            if len(data) != int(length):
+                raise TimeoutError
+            if self.path in SERVE_ROUTES:
+                status, answer = self.serve_command(data)
+            else:
+                body = strict_json(data)
+                status, answer = command(self.server.run_dir, self.server.ids, self.path, body)
         except TimeoutError:
             self.send_json(408, {"error": "body_timeout"})
         except ValueError as error:
@@ -375,6 +412,29 @@ class PanelHandler(BaseHTTPRequestHandler):
             self.send_json(503, {"error": str(error)})
         else:
             self.send_json(status, answer)
+
+    def serve_command(self, data):
+        """Restart the served run, optionally with another factory image."""
+        from flapsim.serve import ServeError, download_release
+
+        supervisor = self.server.supervisor
+        try:
+            if self.path == "/control/firmware":
+                names = self.headers.get_all(NAME_HEADER) or ["upload.bin"]
+                if len(names) != 1 or not FIRMWARE_NAME.fullmatch(names[0]):
+                    raise ValueError("a firmware name is 1-100 printable ASCII characters")
+                return 200, supervisor.load(data, names[0])
+            body = strict_json(data)
+            if self.path == "/control/restart":
+                if body != {}:
+                    raise ValueError("restart takes no fields")
+                return 200, supervisor.restart()
+            if not isinstance(body, dict) or set(body) != {"tag"}:
+                raise ValueError('a release takes exactly {"tag": "v1.4.1"}')
+            image = download_release(body["tag"])
+            return 200, supervisor.load(image, f"{body['tag']} release factory image")
+        except ServeError as error:
+            return 422, {"error": "firmware_rejected", "detail": str(error)}
 
 
 def since_offset(query):

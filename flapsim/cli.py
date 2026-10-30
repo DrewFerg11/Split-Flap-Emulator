@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import re
 import signal
 import sys
 from pathlib import Path
@@ -37,7 +38,11 @@ def main() -> int:
         "--speed", type=float, help="native mode virtual clock rate, 0.25-50 (default 5)"
     )
     runner.add_argument("--hardware", required=True)
-    runner.add_argument("--scenario", required=True, help="boot or a scenario YAML file")
+    runner.add_argument(
+        "--scenario",
+        required=True,
+        help="boot, hold (run until interrupted) or a scenario YAML file",
+    )
     runner.add_argument("--var", dest="variables", action="append", default=[], metavar="KEY=value")
     runner.add_argument(
         "--known-issues",
@@ -74,10 +79,56 @@ def main() -> int:
         action="store_true",
         help="also forward reset, power, fault and mechanics commands from the opened page",
     )
+    serve = commands.add_parser(
+        "serve",
+        help="keep an emulator running with the live panel and its controls (home-lab mode)",
+    )
+    serve.add_argument("--mode", choices=["qemu", "native"], default="qemu")
+    serve.add_argument("--hardware", required=True)
+    source = serve.add_mutually_exclusive_group()
+    source.add_argument("--firmware", type=Path, help="factory image (qemu mode)")
+    source.add_argument(
+        "--firmware-release", metavar="TAG", help="download a Split-Flap Display release (qemu)"
+    )
+    source.add_argument("--native-build", type=Path, help="native/build.py output (native mode)")
+    source.add_argument("--firmware-src", help="native mode: golden, git:<ref> or a checkout")
+    serve.add_argument("--speed", type=float, help="native mode virtual clock rate")
+    serve.add_argument("--timing", choices=["ci", "accurate", "realtime"], help="qemu mode")
+    serve.add_argument("--seed", type=int)
+    serve.add_argument("--out", type=Path, default=Path("runs/serve"))
+    serve.add_argument("--port", type=int, default=8765, help="panel port (0 chooses one)")
+    serve.add_argument(
+        "--bind", default="127.0.0.1", help="panel listen address (default loopback only)"
+    )
+    serve.add_argument(
+        "--allow-host",
+        action="append",
+        default=[],
+        metavar="HOST:PORT",
+        help="also answer requests addressed to this name (for --bind beyond loopback)",
+    )
+    serve.add_argument(
+        "--qemu-prefix",
+        type=Path,
+        default=Path(os.environ.get("FLAPSIM_QEMU_PREFIX", ROOT / "build/qemu/install")),
+    )
     args = parser.parse_args()
     if not args.command:
         parser.print_help()
         return 0
+
+    if args.command == "serve":
+        from flapsim.serve import ServeError, serve
+
+        problem = serve_problem(args)
+        if problem:
+            print(f"Invalid serve: {problem}", file=sys.stderr)
+            return 2
+        try:
+            return serve(args)
+        except (ServeError, OSError) as error:
+            print(f"Invalid serve: {error}", file=sys.stderr)
+            return 2
 
     if args.command == "panel":
         from flapsim.panel import serve
@@ -122,6 +173,22 @@ def main() -> int:
             signal.signal(signum, handler)
     print(f"{'PASS' if code == 0 else 'FAIL'}: evidence: {args.out / 'run.json'}")
     return code
+
+
+def serve_problem(args):
+    if not 0 <= args.port <= 65535:
+        return "--port must be in [0, 65535]"
+    if args.mode == "native" and (args.firmware or args.firmware_release):
+        return "native mode builds firmware from source; use --native-build or --firmware-src"
+    if args.mode == "native" and not (args.native_build or args.firmware_src):
+        return "native mode needs --native-build or --firmware-src"
+    if args.mode == "qemu" and (args.native_build or args.firmware_src):
+        return "--native-build and --firmware-src are native mode options"
+    if args.mode == "qemu" and not (args.firmware or args.firmware_release):
+        return "qemu mode needs --firmware or --firmware-release"
+    if any(not re.fullmatch(r"[A-Za-z0-9.-]{1,253}:\d{1,5}", h) for h in args.allow_host):
+        return "--allow-host takes HOST:PORT, the address a browser uses for the panel"
+    return None
 
 
 def check_mode_arguments(args):

@@ -80,7 +80,7 @@ The full index is [`docs/README.md`](docs/README.md).
 - Per-module physical calibration and firmware verification: [`docs/calibration.md`](docs/calibration.md)
 - Container commands: [`docs/container.md`](docs/container.md)
 - Native-mode checks in firmware CI: [`docs/firmware-ci.md`](docs/firmware-ci.md)
-- Experimental in 1.0: authenticated state, runtime controls, I2C telemetry and declarative scenarios [`docs/control-api.md`](docs/control-api.md); live display panel with opt-in controls [`docs/panel.md`](docs/panel.md)
+- Experimental in 1.0: authenticated state, runtime controls, I2C telemetry and declarative scenarios [`docs/control-api.md`](docs/control-api.md); live display panel with opt-in controls and a long-running `flapsim serve` home-lab mode [`docs/panel.md`](docs/panel.md)
 
 **Maintaining flapsim**
 
