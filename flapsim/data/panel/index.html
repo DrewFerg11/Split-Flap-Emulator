@@ -120,7 +120,7 @@ async function pollSerial() {
 }
 pollSerial();
 
-// The I2C monitor starts at the newest record and shows the latest transactions.
+// The I2C monitor replays the run's retained history, then follows it, keeping the latest rows.
 const i2c = document.getElementById("i2c");
 const i2cStatus = document.getElementById("i2c-status");
 const I2C_ROWS = 200;
@@ -155,17 +155,13 @@ async function pollI2c() {
     const response = await fetch("/i2c" + query, { cache: "no-store" });
     const page = await response.json();
     if (!response.ok) throw new Error(page.error || "HTTP " + response.status);
-    if (i2cCursor === null) {
-      i2cCursor = page.latest || page.next;  // monitor from now, not from the run's start
-    } else {
-      if (page.gap) i2c.prepend(i2cRow({ type: "gap", reason: page.gap.reason }));
-      for (const record of page.records) {
-        if (record.type === "i2c" || record.type === "gap") i2c.prepend(i2cRow(record));
-      }
-      while (i2c.childElementCount > I2C_ROWS) i2c.lastElementChild.remove();
-      i2cCursor = page.next || i2cCursor;
-      if (page.more) delay = 0;
+    if (page.gap) i2c.prepend(i2cRow({ type: "gap", reason: page.gap.reason }));
+    for (const record of page.records) {
+      if (record.type === "i2c" || record.type === "gap") i2c.prepend(i2cRow(record));
     }
+    while (i2c.childElementCount > I2C_ROWS) i2c.lastElementChild.remove();
+    i2cCursor = page.next || i2cCursor;
+    if (page.more) delay = 0;
     i2cStatus.textContent = page.stopped ? "stream stopped" : "";
   } catch (error) {
     i2cStatus.textContent = String(error.message || error);
