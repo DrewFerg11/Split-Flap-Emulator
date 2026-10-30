@@ -1,10 +1,22 @@
 # Firmware release gate
 
-Phase 6 is an integration under review for emulator issue [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7).
-The emulator implementation is [PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17);
-the companion workflow is [Split-Flap-Display draft #85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85). It is not an active,
-verified production gate yet: no immutable image has been published, and no
-positive/negative hosted release-workflow runs have been recorded.
+Phase 6 is emulator issue [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7).
+The emulator implementation is [PR #17](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/17).
+The companion workflow, [Split-Flap-Display #85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85),
+merged into the firmware's `main` as `d52dc78`. Its **Release / Tag** workflow now runs
+the strict simulation on every `v*` tag push, before publication. It pins:
+
+| Input | Pinned value |
+|---|---|
+| Gate helper | this repository at `3ba32a9` (`v0.1.0`), `tools/verify_release_gate.py` |
+| Emulator image | `ghcr.io/drewferg11/split-flap-emulator@sha256:acd9a51fe50c91530df3e1583ce070cb17e712d31d8d415654c43d97879d3935` (v0.1.0) |
+
+The gate is on the trusted release path, but #7's acceptance is not recorded yet: no
+positive/negative hosted runs (dry runs or a gated release) are linked from #7. Golden
+v1.4.1 itself fails the strict smokes because of SFD#54. Firmware `main` has the fix
+and passes them strictly in native mode (see
+[retiring the baseline entries](scenarios.md#retiring-the-sfd54-and-sfd86-entries)),
+so the next release is the first that can pass the gate.
 
 ## Inputs and trust
 
@@ -17,11 +29,11 @@ container, private flash and fresh output directory on `ubuntu-24.04`.
 
 The companion checks out this repository's standard-library helper
 `tools/verify_release_gate.py` at a reviewed full commit SHA with persisted Git
-credentials disabled. Its only registry input is the firmware repository variable
-`FLAPSIM_IMAGE`, which must match `ghcr.io/drewferg11/split-flap-emulator@sha256:` followed by
-64 lowercase hex digits. Missing values and mutable tags fail closed. The digest
-must come from phase 5's actual verified publication; setting a syntactically
-valid value does not prove publication or verification.
+credentials disabled. Its only registry input is `FLAPSIM_IMAGE`, set in the
+workflow's simulation step, which must match `ghcr.io/drewferg11/split-flap-emulator@sha256:`
+followed by 64 lowercase hex digits. Missing values and mutable tags fail closed. The
+digest must come from phase 5's actual verified publication; a syntactically valid
+value alone does not prove publication or verification.
 
 The helper pulls that immutable Linux amd64 image, mounts the factory image
 read-only and the output directory writable, and disables container networking.
@@ -106,17 +118,15 @@ are required for the intended public image. Failure to pull remains a blocker.
 
 ## Activation and updates
 
-Before the companion can leave draft, record the actual verified image digest,
-its phase-5 source/proof/publication link and a successful pull; configure
-`FLAPSIM_IMAGE` to exactly that reference. Review the helper's actual commit pin
-in the companion. Then obtain trusted dry-run evidence for both passing layouts,
-all four asserted rejection modes, preserved non-ESP32 builds and measured job
-durations. Known firmware defects may still prevent the strict positive case;
-the firmware maintainer owns their repair. Keep acceptance unchecked until those
-runs and the corresponding maintainer merges occur.
+The companion has merged with the v0.1.0 image and helper pinned (above). What #7
+still needs is evidence from trusted runs of that workflow: dry runs on an authorized
+tag for both passing layouts (or the first gated release), all four asserted
+rejection modes, preserved non-ESP32 builds and measured job durations, linked from
+#7. Golden v1.4.1 cannot provide the positive case because of SFD#54; a release
+carrying the firmware fix can. Keep acceptance unchecked until those runs exist.
 
 For an emulator update, publish/verify the new immutable image first, review its
-source and helper diff, update the image variable and helper commit together,
+source and helper diff, update `FLAPSIM_IMAGE` and both helper `ref:` pins together,
 and repeat dry-run proofs before a production release. Record old/new references
 and evidence on issue #7. Never put a placeholder digest in the workflow or
-describe an open draft or configured variable as a verified active gate.
+describe a pinned but unexercised gate as verified.
