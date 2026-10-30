@@ -390,7 +390,11 @@ finalized evidence. Off-state timeout/cancellation probes also run with telemetr
 These are review and CI gates, not a claim that the issue is merged or closed.
 Keep #20 open until the telemetry, scenario and final acceptance PRs have merged
 and their final-head checks pass. Runtime stochastic mutation and electrical faults
-remain separate #19 scope.
+remain separate #19 scope. (#19 has since finished: electrical faults landed in #83 as
+startup `drop`/`brownout`/`sag` modes and a runtime-switchable rail, `power: lost`.
+The stochastic modes, noise, slip, NACK and corruption, stay startup-only by design.
+A runtime patch accepts only the deterministic literals, so a run's random stream is
+fixed by its configuration.)
 
 ## Final acceptance
 

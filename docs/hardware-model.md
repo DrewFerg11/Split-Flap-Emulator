@@ -194,8 +194,8 @@ the integration callbacks; direct core API users must serialize their calls.
 
 ## Injected faults
 
-A module mapping can add `faults`. Each module takes at most one fault of each
-kind (sensor, motor, I²C, power). This lets a scenario check how the firmware behaves
+A module mapping can add `faults` ([#19](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/19)).
+Each module takes at most one fault of each kind (sensor, motor, I²C, power). This lets a scenario check how the firmware behaves
 when the hardware misbehaves. Each fault parameter is required when its fault
 is chosen and rejected otherwise.
 
