@@ -9,8 +9,9 @@ entries accept only that request log, or a body (or the start of one) in these s
 - POST /text: {"mode":"<a v1.4.1 mode>", then scalar members the handler reads}.
 - POST /settings: scalar members named after v1.4.1's settings keys ("mode" is a number here).
 
-Strings may not contain brackets (the diagnostic starts with "[") or an error keyword. Arrays
-(e.g. "words") are not accepted, so a body with one is still reported.
+Strings may not contain brackets (the diagnostic starts with "[") or an error keyword, and use only
+the escapes ArduinoJson 7.4.3 writes. Arrays (e.g. "words") are not accepted, so a body with one is
+still reported.
 
 python -m tools.sfd86_patterns prints the four regexes, and --write puts them in both baselines;
 tests/test_scenario.py checks both baselines carry exactly these.
@@ -88,9 +89,10 @@ def raw(full, prefix):
     return Pattern(full, prefix)
 
 
-# A JSON string without brackets or error keywords, as ArduinoJson escapes it.
-_char = rf'(?:{KEYWORDS}[^"\\\[\]]|\\["\\/bfnrt])'
-STRING = seq(words('"'), raw(f"{_char}*", rf"{_char}*\\?"), words('"'))
+# A JSON string without brackets or error keywords, escaped as ArduinoJson 7.4.3 writes it
+# (TextFormatter::writeChar): the short escapes, \u0000 for NUL, every other byte raw.
+ESCAPES = words(*(f"\\{c}" for c in '"\\bfnrt'), "\\u0000")
+STRING = seq(words('"'), star(alt(raw(rf'{KEYWORDS}[^"\\\[\]]', ""), ESCAPES)), words('"'))
 NUMBER = raw(r"-?\d+(?:\.\d+)?", r"(?:-?\d+(?:\.\d*)?|-)?")
 SCALAR = alt(STRING, NUMBER, words("true", "false"))
 

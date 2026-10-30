@@ -885,6 +885,8 @@ LOGGED_BODIES = [
     '{"wire1Addresses":"","wire1Offsets":""}',
     '{"dateFormat":"{dd}-{mm}-{yy}","maxVel":15.5,"mqtt_port":1884,"mode":3}',
     r'{"password":"a\"b\\c"}',
+    r'{"name":"NUL\u0000"}',  # ArduinoJson's only \u escape
+    '{"name":"raw\x01"}',  # other control characters are written raw
 ]
 OTHER_BODIES = [
     "{not-json}",
@@ -897,6 +899,8 @@ OTHER_BODIES = [
     '{"mode":"single","row1":"panic"}',
     '{"ssid":tru}',
     r'{"name":"x\q"}',
+    r'{"name":"a\/b"}',  # ArduinoJson never escapes "/"
+    r'{"name":"\u0001"}',
     "{}",
 ]
 TAILS = [
