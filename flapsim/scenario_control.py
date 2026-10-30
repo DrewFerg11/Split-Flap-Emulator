@@ -3,7 +3,8 @@
 import math
 import time
 
-from flapsim.control import Unavailable, validate_operation
+from flapsim.control_channel import Unavailable
+from flapsim.control_commands import validate_operation
 
 ACTIONS = frozenset(
     {"set_mechanics", "set_fault", "reset", "set_power", "power_cycle", "set_speed"}
@@ -12,7 +13,7 @@ ACTIONS = frozenset(
 
 def commands(kind, value, hardware):
     # Import lazily to keep the basic scenario parser independent of API extras.
-    from flapsim.scenario import fields
+    from flapsim.scenario_schema import fields
 
     if kind in {"set_mechanics", "set_fault"}:
         field = "patch" if kind == "set_mechanics" else "faults"

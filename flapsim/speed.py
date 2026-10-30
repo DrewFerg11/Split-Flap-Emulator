@@ -3,7 +3,7 @@
 import json
 import math
 
-from flapsim.control import Unavailable
+from flapsim.control_channel import Unavailable
 
 
 def valid_speed(value):

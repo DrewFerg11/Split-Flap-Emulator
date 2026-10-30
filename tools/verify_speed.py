@@ -3,12 +3,11 @@
 import argparse
 import json
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 from flapsim.runner import run
 from flapsim.state import display_aligned
+from tools.control_client import ControlClient
 
 
 class SpeedProbe:
@@ -19,33 +18,14 @@ class SpeedProbe:
         self.slow_timeout = slow_timeout
 
     def execute(self, context):
-        manifest = json.loads((context.out / "run.json").read_text())
-        endpoint = manifest["control"]["endpoint"]
-        token = (context.out / "control-token").read_text().strip()
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        client = ControlClient(context, timeout=6)
+        api = client.api
         evidence = {"complete": False, "rates": []}
 
         def record():
             (context.out / "speed-verification.json").write_text(
                 json.dumps(evidence, indent=2) + "\n"
             )
-
-        def api(path="/state", body=None, expected=200):
-            context.checkpoint()
-            request = urllib.request.Request(
-                endpoint + "/api/emu" + path,
-                headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
-                data=None if body is None else json.dumps(body).encode(),
-            )
-            try:
-                response = opener.open(request, timeout=6)
-            except urllib.error.HTTPError as error:
-                response = error
-            with response:
-                result = json.load(response)
-                if response.status != expected:
-                    raise RuntimeError(f"{path}: HTTP {response.status}: {result}")
-                return result
 
         def measure(rate):
             start = time.monotonic()

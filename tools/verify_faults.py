@@ -4,8 +4,6 @@ import argparse
 import json
 import re
 import signal
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 from flapsim.baseline import load_known_issues
@@ -14,6 +12,7 @@ from flapsim.faults import DEFAULT_FAULTS
 from flapsim.runner import run
 from flapsim.scenario import serial_errors
 from flapsim.state import display_aligned
+from tools.control_client import ControlClient
 from tools.verify_native import KnownSerial
 
 CASES = {
@@ -89,9 +88,8 @@ class FaultProbe:
 
     def execute(self, context):
         manifest = json.loads((context.out / "run.json").read_text())
-        endpoint = manifest["control"]["endpoint"]
-        token = (context.out / "control-token").read_text().strip()
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        client = ControlClient(context, timeout=12)
+        api = client.api
         self.out = context.out
         native = manifest["mode"] == "native"
         self.native = native
@@ -107,46 +105,15 @@ class FaultProbe:
                 json.dumps(self.evidence, indent=2) + "\n"
             )
 
-        def api(path="/state", body=None, expected=200):
-            context.checkpoint()
-            request = urllib.request.Request(
-                endpoint + "/api/emu" + path,
-                headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
-                data=None if body is None else json.dumps(body).encode(),
-            )
-            try:
-                response = opener.open(request, timeout=12)
-            except urllib.error.HTTPError as error:
-                response = error
-            with response:
-                result = json.load(response)
-                if response.status != expected:
-                    raise RuntimeError(f"{path}: HTTP {response.status}: {result}")
-                return result
-
         def patch(faults, identifier, revision):
             command = {"id": identifier, "expected_revision": revision, "patch": {"faults": faults}}
             while True:
                 # Busy is an unadmitted transaction-boundary rejection, safe to retry.
-                context.checkpoint()
-                request = urllib.request.Request(
-                    endpoint + "/api/emu/modules/0/32/mech",
-                    headers={
-                        "Authorization": "Bearer " + token,
-                        "Content-Type": "application/json",
-                    },
-                    data=json.dumps(command).encode(),
-                )
-                try:
-                    response = opener.open(request, timeout=12)
-                except urllib.error.HTTPError as error:
-                    response = error
-                with response:
-                    result = json.load(response)
-                    if response.status == 202:
-                        return result
-                    if response.status != 409 or result.get("error") != "model_busy":
-                        raise RuntimeError(f"fault patch failed: {result}")
+                status, result = client.call("/api/emu/modules/0/32/mech", command)
+                if status == 202:
+                    return result
+                if status != 409 or result.get("error") != "model_busy":
+                    raise RuntimeError(f"fault patch failed: {result}")
                 context.pause()
 
         initial = api()
