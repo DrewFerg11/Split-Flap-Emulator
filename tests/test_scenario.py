@@ -877,9 +877,9 @@ def test_a_newline_alone_can_split_the_diagnostic_at_every_cut(name):
     diagnostic = "[ 38085][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
     for cut in range(len(diagnostic)):
         head, tail = diagnostic[:cut], diagnostic[cut:]
-        # Only a line that is flagged as an error needs the baseline: a head from the "[ ts][E]["
+        # Only a line that is flagged as an error needs the baseline: a head from the "[ ts][E]"
         # on, a tail that keeps "failed" or "NOT_FOUND" or the "[E]" marker.
-        if cut >= len("[ 38085][E][") and head:
+        if cut >= len("[ 38085][E]") and head:
             assert known.tolerated_serial(head), f"head {head!r}"
         if tail and cut >= len("[ 38085][E][Preferences.cpp:50] begin(): nvs_"):
             assert known.tolerated_serial(tail), f"tail {tail!r}"
@@ -893,6 +893,8 @@ def test_the_bare_diagnostic_fragments_reject_anything_else(name):
         "[ 38085][E][WiFi",  # another error line, cut short
         "[ 38085][E][Preferences.cpp:51] begin(): nvs_open failed: NOT_FOUND",
         "[E][Pref",  # no timestamp
+        "[ 38085][E",  # not yet the marker the serial check flags
+        "[ 38085][E]x",
         "[ 38085][E][Preferences.cpp:50] begin(): nvs_open failed: INVALID_HANDLE",
         "_open failed: NOT_FOUNX",
         "xopen failed: NOT_FOUND",
@@ -925,6 +927,7 @@ def test_the_split_lines_seen_in_ci_are_tolerated():
         # The native runs on #100 and #101: a reset or cut left a bare head.
         "[ 25075][E][Preferences.cpp:50] begin(): nvs_o",
         "[ 24486][E][Preferen",
+        "[ 43925][E]",  # the golden control-16 run on this PR: cut right after the marker
     ]:
         assert known.tolerated_serial(line), line
 
