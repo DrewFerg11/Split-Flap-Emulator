@@ -16,8 +16,8 @@ Below the display:
   `serial.log`, keeping the last 2000 lines. It follows the end of the log unless you
   scroll up.
 - **I²C traffic:** the latest 200 transactions (guest time, bus, address, direction,
-  data bytes, ACK/NACK and how the transaction ended), newest first, starting when the
-  page opens. Start the run with `--i2c-history` as well; without it the section says
+  data bytes, ACK/NACK and how the transaction ended), newest first, replaying the run's
+  retained history when the page opens and following it from there. Start the run with `--i2c-history` as well; without it the section says
   so. A row marked *gap* means records were lost (see
   [the I²C history](control-api.md#structured-i2c-history-and-websocket-stream)).
 - **Firmware web UI:** a header link to the firmware's own web server for this run
@@ -60,7 +60,7 @@ the run records in `run.json`. It reads `serial.log` from the run directory.
 | `/` | the page |
 | `/state` | the control API's live state |
 | `/i2c?since=<cursor>` | one page of I²C history after an opaque cursor (the page's `next`) |
-| `/serial?since=<offset>` | serial output after a byte offset, at most 64 KiB; without `since`, the last 64 KiB. `restarted` means the log was replaced (a QEMU startup retry) and reading began again at 0 |
+| `/serial?since=<offset>` | serial output after a byte offset, at most 64 KiB; without `since`, the last 64 KiB. `restarted` means the log was replaced or is briefly missing (a QEMU startup retry) and the console clears and reads again from 0 |
 | `/run` | `firmware_url`: the run's loopback firmware web server, or null |
 
 - **Read-only:** the panel only serves those GET routes; it never forwards a
