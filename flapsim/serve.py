@@ -67,7 +67,7 @@ class Supervisor:
         self.firmware_info = None
         if firmware:
             self.use_firmware(Path(firmware), Path(firmware).name)
-        self.number = 0
+        self.number = last_run_number(self.out)
         self.process = None
         self.lock = threading.Lock()
         self.loading = False
@@ -165,6 +165,18 @@ class Supervisor:
             "loading": self.loading,
             "error": self.error,
         }
+
+
+def last_run_number(out):
+    """The highest run-N (directory or log) already under out, so a restarted serve continues the
+    numbering instead of truncating an earlier session's log or reusing its evidence directory."""
+    numbers = [0]
+    if out.is_dir():
+        for entry in out.iterdir():
+            match = re.fullmatch(r"run-(\d+)(?:\.log)?", entry.name)
+            if match:
+                numbers.append(int(match.group(1)))
+    return max(numbers)
 
 
 def serve(args, ready=print):

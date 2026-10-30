@@ -127,6 +127,18 @@ def supervisor(tmp_path, runtime):
         supervisor.stop()
 
 
+def test_a_restarted_serve_continues_the_run_numbering(tmp_path):
+    assert Supervisor(tmp_path, [], "native").number == 0
+    (tmp_path / "run-3").mkdir()
+    (tmp_path / "run-5.log").write_text("earlier session")
+    (tmp_path / "run-x").mkdir()
+    (tmp_path / "firmware").mkdir()
+    supervisor = Supervisor(tmp_path, [], "native")
+    assert supervisor.number == 5
+    assert supervisor.run_dir == tmp_path / "run-5"  # start() moves on to run-6
+    assert (tmp_path / "run-5.log").read_text() == "earlier session"
+
+
 def manifest(run_dir):
     return json.loads((run_dir / "run.json").read_text())
 
