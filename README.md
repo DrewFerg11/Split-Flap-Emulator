@@ -39,7 +39,7 @@ sensors), use the same scenario files and produce the same reports.
 | Network | HTTP through loopback forwarding only | Real host sockets: HTTP, MQTT/Home Assistant and a controllable wall clock |
 | Unique coverage | Byte-for-byte release check; wrong and prerelease versions are rejected | MQTT, time and DST scenarios, hours-long soaks in minutes, sanitizer builds |
 | Build | Pinned QEMU fork, a few minutes once (cached) | Under a minute |
-| Role | **Release gate:** strict, with no known-issues baseline (the firmware-side gate is not active yet, [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7)) | **Fast feedback** and coverage QEMU cannot reach; never gates a release |
+| Role | **Release gate:** strict, with no known-issues baseline (the firmware's release workflow runs it on every tag, pinned to emulator v0.1.0; acceptance runs pending, [#7](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/7)) | **Fast feedback** and coverage QEMU cannot reach; never gates a release |
 
 Use QEMU mode to decide whether a release is good, and native mode while developing firmware or for long and
 network-heavy tests. Scenarios drive the firmware the way a user does (web UI, HTTP, MQTT) and check what the
