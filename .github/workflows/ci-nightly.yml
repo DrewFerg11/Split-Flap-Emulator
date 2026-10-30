@@ -56,6 +56,54 @@ jobs:
             runs/native/**/*.xml
             runs/native/**/*.html
 
+  firmware-main-strict:
+    # The golden baseline (#15) tolerates SFD#54 and SFD#86 only until a firmware release
+    # carries their fixes. This tracks firmware main strictly, with no baseline, so the
+    # entries can be retired with evidence as soon as such a release becomes the golden image.
+    name: Firmware main, strict (no known-issues baseline)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/native-setup
+        with:
+          run-shim-tests: 'false'
+      - name: Build Split-Flap Display main against the shims
+        run: |
+          set -o pipefail
+          python native/build.py --jobs 4 --firmware-src git:main --out build/native/main \
+            2>&1 | tee runs-native-main-build.log
+      - name: Run both release smokes strictly
+        run: |
+          set -e
+          version=$(python -c "import json; print(json.load(open('build/native/main/build-info.json'))['firmware']['version'])")
+          for layout in "8 esp32-8-single" "16 esp32-16-dual"; do
+            set -- $layout
+            flapsim run --mode native --native-build build/native/main --hardware "$2" \
+              --scenario "scenarios/release-smoke-$1.yaml" --seed 7 \
+              --var "FIRMWARE_VERSION=$version" --out "runs/native/main-smoke-$1"
+          done
+      - name: Log outcomes
+        if: always()
+        run: |
+          for layout in 8 16; do
+            python -m tools.summarize_run "runs/native/main-smoke-$layout/run.json" || true
+          done
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-firmware-main-evidence
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            runs-native-main-build.log
+            build/native/main/build-info.json
+            runs/native/**/*.json
+            runs/native/**/*.log
+            runs/native/**/*.md
+            runs/native/**/*.xml
+
   qemu-homing:
     name: Golden scenario (homing-${{ matrix.seed }})
     runs-on: ubuntu-24.04
