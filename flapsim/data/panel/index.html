@@ -45,6 +45,15 @@ select, input[type=text] { background: var(--tile); color: var(--ink); border: 1
       <select id="mech-field" aria-label="Field"></select>
       <input type="text" id="mech-value" aria-label="Value" size="8">
       <button data-command="mech">Apply</button></div>
+    <div id="serve-run" hidden>
+      <div class="command"><span>Run</span><span id="serve-firmware"></span>
+        <button data-command="restart">Restart run</button></div>
+      <div class="command"><span>Firmware</span>
+        <input type="file" id="firmware-file" accept=".bin" aria-label="Factory image">
+        <button data-command="upload">Load image</button>
+        <input type="text" id="firmware-tag" placeholder="v1.4.1" size="10" aria-label="Release tag">
+        <button data-command="release">Load release</button></div>
+    </div>
     <p class="notice" id="control-result" aria-live="polite"></p>
   </section>
   <section class="panel">
@@ -112,7 +121,7 @@ async function links() {
     const response = await fetch("/run", { cache: "no-store" });
     const value = await response.json();
     if (response.ok) {
-      if (value.controls && panelKey) setupControls();
+      if (value.controls && panelKey) setupControls(value.serve);
       if (value.firmware_url) {
         firmware.href = value.firmware_url;
         firmware.hidden = false;
@@ -139,10 +148,30 @@ function options(select, values) {
     return option;
   }));
 }
-function setupControls() {
+function showServe(serve) {
+  if (!serve) return;
+  document.getElementById("serve-run").hidden = false;
+  const firmware = serve.firmware;
+  document.getElementById("serve-firmware").textContent = serve.run + " · " +
+    (firmware ? firmware.name + " (" + (firmware.sha256 || "").slice(0, 12) + ")" : serve.mode) +
+    (serve.running ? "" : " · stopped" + (serve.exit_code === null ? "" : " (" + serve.exit_code + ")")) +
+    (serve.error ? " · " + serve.error : "");
+}
+async function pollServe() {
+  try {
+    const response = await fetch("/run", { cache: "no-store" });
+    if (response.ok) showServe((await response.json()).serve);
+  } catch (error) { /* shown by the other sections */ }
+  setTimeout(pollServe, 3000);
+}
+function setupControls(serve) {
   const controls = document.getElementById("controls");
   if (!controls.hidden) return;
   controls.hidden = false;
+  if (serve) {
+    showServe(serve);
+    pollServe();
+  }
   const result = document.getElementById("control-result");
   const kind = document.getElementById("fault-kind");
   const value = document.getElementById("fault-value");
@@ -165,16 +194,19 @@ function setupControls() {
     const [bus, addr] = document.getElementById(id).value.split(":").map(Number);
     return { bus, addr };
   };
-  async function send(path, body, label) {
+  async function send(path, body, label, headers) {
     result.textContent = label + "…";
     try {
       const response = await fetch(path, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Flapsim-Panel-Key": panelKey },
-        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json", "X-Flapsim-Panel-Key": panelKey,
+          ...headers },
+        body: headers ? body : JSON.stringify(body),
       });
       const answer = await response.json();
-      result.textContent = label + ": " + (response.ok ? answer.status || "done" :
+      if (answer.run) showServe(answer);
+      result.textContent = label + ": " + (response.ok ? answer.status ||
+        (answer.run ? "started " + answer.run : "done") :
         "HTTP " + response.status + " " + (answer.error || "") + " " + (answer.detail || ""));
     } catch (error) {
       result.textContent = label + ": " + String(error.message || error);
@@ -188,6 +220,20 @@ function setupControls() {
     } else if (which === "fault") {
       send("/control/mech", { ...target("fault-module"),
         patch: { faults: { [kind.value]: value.value } } }, kind.value + " " + value.value);
+    } else if (which === "upload") {
+      const file = document.getElementById("firmware-file").files[0];
+      if (!file) {
+        result.textContent = "choose a factory image first";
+        return;
+      }
+      const name = file.name.replace(/[^ -~]/g, "?").slice(0, 100) || "upload.bin";
+      send("/control/firmware", file, "load " + name, {
+        "Content-Type": "application/octet-stream", "X-Flapsim-Firmware-Name": name });
+    } else if (which === "release") {
+      const tag = document.getElementById("firmware-tag").value.trim();
+      send("/control/firmware-release", { tag }, "load " + tag);
+    } else if (which === "restart") {
+      send("/control/restart", {}, "restart run");
     } else if (which === "mech") {
       const field = document.getElementById("mech-field").value;
       const raw = document.getElementById("mech-value").value.trim();
@@ -268,6 +314,8 @@ async function pollI2c() {
     const response = await fetch("/i2c" + query, { cache: "no-store" });
     const page = await response.json();
     if (!response.ok) throw new Error(page.error || "HTTP " + response.status);
+    // A replay from the start (first poll, or after an error) must not stack on the rows shown.
+    if (i2cCursor === null) i2c.replaceChildren();
     if (page.gap) i2c.prepend(i2cRow({ type: "gap", reason: page.gap.reason }));
     for (const record of page.records) {
       if (record.type === "i2c" || record.type === "gap") i2c.prepend(i2cRow(record));
@@ -278,6 +326,7 @@ async function pollI2c() {
     i2cStatus.textContent = page.stopped ? "stream stopped" : "";
   } catch (error) {
     i2cStatus.textContent = String(error.message || error);
+    i2cCursor = null;  // a restarted run rejects the old run's cursor: replay from the start
     delay = 2000;
   }
   setTimeout(pollI2c, delay);

@@ -30,7 +30,9 @@ with no stalls/anomalies and, when specified, exact text in module order.
 A settled state with stalls or anomalies fails with exit code 5 immediately,
 even when its text differs from the expectation.
 `--scenario boot` omits the text assertion; it still requires movement and the
-banner. `version`, `mode`, and `timeout` are required. Missing fields report
+banner. `--scenario hold` has no steps or checks: the firmware runs until the run is
+interrupted (SIGINT or SIGTERM, exit 130 or 143), for interactive use with
+`--control-port` and the [panel](panel.md); `flapsim serve` is built on it. `version`, `mode`, and `timeout` are required. Missing fields report
 their names with invalid-input exit code 2 before launch. Unknown keys,
 unsupported modes, duplicate YAML keys, invalid deadlines
 and text that cannot fit the physical modules fail before launch. Full scenario

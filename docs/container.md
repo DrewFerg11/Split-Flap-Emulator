@@ -83,6 +83,26 @@ Add a read-only mount from the checked-out `baselines/v1.4.1-golden.yaml` to
 diagnostics/expected failures were observed. Omit it when testing a new firmware
 release.
 
+## Home-lab mode in the image
+
+The image runs [`flapsim serve`](panel.md#home-lab-mode-flapsim-serve) like any other
+command. Publish the panel port, bind it inside the container and allow the name the
+browser uses:
+
+```sh
+mkdir -p out
+docker run -d --name splitflap --user "$(id -u):$(id -g)" -p 8765:8765 \
+  --mount "type=bind,source=$(realpath out),target=/out" \
+  ghcr.io/drewferg11/split-flap-emulator:<version> serve \
+  --hardware esp32-16-dual --firmware-release v1.4.1 --out /out/serve \
+  --bind 0.0.0.0 --allow-host "$(hostname):8765"
+docker logs splitflap   # the URL with the panel key
+```
+
+`127.0.0.1:8765` keeps working from the Docker host itself. `--firmware-release` and
+*Load release* need outbound HTTPS to GitHub; with `--network none`, mount an image and
+pass `--firmware` instead. `docker stop splitflap` stops the current run cleanly.
+
 ## Native mode in the image
 
 The image also runs [native mode](native.md). It ships the shim and model sources
