@@ -2,7 +2,8 @@
 
 > **Experimental in 1.0.** The live panel is shipped for early use and may change in 1.x releases while it is finished.
 
-`flapsim panel` serves a read-only web page for a run started with `--control-port`.
+`flapsim panel` serves a web page for a run started with `--control-port`. It is
+read-only unless started with `--controls` (see [Controls](#controls)).
 It shows the virtual display and, for every module, what is physically showing,
 its angle, flap error, hall level, coils, energized state, step counters, stalls and
 anomalies. It refreshes four times a second, with a short flip when a flap changes.
@@ -38,6 +39,45 @@ flapsim panel --run runs/live --port 8765
 # Panel for runs/live: http://127.0.0.1:8765/
 ```
 
+## Controls
+
+`flapsim panel --run runs/live --controls` adds a *Controls* section that sends
+commands to the run's [control API](control-api.md):
+
+- **Controller:** reset, power off and power on (the API's controller approximation;
+  the drums keep their angle).
+- **Fault:** set a module's `sensor`, `motor`, `i2c` or `power` fault to one of the
+  runtime modes the API accepts, or back to `ok`.
+- **Mechanics:** set one of a module's `sensor_window`, `magnet_position`,
+  `flap_offset`, `steps_per_rotation` or `sensor_polarity`.
+
+The result line shows the API's answer, for example `applied`, `HTTP 409 model_busy`
+(geometry needs every motor off) or `HTTP 409 controller_off`. Every command is
+audited in the run's `control.jsonl` like any other client's.
+
+```sh
+flapsim panel --run runs/live --port 8765 --controls
+# Panel for runs/live: http://127.0.0.1:8765/#key=…
+```
+
+Open the printed URL. Its fragment carries a random key for this panel process.
+Browsers never send a fragment to the server, so another local client can read the
+page but cannot learn the key from it. The page keeps the key for the tab and removes
+it from the address bar. A command is forwarded only when the request:
+
+- comes from the panel's own origin (`Origin` must be present and equal to it, and the
+  usual Host check applies),
+- carries the key in `X-Flapsim-Panel-Key`,
+- is `application/json` of at most 2 KiB, with no duplicate keys and only the fields
+  of that command.
+
+The panel chooses each command ID (milliseconds since the epoch, so they keep
+increasing across panel restarts and stay above a script's small IDs) and reads
+`expected_revision` from live state just before a mechanics command. A script that
+sends its own IDs to the same run after the panel has will see `409 stale_or_reused_id`.
+
+Without `--controls` the panel answers every POST with 501 and forwards nothing.
+
 ## One look across the UIs
 
 The live panel and the run's `replay.html` share one dark style and one display script
@@ -63,9 +103,12 @@ the run records in `run.json`. It reads `serial.log` from the run directory.
 | `/serial?since=<offset>` | serial output after a byte offset, at most 64 KiB; without `since`, the last 64 KiB. `restarted` means the log was replaced or is briefly missing (a QEMU startup retry) and the console clears and reads again from 0 |
 | `/run` | `firmware_url`: the run's loopback firmware web server, or null |
 
-- **Read-only:** the panel only serves those GET routes; it never forwards a
-  mutation, and the token never reaches the browser. Unknown or repeated query
-  parameters answer 400.
+- **Read-only by default:** without `--controls` the panel only serves those GET
+  routes and never forwards a mutation. With it, only `POST /control/reset`,
+  `/control/power` and `/control/mech` are added. The token never reaches the browser.
+  Unknown or repeated query parameters answer 400.
+- **Serial floods:** a console more than 256 KiB behind skips to the newest 64 KiB and
+  shows how many bytes it skipped; `serial.log` keeps them.
 - **Firmware output is text:** serial lines and I²C bytes are inserted as text,
   never parsed as HTML.
 - **Loopback only:** it binds `127.0.0.1` and rejects foreign `Host`/`Origin`
@@ -83,7 +126,6 @@ same container, or use `--network host` on Linux.
 
 Remaining #21 items:
 
-- fault, mechanics, power and reset controls
 - loading firmware and a long-running `serve` mode for the Docker image
 - what the firmware *should* be showing next to what is physically showing. v1.4.1
   exposes no target position (no route, I²C or serial signal reports it), and the
