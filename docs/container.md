@@ -18,7 +18,7 @@ Its [Release / Tag run](https://github.com/DrewFerg11/Split-Flap-Emulator/action
 layouts, timeout, stop, wrong-version rejection and native mode) before publishing it, and the
 image pulls anonymously. Split-Flap-Display pins it two ways:
 
-- Its non-gating PR check (`ci-native-emulator.yml`) uses the readable
+- Its required PR check (`ci-emulator-native.yml`) and nightly QEMU run (`ci-emulator-qemu.yml`) use the readable
   `ghcr.io/drewferg11/split-flap-emulator:0.1.0@sha256:acd9a51fe50c91530df3e1583ce070cb17e712d31d8d415654c43d97879d3935`.
   Docker pulls by the digest; the tag is only for readers.
 - The release gate ([Split-Flap-Display#85](https://github.com/DrewFerg11/Split-Flap-Display/pull/85))
