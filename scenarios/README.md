@@ -15,7 +15,7 @@ For the schema, step actions, freshness rules and reports, see
 | **Release** | `release.yml` (calls `ci-container.yml`) | On a `v*` tag, before the image is published. Runs the smoke scenarios from inside the built container image. PRs also run that container check. |
 | **Manual** | `flapsim run ...` | Not in any workflow. For local use and docs examples. |
 
-Two backends: **QEMU** runs the real v1.4.1 firmware binary, so it is the most faithful but
+Two backends: **QEMU** runs the real v1.4.2 firmware binary, so it is the most faithful but
 slow. **Native** builds the firmware source for the host, which is much quicker and supports
 extras QEMU cannot (Wi-Fi/MQTT, a controlled wall clock, `--speed`). Scenarios marked
 "native only" declare `modes: [native]`.
@@ -101,11 +101,11 @@ QEMU smokes, plus about 160 s for the native smoke and MQTT check, on top of the
 
 Step-based scenarios that assert a version need `--var FIRMWARE_VERSION=<release-tag>`;
 version matching is always strict. Golden CI runs also pass `--known-issues
-baselines/v1.4.1-golden.yaml` (QEMU) or `baselines/v1.4.1-native.yaml` (native), a
+baselines/v1.4.2-golden.yaml` (QEMU only; native runs strictly), a
 checksum-bound list of linked known firmware defects (see #15 and the docs). Example:
 
 ```
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
   --hardware esp32-8-single --scenario scenarios/release-smoke-8.yaml --seed 7 \
-  --var FIRMWARE_VERSION=v1.4.1 --known-issues baselines/v1.4.1-golden.yaml --out runs/smoke-8
+  --var FIRMWARE_VERSION=v1.4.2 --known-issues baselines/v1.4.2-golden.yaml --out runs/smoke-8
 ```

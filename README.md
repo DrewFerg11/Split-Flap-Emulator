@@ -44,23 +44,23 @@ sensors), use the same scenario files and produce the same reports.
 Use QEMU mode to decide whether a release is good, and native mode while developing firmware or for long and
 network-heavy tests. Scenarios drive the firmware the way a user does (web UI, HTTP, MQTT) and check what the
 virtual drums show. Most scenarios run in both modes; `*-native-*` scenarios are native only. CI runs the golden
-v1.4.1 firmware through both on every push.
+v1.4.2 firmware through both on every push.
 
 ```sh
 # QEMU mode: the released factory image
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin --hardware esp32-8-single \
-  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.1 --seed 7 \
-  --known-issues baselines/v1.4.1-golden.yaml --out runs/qemu-8
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin --hardware esp32-8-single \
+  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.2 --seed 7 \
+  --known-issues baselines/v1.4.2-golden.yaml --out runs/qemu-8
 
 # Native mode: build the golden source, then run the same scenario
 flapsim run --mode native --firmware-src golden --hardware esp32-8-single \
-  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.1 --seed 7 \
-  --known-issues baselines/v1.4.1-native.yaml --out runs/native-8
+  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.2 --seed 7 \
+  --out runs/native-8
 ```
 
-v1.4.1 has known firmware defects, so golden runs use each mode's
-[known-issues baseline](docs/scenarios.md#known-issue-baselines-golden-runs-only) (as CI does); without it they can fail
-on those defects. New firmware releases run strictly, without `--known-issues`.
+QEMU golden runs use the
+[known-issues baseline](docs/scenarios.md#known-issue-baselines-golden-runs-only) (as CI does) for the emulator's own
+I2C scheduling artifact; native golden runs and new firmware releases run strictly, without `--known-issues`.
 
 The container image `ghcr.io/drewferg11/split-flap-emulator` runs the same commands: `docker run <image> run ...`
 is `flapsim run ...` ([container docs](docs/container.md)).

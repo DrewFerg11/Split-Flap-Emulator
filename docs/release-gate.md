@@ -13,10 +13,9 @@ the strict simulation on every `v*` tag push, before publication. It pins:
 
 The gate is on the trusted release path, but #7's acceptance is not recorded yet: no
 positive/negative hosted runs (dry runs or a gated release) are linked from #7. Golden
-v1.4.1 itself fails the strict smokes because of SFD#54. Firmware `main` has the fix
-and passes them strictly in native mode (see
-[retiring the baseline entries](scenarios.md#retiring-the-sfd54-and-sfd86-entries)),
-so the next release is the first that can pass the gate.
+v1.4.1 itself failed the strict smokes because of SFD#54; v1.4.2 carries the fix and
+passes them strictly in native mode (see
+[retiring the baseline entries](scenarios.md#retiring-the-sfd54-and-sfd86-entries)).
 
 ## Inputs and trust
 
@@ -122,8 +121,8 @@ The companion has merged with the v0.1.0 image and helper pinned (above). What #
 still needs is evidence from trusted runs of that workflow: dry runs on an authorized
 tag for both passing layouts (or the first gated release), all four asserted
 rejection modes, preserved non-ESP32 builds and measured job durations, linked from
-#7. Golden v1.4.1 cannot provide the positive case because of SFD#54; a release
-carrying the firmware fix can. Keep acceptance unchecked until those runs exist.
+#7. Golden v1.4.1 could not provide the positive case because of SFD#54; a release
+carrying the firmware fix, such as v1.4.2, can. Keep acceptance unchecked until those runs exist.
 
 For an emulator update, publish/verify the new immutable image first, review its
 source and helper diff, update `FLAPSIM_IMAGE` and both helper `ref:` pins together,

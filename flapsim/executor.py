@@ -79,7 +79,7 @@ def excused(counters, known_issues, serial):
     """Whether a baseline explains every model fault: only drum stalls, each matched by a logged
     known I2C timeout (#14). Returns the tolerated-stall record, or None.
 
-    v1.4.1 logs only a module's first failed write per boot (SplitFlapModule::hasErrored), so
+    The firmware logs only a module's first failed write per boot (SplitFlapModule::hasErrored), so
     one logged timeout can stand for several lost writes. Once the run has logged one, stalls
     the model saw follow an address-only write (lost_write_stalls, #79) are explained as well."""
     stalls = counters["stalls"]

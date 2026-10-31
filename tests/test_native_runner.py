@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 from flapsim import native
 from flapsim.baseline import KnownIssues, load_known_issues
@@ -197,8 +198,20 @@ def test_speed_is_bounded(speed):
         native.check_speed(speed)
 
 
-def test_native_baseline_binds_a_clean_source_commit():
-    baseline = load_known_issues(ROOT / "baselines/v1.4.1-native.yaml")
+def native_baseline(path, commit=COMMIT):
+    entry = {"issue": "a/b#1", "reason": "r", "regex": "^x$"}
+    document = {
+        "version": 1,
+        "firmware_source_commit": commit,
+        "description": "d",
+        "serial": [entry],
+    }
+    path.write_text(yaml.safe_dump(document))
+    return path
+
+
+def test_native_baseline_binds_a_clean_source_commit(tmp_path):
+    baseline = load_known_issues(native_baseline(tmp_path / "native.yaml"))
     assert baseline.firmware_source_commit == COMMIT and baseline.firmware_sha256 is None
     baseline.check_source(COMMIT, False)
     with pytest.raises(ValueError, match="clean firmware source"):
@@ -207,41 +220,9 @@ def test_native_baseline_binds_a_clean_source_commit():
         baseline.check_source("1" * 40, False)
     with pytest.raises(ValueError, match="binds native firmware source"):
         baseline.check_firmware("0" * 64)
-    golden = load_known_issues(ROOT / "baselines/v1.4.1-golden.yaml")
+    golden = load_known_issues(ROOT / "baselines/v1.4.2-golden.yaml")
     with pytest.raises(ValueError, match="binds a QEMU firmware image"):
         golden.check_source(COMMIT, False)
-
-
-def test_native_baseline_carries_the_golden_firmware_defect_entries():
-    # The same v1.4.1 defects (SFD#86 splices, SFD#54 item 4) must be expected in both modes.
-    native = load_known_issues(ROOT / "baselines/v1.4.1-native.yaml")
-    golden = load_known_issues(ROOT / "baselines/v1.4.1-golden.yaml")
-
-    def splices(baseline):
-        return [e["regex"] for e in baseline.serial if e["issue"].endswith("#86")]
-
-    assert len(splices(golden)) == 4 and splices(native) == splices(golden)
-    assert any("request-body form" in e["reason"] for e in native.serial)
-    key = ("release-smoke-16", 11, "assert_no_errors")
-    shared = [
-        [e["error"] for e in b.failures if (e["scenario"], e["step"], e["action"]) == key]
-        for b in (native, golden)
-    ]
-    assert len(shared[0]) == 1 and shared[0] == shared[1]
-
-
-def test_native_baseline_covers_only_the_putstring_commit_race():
-    native = load_known_issues(ROOT / "baselines/v1.4.1-native.yaml")
-    prefix = "[ 24922][E][Preferences.cpp:278] putString(): nvs_commit fail: "
-    line = prefix + "wire1Addresses INVALID_HANDLE"
-    assert native.tolerated_serial(line)["issue"] == "DrewFerg11/Split-Flap-Display#54"
-    for bad in [
-        line.replace("INVALID_HANDLE", "NOT_FOUND"),
-        line.replace("putString", "putBytes"),
-        line.replace("nvs_commit", "nvs_set_str"),
-        line + " extra",
-    ]:
-        assert native.tolerated_serial(bad) is None, bad
 
 
 def test_baseline_binding_is_one_validated_identity():
@@ -264,7 +245,7 @@ def test_baseline_binding_is_one_validated_identity():
 
 def test_native_baseline_rejects_a_dirty_build_before_launch(native_args, tmp_path):
     native_args.native_build = fake_build(tmp_path / "dirty", dirty=True)
-    native_args.known_issues = ROOT / "baselines/v1.4.1-native.yaml"
+    native_args.known_issues = native_baseline(tmp_path / "native.yaml")
     native_args.scenario = "release-smoke-8"
     native_args.variables = ["FIRMWARE_VERSION=v1.4.1"]
     with pytest.raises(ValueError, match="clean firmware source"):

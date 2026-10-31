@@ -89,8 +89,7 @@ jobs:
         run: |
           for scenario in runtime-controls-16 runtime-speed-native-16; do
             flapsim run --mode native --native-build build/native/golden --hardware esp32-16-dual \
-              --scenario "$scenario" --known-issues baselines/v1.4.1-native.yaml \
-              --out "runs/native/$scenario"
+              --scenario "$scenario" --out "runs/native/$scenario"
           done
       - name: Verify deterministic faults, unaffected modules and recovery
         run: |
@@ -127,15 +126,15 @@ jobs:
             python -m tools.verify_control_lifecycle --mode native --native-build build/native/golden \
               --case "$lifecycle_case" --out "runs/native/control-lifecycle-$lifecycle_case"
           done
-      - name: Run the golden smoke scenarios natively under the native known-issues baseline
+      - name: Run the golden smoke scenarios natively and strictly
         if: matrix.name != 'sanitizers'
         run: |
           set -e
           for layout in "8 esp32-8-single" "16 esp32-16-dual"; do
             set -- $layout
             flapsim run --mode native --native-build build/native/golden --hardware "$2" \
-              --scenario "scenarios/release-smoke-$1.yaml" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
-              --known-issues baselines/v1.4.1-native.yaml --out "runs/native/smoke-$1"
+              --scenario "scenarios/release-smoke-$1.yaml" --seed 7 --var FIRMWARE_VERSION=v1.4.2 \
+              --out "runs/native/smoke-$1"
           done
       - name: Run MQTT and controlled-clock scenarios natively
         if: matrix.name != 'sanitizers'
@@ -143,8 +142,8 @@ jobs:
           set -e
           for scenario in mqtt-native-8 clock-dst-native-8 date-rollover-native-8; do
             flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
-              --scenario "$scenario" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
-              --known-issues baselines/v1.4.1-native.yaml --out "runs/native/$scenario"
+              --scenario "$scenario" --seed 7 --var FIRMWARE_VERSION=v1.4.2 \
+              --out "runs/native/$scenario"
           done
       - name: Run the first-boot scenarios natively on both layouts
         if: matrix.name != 'sanitizers'
@@ -153,8 +152,8 @@ jobs:
           for layout in "8 esp32-8-single" "16 esp32-16-dual"; do
             set -- $layout
             flapsim run --mode native --native-build build/native/golden --hardware "$2" \
-              --scenario "first-boot-$1" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
-              --known-issues baselines/v1.4.1-native.yaml --out "runs/native/first-boot-$1"
+              --scenario "first-boot-$1" --seed 7 --var FIRMWARE_VERSION=v1.4.2 \
+              --out "runs/native/first-boot-$1"
           done
       - name: Run injected-fault scenarios natively
         if: matrix.name != 'sanitizers'
@@ -163,8 +162,8 @@ jobs:
           for fault in "stuck-sensor esp32-8-single-stuck-sensor" "module-lost esp32-8-single-module-lost"; do
             set -- $fault
             flapsim run --mode native --native-build build/native/golden --hardware "$2" \
-              --scenario "fault-$1-8" --seed 7 --var FIRMWARE_VERSION=v1.4.1 \
-              --known-issues baselines/v1.4.1-native.yaml --out "runs/native/fault-$1-8"
+              --scenario "fault-$1-8" --seed 7 --var FIRMWARE_VERSION=v1.4.2 \
+              --out "runs/native/fault-$1-8"
           done
       - name: Log native scenario outcomes
         if: always()
@@ -211,10 +210,10 @@ jobs:
       - name: Run real-firmware golden scenario
         if: matrix.name != 'negative-versions' && !startsWith(matrix.name, 'control-')
         run: |
-          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
             --hardware "${{ matrix.hardware }}" --scenario "scenarios/${{ matrix.scenario }}.yaml" \
-            --seed "${{ matrix.seed }}" --var FIRMWARE_VERSION=v1.4.1 \
-            --known-issues baselines/v1.4.1-golden.yaml \
+            --seed "${{ matrix.seed }}" --var FIRMWARE_VERSION=v1.4.2 \
+            --known-issues baselines/v1.4.2-golden.yaml \
             --out runs/scenario
           python -c 'import json; m=json.load(open("runs/scenario/run.json")); print("Scenario wall seconds:", m["wall_seconds"])'
       - name: Prove prerelease and deliberately wrong versions fail
@@ -224,35 +223,35 @@ jobs:
         if: startsWith(matrix.name, 'control-')
         run: |
           python -m tools.verify_control \
-            --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
-            --hardware "${{ matrix.hardware }}" --known-issues baselines/v1.4.1-golden.yaml \
+            --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
+            --hardware "${{ matrix.hardware }}" --known-issues baselines/v1.4.2-golden.yaml \
             --out runs/scenario
       - name: Verify stopped controller power and power-on during motion
         if: startsWith(matrix.name, 'control-')
         run: |
           python -m tools.verify_power --mode qemu \
-            --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+            --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
             --hardware "${{ matrix.hardware }}" --i2c-history \
-            --known-issues baselines/v1.4.1-golden.yaml --out runs/power
+            --known-issues baselines/v1.4.2-golden.yaml --out runs/power
       - name: Verify QEMU cleanup with an active WebSocket
         if: matrix.name == 'control-16'
         run: |
           for lifecycle_case in timeout sigint sigterm crash; do
             python -m tools.verify_control_lifecycle --mode qemu \
-              --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin --case "$lifecycle_case" \
+              --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin --case "$lifecycle_case" \
               --out "runs/control-lifecycle-$lifecycle_case"
           done
       - name: Verify declarative runtime controls with real QEMU firmware
         if: matrix.name == 'control-16'
         run: |
-          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
             --hardware esp32-16-dual --scenario runtime-controls-16 \
-            --known-issues baselines/v1.4.1-golden.yaml --out runs/runtime-controls-16
+            --known-issues baselines/v1.4.2-golden.yaml --out runs/runtime-controls-16
       - name: Verify a disconnected module, unaffected drums and fault recovery
         if: matrix.name == 'control-16'
         run: |
-          python -m tools.verify_faults --mode qemu --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
-            --hardware esp32-16-dual --case absent --known-issues baselines/v1.4.1-golden.yaml \
+          python -m tools.verify_faults --mode qemu --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
+            --hardware esp32-16-dual --case absent --known-issues baselines/v1.4.2-golden.yaml \
             --out runs/fault-control-16
       - name: Log available scenario outcome
         if: always() && matrix.name != 'negative-versions'

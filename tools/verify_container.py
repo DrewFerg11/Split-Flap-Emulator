@@ -238,7 +238,8 @@ class ImageVerifier:
         extra_mounts = []
         known_issues = name in {"smoke-8", "smoke-16", "runtime-controls-16"} and not wrong_version
         if known_issues:
-            extra_mounts.append((ROOT / "baselines/v1.4.1-golden.yaml", "/known-issues.yaml"))
+            baseline = ROOT / f"baselines/{GOLDEN['tag']}-golden.yaml"
+            extra_mounts.append((baseline, "/known-issues.yaml"))
         scale = self.args.timeout_scale
         if scale != 1 and scenario in self.resources["scenarios"]:
             document = yaml.safe_load(self.resources["scenarios"][scenario])
@@ -275,18 +276,13 @@ class ImageVerifier:
             scenario,
             "--var",
             f"FIRMWARE_VERSION={GOLDEN['tag']}",
-            "--known-issues",
-            "/known-issues.yaml",
             "--out",
             "/out/run",
             "--control-port",
             "0",
             "--i2c-history",
         ]
-        mounts = [
-            (source, "/firmware-src"),
-            (ROOT / "baselines/v1.4.1-native.yaml", "/known-issues.yaml"),
-        ]
+        mounts = [(source, "/firmware-src")]
         # The case covers a full firmware build plus the scenario.
         timeout = 1200 * self.args.timeout_scale
         with self.container(name, command, mounts) as (container_id, case):

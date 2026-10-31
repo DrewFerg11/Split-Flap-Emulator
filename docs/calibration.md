@@ -60,9 +60,9 @@ explicit physical values.
 
 ```sh
 python -m tools.verify_model --fetch-only
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
   --hardware esp32-8-single-calibration --scenario calibration-8 \
-  --var FIRMWARE_VERSION=v1.4.1 --known-issues baselines/v1.4.1-golden.yaml \
+  --var FIRMWARE_VERSION=v1.4.2 --known-issues baselines/v1.4.2-golden.yaml \
   --out runs/calibration-8
 ```
 

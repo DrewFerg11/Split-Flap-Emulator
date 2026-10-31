@@ -5,9 +5,9 @@ and run a smoke scenario:
 
 ```sh
 python -m tools.verify_model --fetch-only
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
   --hardware esp32-8-single --scenario scenarios/release-smoke-8.yaml \
-  --var FIRMWARE_VERSION=v1.4.1 --known-issues baselines/v1.4.1-golden.yaml \
+  --var FIRMWARE_VERSION=v1.4.2 --known-issues baselines/v1.4.2-golden.yaml \
   --out runs/smoke-8
 ```
 
@@ -46,11 +46,11 @@ versions. Do not edit expectations to follow whatever the device reports.
 
 There is no version exception. The previous v1.4.0 golden image reported
 `v1.4.0-rc.1` (fixed in firmware by
-[SFD #87](https://github.com/DrewFerg11/Split-Flap-Display/pull/87)); the v1.4.1
+[SFD #87](https://github.com/DrewFerg11/Split-Flap-Display/pull/87)); the v1.4.2
 golden image reports its own tag, so the exception was retired.
 
 `python -m tools.verify_negative_version --out runs/negative-versions` proves
-that exact-match expectations of the golden tag's prerelease (`v1.4.1-rc.1`, the
+that exact-match expectations of the golden tag's prerelease (`v1.4.2-rc.1`, the
 v1.4.0 failure mode in reverse) and a deliberately wrong `v9.9.9` both fail with
 exit 5 against the pinned image,
 produce failing JUnit evidence, and reap QEMU.
@@ -58,9 +58,9 @@ An unexpected pass, timeout or different failure makes this verifier fail.
 
 ## Known-issue baselines (golden runs only)
 
-The golden image has known firmware defects that the strict smoke scenarios
-correctly detect. To keep the emulator's own CI meaningful without hiding them,
-golden runs pass `--known-issues baselines/v1.4.1-golden.yaml`. The policy is
+The QEMU golden run records the emulator's own I2C scheduling artifact
+(#14) that the strict smoke scenarios detect. To keep the emulator's own CI meaningful without hiding it,
+QEMU golden runs pass `--known-issues baselines/v1.4.2-golden.yaml`. The policy is
 tracked in [#15](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15).
 
 - A baseline names one firmware SHA-256. Any other firmware is rejected before
@@ -88,7 +88,7 @@ Remove entries as their issues are fixed, and delete the file when it is empty.
 ### Retiring the SFD#54 and SFD#86 entries
 
 Split-Flap Display fixed the settings race on its `main` (`ef65640`, SFD#91: one locked
-Preferences handle, and unset keys no longer logged). That also removes the fresh-NVS
+Preferences handle, and unset keys no longer logged). That also removed the fresh-NVS
 diagnostic that SFD#86 splices into. Measured natively without any baseline, with seeds
 1-3 on each layout:
 
@@ -97,12 +97,12 @@ diagnostic that SFD#86 splices into. Measured natively without any baseline, wit
 | golden v1.4.1 | 0/4 pass (lost settings writes time out) | 28,363 |
 | `ef65640` | 6/6 pass | 0 |
 
-No firmware release contains the fix yet, so the golden image and its baseline stay as
-they are. The nightly `firmware-main-strict` job (`ci-nightly.yml`) builds firmware
-`main` and runs both release smokes with no baseline. When a release carrying the fix
-becomes the golden image and that job is green, remove the SFD#54 and SFD#86 entries,
-along with `tools/sfd86_patterns.py` and its tests. The #14 entries stay until the
-scheduling artifact itself is fixed.
+Firmware v1.4.2 (source commit `5af2bef`) carries the fix (SFD#91) and became the golden
+image. With the nightly `firmware-main-strict` job (`ci-nightly.yml`, firmware `main`, no
+baseline) green, the SFD#54 and SFD#86 entries were retired at v1.4.2, along with
+`tools/sfd86_patterns.py` and its tests, and the native baseline was deleted because
+nothing else remained in it. Only the #14 entries and the #94 expected failure stay, until
+the scheduling artifact itself is fixed.
 
 ### Native-only setup and MQTT steps
 
@@ -121,7 +121,7 @@ nvs:                             # seeded settings store: str -> str, int -> i32
 ```
 
 Seeding NVS starts from a provisioned device without going through `POST /settings`, which
-the golden firmware's SFD#54 race would usually lose. `mqtt_publish: {topic, payload, retain?}`
+the SFD#54 race (fixed in v1.4.2) would usually lose. `mqtt_publish: {topic, payload, retain?}`
 publishes a command, and `wait_mqtt: {topic, payload? | json?, retained?}` waits for the next
 matching message after the previous match (`json` is a subset match); every message is kept in
 `mqtt.jsonl`. Bundled examples: `mqtt-native-8` (Home Assistant discovery, availability,
@@ -130,13 +130,11 @@ spring-forward hour) and `date-rollover-native-8` (day, month and year at New Ye
 
 ### Native-mode baseline
 
-`baselines/v1.4.1-native.yaml` is the native-mode counterpart for the emulator's own native
-CI. Instead of an image checksum it binds `firmware_source_commit`, and applies only to a
-**clean** build of that commit (a dirty or different checkout is rejected before launch). A
+There is no native baseline at v1.4.2; native golden runs are strict. The mechanism remains: a
+native baseline binds `firmware_source_commit` instead of an image checksum, and applies only to
+a **clean** build of that commit (a dirty or different checkout is rejected before launch). A
 baseline binds exactly one of `firmware_sha256` (QEMU mode) or `firmware_source_commit`
-(native mode) and is refused by the other mode. Native mode runs the loop and web-server tasks
-as truly parallel threads, so the SFD#54 lost-write race reproduces far more often than in
-QEMU mode, including before the smoke-8 reboot (step 10).
+(native mode) and is refused by the other mode.
 
 ## Schema
 
@@ -262,9 +260,8 @@ stalls/anomalies before completing startup X. PRs run seed 7 and the nightly wor
 `name` (`stress-<round>`) while `readers` (0–16, default 4) `GET /settings` run at the same
 time, then reads the name back. A concurrent read that sees anything but the previous or
 the new name is a raced read; a read-back without the new name is a lost write. Either
-fails the step with the round and the values seen. v1.4.1 loses the first write in native
-mode, so golden runs record it as a #54 expected failure; firmware with the fix passes
-all 30 rounds.
+fails the step with the round and the values seen. v1.4.1 lost the first write in native
+mode (SFD#54); v1.4.2 passes all 30 rounds.
 `clock-soak-native-8.yaml` (native only) runs time mode for three guest hours, 180 display
 updates, and then asserts no errors and no model faults. Run it with `--speed 50`: it takes
 about 3.5 wall minutes. The nightly workflow runs it (and `settings-race-8`) on the golden source under the
@@ -277,10 +274,9 @@ with every saved value read back and the new layout in effect, then
 `POST /settings/reset` back to the first-boot display and defaults. After the reboot
 they wait for `Homing` before the display check; after the reset, which does not home,
 they wait for the blank settlement (`history: true`). Either way a display that already
-showed the target can't match early. CI runs both natively against the golden source
-under the native baseline, where v1.4.1 fails them on
-[SFD#54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54)'s lost writes;
-firmware with that fixed passes them strictly.
+showed the target can't match early. CI runs both natively against the golden source,
+strictly; v1.4.1 failed them on
+[SFD#54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54)'s lost writes.
 
 ## Evidence and validation
 
@@ -323,49 +319,29 @@ local-host timing for CI measurements.
 
 ## Golden acceptance blockers
 
-The checksum-pinned published v1.4.1 image (like v1.4.0) does not pass both complete smokes.
-[Firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54)
-records settings GET readback returning defaults despite confirmed persistence,
-and dual-row text POST returning HTTP 200 without subsequent motion. Readback
-sometimes passes, while rebooted Preferences missing-key errors still fail the
-strict error gate. The maintainer owns the firmware fix. The accepted #15 golden baseline now
-records these failures explicitly so they do not block emulator PRs.
+The checksum-pinned published v1.4.1 image (like v1.4.0) did not pass both complete smokes
+([firmware #54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54): lost settings
+writes, and rebooted Preferences missing-key errors). v1.4.2 fixes it (SFD#91) and is the golden
+image, so the baseline no longer records those failures.
 
 The intermittent I2C read Error 263 and write `error code: 5` in
 [emulator #14](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/14)
 are an emulator scheduling artifact, not a firmware or model defect. QEMU runs the
-ESP32's two cores in turn on one thread. ESP-IDF's I2C ISR for `Wire1` (core 1) can be
+ESP32's two cores in turn on one thread. ESP-IDF's I2C ISR for `Wire1` (core 1 up to v1.4.1) can be
 parked between posting DONE to the `Wire1` task (core 0) and setting the driver idle;
 the task's next transfer then has its interrupt ignored and times out. A write that
 times out loses one coil pattern, which can stall one drum. The golden baseline
 records both lines, and each logged write timeout (`explains_stalls: 1`) excuses at
 most one drum stall in the same run; anomalies, other write codes and stalls beyond
-that count still fail. v1.4.1 logs only a module's first failed write per boot
+that count still fail. The firmware logs only a module's first failed write per boot
 (`SplitFlapModule::hasErrored`), so later timeouts on that module are silent. Once
 the run has logged one, the stalls the model counts in `lost_write_stalls` (each
 one followed a write that delivered only its address) are explained too. Scenario reports list tolerated stalls under the known issues.
 A faithful fix needs different core scheduling, tracked in #14.
 
-The checksum-bound golden baseline also records the exact Preferences.begin
-NOT_FOUND timestamp fragment documented in [SFD #86](https://github.com/DrewFerg11/Split-Flap-Display/issues/86).
-Its retained raw UART capture shows request logging inserted inside a diagnostic
-record. Where the split lands varies between runs: the line ends with the
-diagnostic's tail starting anywhere in its `[ timestamp]` (a bare digit suffix or
-the full timestamp), preceded by the other task's partial output. That output must
-be the `POST /text` or `/settings` request log, or that request's body in the
-shapes v1.4.1 logs (`{"mode":"<mode>",...}` for `/text`, settings keys for
-`/settings`, scalar values only), followed by the exact Preferences.cpp:50
-message. When only the other task's newline lands inside the diagnostic, the record
-is split into two bare lines, and each is accepted: a head ending anywhere from its
-`[ timestamp][E]` marker on, and a tail that is any remainder of the diagnostic after the
-cut (for example `[ 38085][E][Pref` and `erences.cpp:50] begin(): nvs_open failed: NOT_FOUND`).
-Other text, such as `{not-json}`, still fails. The splice regexes are
-generated by [`tools/sfd86_patterns.py`](../tools/sfd86_patterns.py), which lists
-the accepted shapes. An unspliced diagnostic line is
-left to the normal `fresh_nvs` policy. Counts/first occurrence remain visible. Strict default and new-release
-runs still reject it, as do other malformed messages. This records current-image
-behavior while the firmware maintainer investigates writer/SDK locking; it does
-not repair logging or establish physical-hardware behavior.
+The SFD#86 diagnostic splice (request logging inserted inside the fresh-NVS Preferences.begin
+record) was accepted for v1.4.1 only. v1.4.2 no longer logs unset keys, so those patterns,
+`tools/sfd86_patterns.py` and the native baseline were removed at v1.4.2.
 
 ## Declarative runtime controls
 
@@ -421,5 +397,5 @@ Both are installed resources:
 ```sh
 flapsim run --mode native --native-build build/native/golden \
   --hardware esp32-16-dual --scenario runtime-controls-16 \
-  --known-issues baselines/v1.4.1-native.yaml --out runs/runtime-controls
+  --out runs/runtime-controls
 ```
