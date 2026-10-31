@@ -4,7 +4,7 @@ Install and build using [development.md](development.md), then run:
 
 ```sh
 python -m tools.verify_model --fetch-only
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
   --hardware esp32-8-single --scenario scenarios/boot-esp32-8-single.yaml \
   --out runs/boot-8
 python -m tools.verify_model --hardware esp32-8-single --out runs/boot-8
@@ -65,7 +65,7 @@ an ownership gap around process launch.
 ```sh
 python native/build.py --out build/native/golden
 flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
-  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.1 --out runs/native-8
+  --scenario scenarios/release-smoke-8.yaml --var FIRMWARE_VERSION=v1.4.2 --out runs/native-8
 ```
 
 `--firmware-src golden|git:<ref>|<checkout>` builds first instead (from a source checkout).

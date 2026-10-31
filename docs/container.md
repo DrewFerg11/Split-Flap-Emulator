@@ -26,7 +26,7 @@ image pulls anonymously. Split-Flap-Display pins it two ways:
   rejects any other form before contacting a registry.
 
 Golden image checks explicitly mount the checksum-bound
-[known-issues baseline](../baselines/v1.4.1-golden.yaml), following the accepted
+[known-issues baseline](../baselines/v1.4.2-golden.yaml), following the accepted
 [#15 policy](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15).
 Matched diagnostics and expected failures remain visible as
 `passed_with_known_issues`/`xfail`, including the
@@ -75,10 +75,10 @@ Only the checksum-pinned published golden image may use the known-issues baselin
 
 ```sh
 # Add these arguments to a golden smoke command, not a firmware release gate:
---var FIRMWARE_VERSION=v1.4.1 --known-issues /known-issues.yaml
+--var FIRMWARE_VERSION=v1.4.2 --known-issues /known-issues.yaml
 ```
 
-Add a read-only mount from the checked-out `baselines/v1.4.1-golden.yaml` to
+Add a read-only mount from the checked-out `baselines/v1.4.2-golden.yaml` to
 `/known-issues.yaml` for this golden example. The baseline records exactly which
 diagnostics/expected failures were observed. Omit it when testing a new firmware
 release.
@@ -94,7 +94,7 @@ mkdir -p out
 docker run -d --name splitflap --user "$(id -u):$(id -g)" -p 8765:8765 \
   --mount "type=bind,source=$(realpath out),target=/out" \
   ghcr.io/drewferg11/split-flap-emulator:<version> serve \
-  --hardware esp32-16-dual --firmware-release v1.4.1 --out /out/serve \
+  --hardware esp32-16-dual --firmware-release v1.4.2 --out /out/serve \
   --bind 0.0.0.0 --allow-host "$(hostname):8765"
 docker logs splitflap   # the URL with the panel key
 ```
@@ -112,13 +112,13 @@ firmware-derived binary.** Mount a firmware checkout and the run builds it insid
 directory, with no network access:
 
 ```sh
-git clone --depth 1 --branch v1.4.1 https://github.com/DrewFerg11/Split-Flap-Display fw-src
+git clone --depth 1 --branch v1.4.2 https://github.com/DrewFerg11/Split-Flap-Display fw-src
 mkdir -p out/native-8
 docker run --rm --network none --user "$(id -u):$(id -g)" \
   --mount "type=bind,source=$(realpath fw-src),target=/firmware-src,readonly" \
   --mount "type=bind,source=$(realpath out/native-8),target=/out" \
   ghcr.io/drewferg11/split-flap-emulator:<version> run --mode native --firmware-src /firmware-src \
-  --hardware esp32-8-single --scenario release-smoke-8 --var FIRMWARE_VERSION=v1.4.1 \
+  --hardware esp32-8-single --scenario release-smoke-8 --var FIRMWARE_VERSION=v1.4.2 \
   --out /out/run
 ```
 

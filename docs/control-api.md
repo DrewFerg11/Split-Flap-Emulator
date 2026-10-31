@@ -10,9 +10,9 @@ The complete #20 scope is implemented and accepted; see [the implementation plan
 
 ```sh
 python -m pip install -e '.[control]'
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
   --hardware esp32-8-single --scenario homing-random \
-  --var FIRMWARE_VERSION=v1.4.1 --control-port 0 --out runs/live
+  --var FIRMWARE_VERSION=v1.4.2 --control-port 0 --out runs/live
 ```
 
 `--control-port 0` binds an OS-assigned port on `127.0.0.1`; an explicit port is
@@ -331,7 +331,7 @@ mistake a reused descriptor for the control channel.
 ```sh
 python -m tools.verify_model --fetch-only
 python -m tools.verify_control \
-  --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+  --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
   --hardware esp32-8-single --out runs/control-probe
 ```
 

@@ -29,10 +29,10 @@ jobs:
           set -e
           flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
             --scenario settings-race-8 --seed 7 \
-            --known-issues baselines/v1.4.1-native.yaml --out runs/native/settings-race-8
+            --out runs/native/settings-race-8
           flapsim run --mode native --native-build build/native/golden --hardware esp32-8-single \
             --scenario clock-soak-native-8 --seed 7 --speed 50 \
-            --known-issues baselines/v1.4.1-native.yaml --out runs/native/clock-soak-native-8
+            --out runs/native/clock-soak-native-8
       - name: Log native scenario outcomes
         if: always()
         run: |
@@ -57,9 +57,8 @@ jobs:
             runs/native/**/*.html
 
   firmware-main-strict:
-    # The golden baseline (#15) tolerates SFD#54 and SFD#86 only until a firmware release
-    # carries their fixes. This tracks firmware main strictly, with no baseline, so the
-    # entries can be retired with evidence as soon as such a release becomes the golden image.
+    # Tracks firmware main strictly, with no baseline, so a regression shows up before the next
+    # release becomes the golden image (it gave the evidence to retire SFD#54 and SFD#86 at v1.4.2).
     name: Firmware main, strict (no known-issues baseline)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -118,10 +117,10 @@ jobs:
       - uses: ./.github/actions/qemu-setup
       - name: Run real-firmware golden scenario
         run: |
-          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+          flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
             --hardware esp32-8-single --scenario scenarios/homing-random.yaml \
-            --seed "${{ matrix.seed }}" --var FIRMWARE_VERSION=v1.4.1 \
-            --known-issues baselines/v1.4.1-golden.yaml \
+            --seed "${{ matrix.seed }}" --var FIRMWARE_VERSION=v1.4.2 \
+            --known-issues baselines/v1.4.2-golden.yaml \
             --out runs/scenario
       - name: Log available scenario outcome
         if: always()

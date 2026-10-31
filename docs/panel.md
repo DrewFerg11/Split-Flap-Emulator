@@ -32,7 +32,7 @@ Below the display:
 # Terminal 1: a run with the control API and I2C history enabled (QEMU or native)
 flapsim run --mode native --native-build build/native/golden \
   --hardware esp32-16-dual --scenario release-smoke-16 \
-  --var FIRMWARE_VERSION=v1.4.1 --control-port 0 --i2c-history --out runs/live
+  --var FIRMWARE_VERSION=v1.4.2 --control-port 0 --i2c-history --out runs/live
 
 # Terminal 2: the panel for that run
 flapsim panel --run runs/live --port 8765
@@ -84,7 +84,7 @@ Without `--controls` the panel answers every POST with 501 and forwards nothing.
 Ctrl-C or SIGTERM (`docker stop`):
 
 ```sh
-flapsim serve --hardware esp32-16-dual --firmware-release v1.4.1
+flapsim serve --hardware esp32-16-dual --firmware-release v1.4.2
 # Serving esp32-16-dual (qemu) from runs/serve: http://127.0.0.1:8765/#key=…
 
 flapsim serve --mode native --native-build build/native/golden --hardware esp32-8-single
@@ -122,7 +122,7 @@ By default serve listens on `127.0.0.1:8765` only. To use it from another machin
 for example a Proxmox LXC or VM:
 
 ```sh
-flapsim serve --hardware esp32-16-dual --firmware-release v1.4.1 \
+flapsim serve --hardware esp32-16-dual --firmware-release v1.4.2 \
   --bind 0.0.0.0 --allow-host splitflap.lan:8765
 ```
 

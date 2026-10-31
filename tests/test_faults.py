@@ -250,7 +250,7 @@ def test_golden_baseline_tolerates_the_emulator_wire1_timeout_read_only():
     from flapsim.baseline import load_known_issues
     from flapsim.scenario import ExecutionFailed, serial_errors
 
-    known = load_known_issues("baselines/v1.4.1-golden.yaml")
+    known = load_known_issues("baselines/v1.4.2-golden.yaml")
     read = "[ 52001][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263"
     serial_errors(read, {"fresh_nvs": True}, known)
     with pytest.raises(ExecutionFailed):
@@ -263,7 +263,7 @@ def test_stalls_are_excused_only_as_far_as_the_golden_baseline_explains_them():
     from flapsim.baseline import load_known_issues
     from tools.verify_faults import unexcused_faults
 
-    known = load_known_issues("baselines/v1.4.1-golden.yaml")
+    known = load_known_issues("baselines/v1.4.2-golden.yaml")
     serial = (
         "Error writing data to module 33, error code: 5\n"
         "Error writing data to module 34, error code: 2"

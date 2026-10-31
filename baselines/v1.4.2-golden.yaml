@@ -1,0 +1,47 @@
+# Known-issue baseline for the checksum-pinned v1.4.2 golden image (esp32_n4 factory).
+# Policy and exit criteria: https://github.com/DrewFerg11/Split-Flap-Emulator/issues/15
+#
+# Used only by the emulator's own golden CI runs (--known-issues). Release gating of new firmware
+# never passes a baseline, so everything below fails there. Remove entries as their issues are fixed;
+# delete this file when it is empty.
+version: 1
+firmware_sha256: e65dc8d0aa30057cad41f3bca4425000308b17d0d9ad93b520b3dbf2c7d54c5a
+description: >-
+  Published v1.4.2 esp32_n4 factory image. v1.4.2 fixes the settings race and the unset-key log
+  noise (SFD#54, via SFD#91), which also removes the fresh-NVS diagnostic that SFD#86 spliced into,
+  so only the QEMU-only #14 scheduling artifact remains. v1.4.2 also installs Wire1's I2C driver on
+  core 0 with its transfers (SFD#90); the #14 entries stay until runs show the artifact is gone.
+
+serial:
+  - issue: DrewFerg11/Split-Flap-Emulator#14
+    reason: >-
+      Emulator scheduling artifact in 16-module dual-bus runs. QEMU runs the two cores in turn, so
+      when Wire1's I2C ISR runs on the other core from its task (core 1 and core 0 up to v1.4.1) it
+      can be parked between posting DONE to the task and setting the driver idle; the task's next transfer then has its interrupt ignored and
+      times out (here a hall-sensor read: Error 263). Real parallel cores cannot interleave this
+      way. A read loses no coil pattern, so this line excuses no stall.
+    regex: '^\[\s*\d+\]\[E\]\[Wire\.cpp:\d+\] requestFrom\(\): i2cRead returned Error 263$'
+  - issue: DrewFerg11/Split-Flap-Emulator#14
+    reason: >-
+      The write-side form of the same emulator scheduling artifact: Wire endTransmission code 5
+      (timeout). Only the address reached the module, so its coil pattern was lost and one drum
+      stall may follow; each such line excuses one stall. The firmware logs only a module's
+      first failed write per boot, so once a line is logged, the stalls the model saw follow an
+      address-only write (lost_write_stalls, #79) are excused too. Other write codes (e.g. 2, missing module)
+      are not covered.
+    explains_stalls: 1
+    regex: '^Error writing data to module \d+, error code: 5$'
+
+expected_failures:
+  - issue: DrewFerg11/Split-Flap-Emulator#94
+    reason: >-
+      Boot homing in a 16-module dual-bus run can stall when the #14 scheduling artifact times out
+      a coil write during homing: the firmware latches that module's hasErrored flag, after which
+      its hall reads return false and further failed writes are silent. Expected only when the run
+      also logged a #14 write timeout (requires_serial); a homing timeout without one, or any
+      model anomaly, still fails.
+    scenario: release-smoke-16
+    step: 3
+    action: wait_display
+    error: timeout
+    requires_serial: '^Error writing data to module \d+, error code: 5$'

@@ -22,7 +22,7 @@ coverage QEMU mode cannot reach.
   shims for everything the firmware touches without a network, and a bounded verifier.
 - Phase 2 ([#30](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/30)): host sockets, the
   HTTP transport and `flapsim run --mode native` ([runner](runner.md#native-mode)); the golden
-  smoke scenarios run natively in CI (PR checks) under `baselines/v1.4.1-native.yaml`.
+  smoke scenarios run natively in CI (PR checks) with no known-issues baseline.
 - Phase 3 ([#31](https://github.com/DrewFerg11/Split-Flap-Emulator/pull/31)): a supervised
   Mosquitto broker with MQTT scenario steps, a controlled wall clock and seeded settings
   ([scenarios](scenarios.md#native-only-setup-and-mqtt-steps)).
@@ -65,7 +65,7 @@ modelled). They are applied to the sketch, the firmware and the libraries, as Pl
   so diagnostics point at the original file.
 - **Version**: the firmware's own `inject_version.py` rule (best release tag at `HEAD`, else
   `git describe --tags --always --dirty`); the golden build reports its tag. The build source
-  string is `flapsim native`, so the banner reads `Firmware: v1.4.1 (flapsim native)`.
+  string is `flapsim native`, so the banner reads `Firmware: v1.4.2 (flapsim native)`.
 - **Libraries** (`native/libraries.json`), fetched at pinned commits: ArduinoJson 7.4.3 (the
   pin SFD's unit tests use), PubSubClient3 3.3.0 (as in `lib_deps`) and Improv WiFi Library
   0.0.4. ESPAsyncWebServer is replaced by an adapter (see ADR 0002).

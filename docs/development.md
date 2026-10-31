@@ -43,10 +43,10 @@ mkdir -p runs
 set -o pipefail
 qemu/build.sh --jobs 4 2>&1 | tee runs/qemu-build.log
 python -m tools.verify_model --fetch-only
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
   --hardware esp32-8-single --scenario scenarios/boot-esp32-8-single.yaml --out runs/model-8
 python -m tools.verify_model --hardware esp32-8-single --out runs/model-8
-flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.1-factory.bin \
+flapsim run --firmware firmware/splitflap-esp32_n4-v1.4.2-factory.bin \
   --hardware esp32-16-dual --scenario scenarios/boot-esp32-16-dual.yaml --out runs/model-16
 python -m tools.verify_model --hardware esp32-16-dual --out runs/model-16
 ```
@@ -85,8 +85,8 @@ it preserves the source fetch. For a fully cold build, remove `build/qemu/`.
 `--build-root`. Stop users of an installation before replacing that runtime.
 
 The fetch command downloads the exact published factory artifact named in
-`tools/golden_firmware.json` (v1.4.1, esp32_n4). Its 4,128,768-byte input must hash
-to `5a71579b127ee87f0716cb1df938c9f98d3519a9283f72c003dfb857db32e6f4`.
+`tools/golden_firmware.json` (v1.4.2, esp32_n4). Its 4,128,768-byte input must hash
+to `e65dc8d0aa30057cad41f3bca4425000308b17d0d9ad93b520b3dbf2c7d54c5a`.
 The checksum was measured from the published release download; it is a regression
 pin, not a separate upstream signature. Existing corrupt inputs fail instead of
 being silently replaced. A separate working copy is padded with `0xff` to

@@ -2,7 +2,6 @@
 
 import copy
 import json
-import re
 import signal
 import subprocess
 import threading
@@ -29,7 +28,6 @@ from flapsim.scenario import (
     validate_step,
 )
 from flapsim.state import validate_state
-from tools import sfd86_patterns
 from tools.verify_boot import GOLDEN
 
 GOLDEN_SHA256 = GOLDEN["sha256"]
@@ -679,7 +677,7 @@ def baseline(**overrides):
 
 
 def test_checked_in_baseline_is_valid_and_bound_to_the_golden_checksum():
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    known = load_known_issues(Path(__file__).parents[1] / f"baselines/{GOLDEN['tag']}-golden.yaml")
     known.check_firmware(GOLDEN_SHA256)
     with pytest.raises(ValueError, match="applies only to firmware"):
         known.check_firmware("0" * 64)
@@ -690,18 +688,11 @@ def test_checked_in_baseline_is_valid_and_bound_to_the_golden_checksum():
         "Error writing data to module 34, error code: 4",
         "Error writing data to module 34, error code: 2",
         "x Error writing data to module 34, error code: 5",
+        # v1.4.2 fixed SFD#54, so its settings errors are no longer tolerated.
+        "[ 26540][E][Preferences.cpp:483] getString(): nvs_get_str len fail: x INVALID_HANDLE",
+        "[ 26540][E][Preferences.cpp:483] getString(): nvs_get_str len fail: x NOT_FOUND",
     ]:
         assert known.tolerated_serial(line) is None
-    # Both points where the #54 race can invalidate the shared handle (seen in CI on QEMU).
-    prefix = "[ 26540][E][Preferences.cpp:"
-    for line in [
-        prefix + "483] getString(): nvs_get_str len fail: wire1Offsets INVALID_HANDLE",
-        prefix + "490] getString(): nvs_get_str fail: wire1Offsets INVALID_HANDLE",
-    ]:
-        assert known.tolerated_serial(line)["issue"] == "DrewFerg11/Split-Flap-Display#54"
-    assert (
-        known.tolerated_serial(prefix + "490] getString(): nvs_get_str fail: x NOT_FOUND") is None
-    )
 
 
 @pytest.mark.parametrize(
@@ -747,324 +738,6 @@ def test_baseline_tolerates_only_matching_serial_lines_and_records_them(context)
         executor(
             [{"assert_no_errors": {}}], firmware_sha256=GOLDEN_SHA256, known_issues=baseline()
         ).execute(context)
-
-
-@pytest.mark.parametrize(
-    "raw",
-    [
-        # Raw serial tail from CI39511137762, container-smoke-16 (SFD#86).
-        "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
-        "[ 3Received text update request\n"
-        '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}\n'
-        "8055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n",
-        # Raw serial tail from CI39514731449, golden smoke-16: the split lands in the request body.
-        "[ 38086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
-        "[ 3Received text update request\n"
-        '{"mode":"d8086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n',
-        # Raw serial tail from CI39516600807, golden smoke-16: the whole diagnostic, timestamp
-        # included, is appended to the request body with no newline in between.
-        "[ 38162][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
-        "Received text update request\n"
-        '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}'
-        "[ 38162][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n",
-    ],
-)
-def test_raw_interleaved_preferences_fragment_is_visible_and_golden_only(context, raw):
-    (context.out / "serial.log").write_text(raw)
-    step = {"assert_no_errors": {"fresh_nvs": True}}
-    with pytest.raises(ExecutionFailed, match=r"\d\]\[E\]\[Preferences\.cpp:50\]"):
-        executor([step]).execute(context)
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    engine = executor([step], firmware_sha256=GOLDEN_SHA256, known_issues=known)
-    result = engine.execute(context)
-    engine.verify_final(context.out, context.hardware)
-    records = result["known_issues"]["tolerated_serial"]
-    assert result["known_issues"]["applied"]
-    assert len(records) == 1 and records[0]["count"] == 1
-    assert records[0]["issue"] == "DrewFerg11/Split-Flap-Display#86"
-    assert records[0]["first"] == raw.splitlines()[-1]
-
-
-@pytest.mark.parametrize(
-    "raw, spliced",
-    [
-        # Raw serial tail from CI39648931023, golden smoke-16: the diagnostic's head is followed
-        # by the request body, and its tail resumes on the next line after the timestamp.
-        (
-            "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
-            "Received text update request\n"
-            '[ 38055][E][Preferences.cp{"mode":"dual-single","row1":"HELLO","row2":"WORLD",'
-            '"center":true}\n'
-            "p:50] begin(): nvs_open failed: NOT_FOUND\n",
-            2,
-        ),
-        # Raw serial tail from CI39652106628, golden smoke-16: the whole diagnostic is followed by
-        # the request log with no newline in between.
-        (
-            "[ 38053][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
-            "[ 38053][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
-            "Received text update request\n"
-            '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}\n',
-            1,
-        ),
-        # Raw serial tail from CI39680498356, golden smoke-16: the head ends inside "begin", and
-        # the tail resumes at "()" after the request body.
-        (
-            "[ 38100][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
-            "[ 38100][E][Preferences.cpp:50] beginReceived text update request\n"
-            '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}\n'
-            "(): nvs_open failed: NOT_FOUND\n",
-            2,
-        ),
-        # Raw serial tail from arm64 container smoke-16 (#84): the request body is followed by the
-        # head of the diagnostic on the same line, and its tail resumes on the next line.
-        (
-            "[ 38172][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
-            "Received text update request\n"
-            "[ 38172][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
-            '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}'
-            "[ 38172][E][Preferences\n"
-            ".cpp:50] begin(): nvs_open failed: NOT_FOUND\n"
-            "[ 38173][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND\n",
-            2,
-        ),
-    ],
-)
-def test_head_and_late_tail_splices_are_golden_only(context, raw, spliced):
-    (context.out / "serial.log").write_text(raw)
-    step = {"assert_no_errors": {"fresh_nvs": True}}
-    with pytest.raises(ExecutionFailed, match="unexpected serial error"):
-        executor([step]).execute(context)
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    result = executor([step], firmware_sha256=GOLDEN_SHA256, known_issues=known).execute(context)
-    records = result["known_issues"]["tolerated_serial"]
-    assert sum(r["count"] for r in records) == spliced
-    assert {r["issue"] for r in records} == {"DrewFerg11/Split-Flap-Display#86"}
-
-
-def test_request_body_head_splice_pairs_with_the_tail_entry_at_every_cut():
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    body = '{"mode":"dual-single","row1":"HELLO"}'
-    diagnostic = "Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
-    for cut in range(len(diagnostic) + 1):
-        head, tail = body + "[ 38172][E][" + diagnostic[:cut], diagnostic[cut:]
-        # A head the baseline absorbs must resume as a tolerated tail, never as a red fragment.
-        if known.tolerated_serial(head) and tail:
-            assert known.tolerated_serial(tail), f"cut {cut}: {head!r} / {tail!r}"
-    assert known.tolerated_serial(body + "[ 38172][E][Preferences.cpp:50] begin(): ")
-    assert known.tolerated_serial(body + "[ 38172][E][Preferences.cpp:50] begin(): n") is None
-
-
-def test_request_body_head_splice_rejects_other_prefixes_and_continuations(context):
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    body = '{"mode":"dual-single","row1":"HELLO"}'
-    head = "[ 38172][E][Preferences"
-    assert known.tolerated_serial(body + head)
-    for bad in [
-        body + head + ".cpp:50] begin(): nvs_open failed: INVALID_HANDLE",
-        body.replace("HELLO", "panic") + head,
-        "x" + body + head,
-        body + "[ 38172][E][Wire",
-        "[a]" + body + head,
-    ]:
-        assert known.tolerated_serial(bad) is None, bad
-
-
-@pytest.mark.parametrize("name", ["golden", "native"])
-def test_a_newline_alone_can_split_the_diagnostic_at_every_cut(name):
-    # The other task's body went out before, and only its newline landed inside the diagnostic
-    # (#105): the head and the tail are each a bare line of the one fresh-NVS diagnostic. Every
-    # line the serial check would flag, at every cut, must be tolerated.
-    known = load_known_issues(Path(__file__).parents[1] / f"baselines/v1.4.1-{name}.yaml")
-    diagnostic = "[ 38085][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
-    flagged = re.compile(r"\[E\]|\b(error|failed|panic|abort|exception)\b", re.IGNORECASE)
-    seen = 0
-    for cut in range(1, len(diagnostic)):
-        for line in (diagnostic[:cut], diagnostic[cut:]):
-            if flagged.search(line):
-                seen += 1
-                assert known.tolerated_serial(line), f"cut {cut}: {line!r}"
-    assert seen > 60  # most cuts leave a flagged line on each side
-
-
-@pytest.mark.parametrize("name", ["golden", "native"])
-def test_the_bare_diagnostic_fragments_reject_anything_else(name):
-    known = load_known_issues(Path(__file__).parents[1] / f"baselines/v1.4.1-{name}.yaml")
-    for bad in [
-        "[ 38085][E][Prex",  # a character the diagnostic does not have
-        "[ 38085][E][WiFi",  # another error line, cut short
-        "[ 38085][E][Preferences.cpp:51] begin(): nvs_open failed: NOT_FOUND",
-        "[E][Pref",  # no timestamp
-        "[ 38085][E",  # not yet the marker the serial check flags
-        "[ 38085][E]x",
-        "[ 38085][E][Preferences.cpp:50] begin(): nvs_open failed: INVALID_HANDLE",
-        "_open failed: NOT_FOUNX",
-        "xopen failed: NOT_FOUND",
-        "_open failed: NOT_FOUND!",
-    ]:
-        assert known.tolerated_serial(bad) is None, bad
-    adversarial = [
-        "[ 1][E][Preferences.cpp:50] begin(): " + "{" * 20000,
-        "_open failed: NOT_" + "x" * 20000,
-        "[ 1][E][" + "P" * 20000,
-    ]
-    started = time.monotonic()
-    for line in adversarial:
-        known.tolerated_serial(line)
-    assert time.monotonic() - started < 2
-
-
-def test_the_split_lines_seen_in_ci_are_tolerated():
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    # Raw serial from the container smoke-16 run on #103: the body went out ahead of one
-    # diagnostic and its newline landed a few diagnostics later, inside "Preferences".
-    for line in [
-        '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}'
-        "[ 38084][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
-        "[ 38085][E][Pref",
-        "erences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
-        # The golden smoke-16 run on #98: the request log and body spliced inside "nvs_open".
-        "[ 38075][E][Preferences.cpp:50] begin(): nvsReceived text update request",
-        "_open failed: NOT_FOUND",  # the body between them is a line of its own, never an error
-        # The native runs on #100 and #101: a reset or cut left a bare head.
-        "[ 25075][E][Preferences.cpp:50] begin(): nvs_o",
-        "[ 24486][E][Preferen",
-        "[ 43925][E]",  # the golden control-16 run on this PR: cut right after the marker
-    ]:
-        assert known.tolerated_serial(line), line
-
-
-def test_sfd86_entries_are_the_generated_request_shape_patterns():
-    for name in ("golden", "native"):
-        known = load_known_issues(Path(__file__).parents[1] / f"baselines/v1.4.1-{name}.yaml")
-        regexes = [e["regex"] for e in known.serial if e["issue"].endswith("#86")]
-        assert regexes == sfd86_patterns.patterns(), name
-
-
-# Bodies as v1.4.1 logs them (ArduinoJson, compact): scenarios, the firmware's web UI and the
-# settings schema's value types, including a brace-formatted default and an escaped password.
-LOGGED_BODIES = [
-    '{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}',
-    '{"mode":"accuracy","delay":2,"stepSize":1}',
-    '{"wireOffsets":"-210,-160,-110,-60,10,60,110,160"}',
-    '{"wire1Addresses":"","wire1Offsets":""}',
-    '{"dateFormat":"{dd}-{mm}-{yy}","maxVel":15.5,"mqtt_port":1884,"mode":3}',
-    r'{"password":"a\"b\\c"}',
-    r'{"name":"NUL\u0000"}',  # ArduinoJson's only \u escape
-    '{"name":"raw\x01"}',  # other control characters are written raw
-    '{"maxVel":1.5e-7,"stepsPerRot":-2.25e9,"name":null}',  # exponents; NaN is null
-    '{"maxVel":0.05,"displayOffset":0}',
-    r'{"name":"a,\"ssid\":","ssid":"b"}',  # key-like text in a value is not a key
-]
-OTHER_BODIES = [
-    "{not-json}",
-    '{"mode":"bogus"}',
-    '{"mode":"single","words":["HELLO"]}',
-    '{"row1":"HELLO"}',
-    '{"unknown":"x"}',
-    '{"mode": "single"}',
-    '{"mode":"single",}',
-    '{"mode":"single","row1":"panic"}',
-    '{"ssid":tru}',
-    r'{"name":"x\q"}',
-    r'{"name":"a\/b"}',  # ArduinoJson never escapes "/"
-    r'{"name":"\u0001"}',
-    '{"maxVel":1e+7}',  # ArduinoJson writes no "+" exponent
-    '{"maxVel":01}',  # nor leading zeros
-    '{"maxVel":1e07}',
-    '{"maxVel":1\u0662}',  # digits are ASCII; Python's \d would take Arabic-Indic ones
-    '{"maxVel":1.\u0662}',
-    '{"stepsPerRot":-2\u0662}',
-    '{"maxVel":NaN}',
-    "{}",
-    # ArduinoJson merges a repeated key, so a logged body names each member once.
-    '{"ssid":"a","ssid":"b"}',
-    '{"mode":3,"name":"x","mode":4}',
-    '{"mode":"single","row1":"A","row2":"B","row1":"C"}',
-]
-TAILS = [
-    "8055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
-    " 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
-    "p:50] begin(): nvs_open failed: NOT_FOUND",
-    "nvs_open failed: NOT_FOUND",
-]
-
-
-@pytest.mark.parametrize("body", LOGGED_BODIES)
-def test_sfd86_splices_accept_logged_request_bodies(body):
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    assert known.tolerated_serial(body + "[ 38172][E][Preferences")
-    assert known.tolerated_serial("[ 38172][E][Preferences.cp" + body)
-    # A splice can cut the body anywhere; only its start precedes or follows the diagnostic.
-    for cut in range(1, len(body) + 1):
-        assert known.tolerated_serial("[ 38172][E][Pref" + body[:cut]), cut
-        for tail in TAILS:
-            assert known.tolerated_serial(body[:cut] + tail), (cut, tail)
-
-
-@pytest.mark.parametrize("body", OTHER_BODIES)
-def test_sfd86_splices_reject_other_braced_text(body):
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    for line in [
-        body + "[ 38172][E][Preferences",
-        "[ 38172][E][Preferences.cp" + body,
-        *(body + tail for tail in TAILS),
-    ]:
-        assert known.tolerated_serial(line) is None, line
-
-
-def test_sfd86_splices_reject_a_repeated_key_before_the_cut():
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    body = '{"ssid":"a","ssid":"b"}'
-    for cut in range(body.index(',"ssid":') + len(',"ssid":'), len(body) + 1):
-        assert known.tolerated_serial("[ 38172][E][Pref" + body[:cut]) is None, cut
-        for tail in TAILS:
-            assert known.tolerated_serial(body[:cut] + tail) is None, (cut, tail)
-
-
-def test_a_request_body_spliced_inside_the_diagnostic_is_recognised():
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    # Raw line from CI40994611944, golden smoke-16: the body lands inside "[ timestamp][E]".
-    observed = (
-        '[ 38085][{"mode":"dual-single","row1":"HELLO","row2":"WORLD","center":true}'
-        "E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
-    )
-    assert known.tolerated_serial(observed)["issue"] == "DrewFerg11/Split-Flap-Display#86"
-    for body in LOGGED_BODIES:
-        for cut in range(1, len(DIAGNOSTIC)):
-            line = DIAGNOSTIC[:cut] + body + DIAGNOSTIC[cut:]
-            assert known.tolerated_serial(line), (cut, body)
-    LOG = "Received text update request"
-    for line in [
-        DIAGNOSTIC.replace("][E]", "]{not-json}[E]"),
-        DIAGNOSTIC.replace("][E]", '][{"mode":"bogus"}E]'),
-        DIAGNOSTIC.replace("][E]", '][{"ssid":"a"}{"ssid":"b"}E]'),
-        DIAGNOSTIC.replace("][E]", '][{"ssid":"a","ssid":"b"}E]'),
-        DIAGNOSTIC.replace("NOT_FOUND", '{"ssid":"a"}NOT_FOUN'),
-        DIAGNOSTIC.replace("NOT_FOUND", "INVALID_HANDLE").replace("[E][", '[E][{"ssid":"a"}'),
-        DIAGNOSTIC.replace("38055", '{"ssid":"a"}'),
-        DIAGNOSTIC.replace("][E]", "]junk" + LOG + "[E]"),
-        DIAGNOSTIC.replace("][E]", "]" + LOG + "junk[E]"),
-        DIAGNOSTIC.replace("][E]", "]Received textx update request[E]"),
-        # Two insertions: a body and a request log.
-        DIAGNOSTIC.replace("][E]", '][{"ssid":"a"}E]').replace("begin", LOG + "begin"),
-    ]:
-        assert known.tolerated_serial(line) is None, line
-
-
-def test_sfd86_splices_accept_only_the_logged_request_logs():
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    diagnostic = "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
-    for endpoint in ("text", "settings"):
-        log = f"Received {endpoint} update request"
-        assert known.tolerated_serial("[ 38055][E][Preferences.cpp:5" + log)
-        assert known.tolerated_serial(diagnostic.replace("NOT_FOUND", log + "NOT_FOUND"))
-        for cut in range(len(log) + 1):
-            assert known.tolerated_serial(log[:cut] + TAILS[2]), cut
-    for other in ["Received mqtt update request", "Received text update request!", "hello"]:
-        assert known.tolerated_serial("[ 38055][E][Preferences.cpp:5" + other) is None
-        assert known.tolerated_serial(diagnostic.replace("NOT_FOUND", other + "NOT_FOUND")) is None
-        assert known.tolerated_serial(other + TAILS[2]) is None
 
 
 DIAGNOSTIC = "[ 38055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
@@ -1142,121 +815,6 @@ def test_container_reset_can_interrupt_nvs_source_header_without_rewriting_evide
             serial_errors(invalid, {"fresh_nvs": True})
 
 
-def test_every_split_point_of_the_diagnostic_is_recognised():
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    body = '{"mode":"dual-single","row1":"HELLO"'
-    head_start = DIAGNOSTIC.index("[E][") + 4
-    for cut in range(head_start, len(DIAGNOSTIC) + 1):
-        for other in (body, "Received settings update request"):
-            assert known.tolerated_serial(DIAGNOSTIC[:cut] + other), (cut, other)
-    # Tails resume anywhere up to "nvs_open", which only Preferences.cpp:50 logs.
-    for cut in range(1, DIAGNOSTIC.index("nvs_open") + 1):
-        assert known.tolerated_serial(DIAGNOSTIC[cut:]), cut
-        assert known.tolerated_serial(body + DIAGNOSTIC[cut:]), cut
-
-
-def test_a_request_log_spliced_inside_the_diagnostic_is_recognised():
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    log = "Received text update request"
-    head_start = DIAGNOSTIC.index("[E][") + 4
-    for cut in range(head_start, len(DIAGNOSTIC)):
-        entry = known.tolerated_serial(DIAGNOSTIC[:cut] + log + DIAGNOSTIC[cut:])
-        assert entry["issue"] == "DrewFerg11/Split-Flap-Display#86", cut
-    # Seen in CI: "...nvs_open failed: Received text update requestNOT_FOUND".
-    observed = DIAGNOSTIC.replace("NOT_FOUND", log + "NOT_FOUND")
-    assert known.tolerated_serial(observed)
-    other = DIAGNOSTIC.replace("NOT_FOUND", "INVALID_HANDLE")
-    for line in [
-        DIAGNOSTIC.replace("begin", log + "end"),
-        other.replace("INVALID", log + "INVALID"),
-        DIAGNOSTIC.replace("NOT_FOUND", "panic NOT_FOUND"),
-        DIAGNOSTIC.replace("NOT_FOUND", log + " panicNOT_FOUND"),
-    ]:
-        assert known.tolerated_serial(line) is None, line
-
-
-@pytest.mark.parametrize(
-    "line",
-    [
-        DIAGNOSTIC,
-        "[ 9][E][Preferences.cpp:50] begin(): nvs_open failed: INVALID_HANDLE",
-        "[ 9][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUNDpanic",
-        '[ 9][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND{"x":"error"}',
-        '[ 9][E][Preferences.cp{"x":[1]}',
-        "[ 9][E][Preferences.cpp:483] putString(): x{}",
-        "[ 9][E][Preferences.cpReceived text update request panic",
-        "[ 9][E][Wire.cpp:1]{}",
-        "x failed: nvs_open failed: NOT_FOUND",
-        "Exception (): nvs_open failed: NOT_FOUND",
-        "Wifi failed: NOT_FOUND",
-        "Exception p:50] begin(): nvs_open failed: NOT_FOUND",
-    ],
-)
-def test_head_and_late_tail_entries_reject_other_lines(line):
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    assert known.tolerated_serial(line) is None
-
-
-def test_unspliced_diagnostic_stays_governed_by_the_fresh_nvs_policy(context):
-    line = "[ 38162][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND"
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    assert known.tolerated_serial(line) is None
-    (context.out / "serial.log").write_text(line + "\n")
-    with pytest.raises(ExecutionFailed):
-        executor(
-            [{"assert_no_errors": {}}], firmware_sha256=GOLDEN_SHA256, known_issues=known
-        ).execute(context)
-
-
-@pytest.mark.parametrize(
-    "line",
-    [
-        "8055][E][Preferences.cpp:50] begin(): nvs_open failed: INVALID_HANDLE",
-        "8055][E][Preferences.cpp:51] begin(): nvs_open failed: NOT_FOUND",
-        "8055][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND panic",
-        "8055][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263",
-        'Guru Meditation Error: {"mode":"d8086][E][Preferences.cpp:50] begin(): '
-        "nvs_open failed: NOT_FOUND",
-        "abort() was called d8086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
-        "[ 7][E][Wire.cpp:1] boom 8086][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND",
-        'Exception {"center":true}[ 38162][E][Preferences.cpp:50] begin(): '
-        "nvs_open failed: NOT_FOUND",
-        '{"x":[1]}[ 38162][E][Preferences.cpp:50] begin(): nvs_open failed: NOT_FOUND',
-    ],
-)
-def test_golden_fragment_baseline_does_not_accept_other_broken_errors(context, line):
-    (context.out / "serial.log").write_text(line + "\n")
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    with pytest.raises(ExecutionFailed):
-        executor(
-            [{"assert_no_errors": {"fresh_nvs": True}}],
-            firmware_sha256=GOLDEN_SHA256,
-            known_issues=known,
-        ).execute(context)
-
-
-def test_smoke16_final_check_expects_only_the_plain_fresh_nvs_diagnostic():
-    # CI39654380205: the step-8 race did not occur and step 11 failed on this exact line.
-    known = load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
-    plain = "unexpected serial error: " + DIAGNOSTIC.replace("38055", "38037")
-    entry = known.expected_failure(
-        "release-smoke-16", 11, "assert_no_errors", plain, step_timed_out=False
-    )
-    assert entry["issue"] == "DrewFerg11/Split-Flap-Display#54"
-    for other in [
-        "unexpected serial error: [ 7][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 263",
-        plain.replace("NOT_FOUND", "INVALID_HANDLE"),
-        plain + " panic",
-    ]:
-        assert not known.expected_failure(
-            "release-smoke-16", 11, "assert_no_errors", other, step_timed_out=False
-        )
-    for scenario, step in [("release-smoke-8", 11), ("release-smoke-16", 6)]:
-        assert not known.expected_failure(
-            scenario, step, "assert_no_errors", plain, step_timed_out=False
-        )
-
-
 def test_expected_failure_stops_the_scenario_as_xfail_and_only_when_it_matches(context):
     steps = [
         {"wait_display": {"text": "HELLOXXX"}, "timeout": 0.1},
@@ -1326,7 +884,7 @@ READ_TIMEOUT = "[ 27700][E][Wire.cpp:513] requestFrom(): i2cRead returned Error 
 
 
 def golden_baseline():
-    return load_known_issues(Path(__file__).parents[1] / "baselines/v1.4.1-golden.yaml")
+    return load_known_issues(Path(__file__).parents[1] / f"baselines/{GOLDEN['tag']}-golden.yaml")
 
 
 def requiring(regex):
@@ -1419,7 +977,7 @@ def stalled(context, stalls, anomalies=0, lost=0):
         ([WRITE_TIMEOUT], 1, 1, 0, False),  # anomalies are never excused
         ([READ_TIMEOUT], 1, 0, 0, False),  # a lost read moves no coil
         ([], 1, 0, 0, False),
-        # v1.4.1 logs only a module's first failed write per boot; the model saw both (#79).
+        # The firmware logs only a module's first failed write per boot; the model saw both (#79).
         ([WRITE_TIMEOUT], 2, 0, 2, True),
         ([WRITE_TIMEOUT], 3, 0, 2, False),  # one stall followed no lost write
         ([WRITE_TIMEOUT], 2, 1, 2, False),
