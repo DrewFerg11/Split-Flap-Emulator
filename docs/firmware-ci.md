@@ -9,7 +9,7 @@ The job uses only the **published image**, pinned by digest: it pulls the image,
 source inside it with `--network none` (the pinned libraries ship in the image), and runs every
 scenario in it. It needs no emulator checkout, no host toolchain and no registry login (the image
 is public). [`firmware-native-ci.yml`](firmware-native-ci.yml) mirrors the job as installed in
-Split-Flap-Display's `.github/workflows/ci-native-emulator.yml`. `FLAPSIM_IMAGE` is
+Split-Flap-Display's `.github/workflows/ci-emulator-native.yml` (**CI / Emulator (native)**, required check **Emulator (native)**). `FLAPSIM_IMAGE` is
 `ghcr.io/drewferg11/split-flap-emulator:<version>@sha256:<digest>`: Docker pulls by the digest, and
 the tag is there for readers. To move to a newer emulator, update both from the digest that
 release's publication recorded.
@@ -33,7 +33,7 @@ and serial logs are uploaded as artifacts.
 ## Nightly QEMU run
 
 Native mode doesn't run the real ESP32 binary, so Split-Flap-Display's
-`.github/workflows/ci-nightly-qemu.yml` covers that between releases. Daily at 07:23 UTC (or on
+`.github/workflows/ci-emulator-qemu.yml` (**CI / Emulator (QEMU nightly)**) covers that between releases. Daily at 07:23 UTC (or on
 manual dispatch) it builds `main`'s `esp32_n4` merged factory image with the same steps as the
 release workflow, then boots it under QEMU in the same pinned image for `release-smoke-8` and
 `release-smoke-16`, with `--timing ci` and no baseline. The expected version is the firmware's own
