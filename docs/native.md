@@ -27,7 +27,7 @@ coverage QEMU mode cannot reach.
   Mosquitto broker with MQTT scenario steps, a controlled wall clock and seeded settings
   ([scenarios](scenarios.md#native-only-setup-and-mqtt-steps)).
 - Phase 4: native mode in the container image ([container](container.md#native-mode-in-the-image))
-  and a non-gating firmware CI job for Split-Flap Display ([firmware CI](firmware-ci.md)).
+  and a required firmware CI job for Split-Flap Display ([firmware CI](firmware-ci.md)).
 
 The native runner also supports the shared authenticated
 [state and mechanics API](control-api.md) with `--control-port`.

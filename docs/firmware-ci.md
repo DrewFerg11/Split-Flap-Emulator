@@ -1,9 +1,9 @@
 # Native-mode checks in Split-Flap Display CI
 
 Plan step 6 of [#24](https://github.com/DrewFerg11/Split-Flap-Emulator/issues/24). The firmware
-repository adds one **non-gating** job that builds each pull request's own source in native mode
+repository runs one **required** job that builds each pull request's own source in native mode
 and runs the emulator's scenarios against it. QEMU mode against the released image stays the
-release gate. Make the job required once it has been stable on firmware PRs for a while.
+release gate, and a [nightly QEMU job](#nightly-qemu-run) boots `main`'s factory image ahead of it.
 
 The job uses only the **published image**, pinned by digest: it pulls the image, builds the PR's
 source inside it with `--network none` (the pinned libraries ship in the image), and runs every
@@ -30,11 +30,22 @@ rule produces for the PR checkout, read back from `build-info.json`. Every scena
 if an earlier one fails. The job summary lists each outcome, and the reports, JUnit, replays
 and serial logs are uploaded as artifacts.
 
+## Nightly QEMU run
+
+Native mode doesn't run the real ESP32 binary, so Split-Flap-Display's
+`.github/workflows/ci-nightly-qemu.yml` covers that between releases. Daily at 07:23 UTC (or on
+manual dispatch) it builds `main`'s `esp32_n4` merged factory image with the same steps as the
+release workflow, then boots it under QEMU in the same pinned image for `release-smoke-8` and
+`release-smoke-16`, with `--timing ci` and no baseline. The expected version is the firmware's own
+`git describe` result, so no tag is needed. It gates nothing; the release still runs its own strict
+simulation of the exact image it publishes ([release gate](release-gate.md)). Evidence is uploaded
+as `nightly-qemu-evidence` for 14 days. Update its `FLAPSIM_IMAGE` together with the native job's
+and the release gate's.
+
 ## Expected state today
 
 The released v1.4.1 source fails the strict smoke scenarios on
-[SFD#54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54) (settings lost to the
-loop/web-server `Preferences` race, plus `NOT_FOUND` noise for unwritten keys). Native mode
-reproduces these far more reliably than QEMU mode. A PR that fixes #54 should turn the smoke
-scenarios green, which is why the job helps verify that fix. The MQTT and clock scenarios
-fail only on the `NOT_FOUND` noise until then.
+[SFD#54](https://github.com/DrewFerg11/Split-Flap-Display/issues/54) and
+[SFD#84](https://github.com/DrewFerg11/Split-Flap-Display/issues/84). Both were fixed on `main` by
+[SFD#91](https://github.com/DrewFerg11/Split-Flap-Display/pull/91), after which every scenario
+passed, so the job was made required.
